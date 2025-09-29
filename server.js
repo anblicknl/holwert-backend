@@ -1274,7 +1274,8 @@ app.get('/api/admin/organizations', authenticateToken, async (req, res) => {
 
     let query = `
       SELECT id, name, description, contact_email, contact_phone, website, is_approved, created_at,
-             COALESCE(category, '') as category
+             COALESCE(category, '') as category,
+             COALESCE(logo_url, '') as logo_url
       FROM organizations
       WHERE 1=1
     `;
@@ -1369,6 +1370,7 @@ app.put('/api/admin/organizations/:id', authenticateToken, async (req, res) => {
       contact_phone, 
       website, 
       category,
+      logo_url,
       facebook_url,
       instagram_url,
       twitter_url,
@@ -1415,10 +1417,11 @@ app.put('/api/admin/organizations/:id', authenticateToken, async (req, res) => {
         contact_phone = $4,
         website = $5,
         category = $6,
-        is_approved = $7,
+        logo_url = $7,
+        is_approved = $8,
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $8
-      RETURNING id, name, description, contact_email, contact_phone, website, COALESCE(category, '') as category, is_approved, created_at`,
+      WHERE id = $9
+      RETURNING id, name, description, contact_email, contact_phone, website, COALESCE(category, '') as category, COALESCE(logo_url, '') as logo_url, is_approved, created_at`,
       [
         name, 
         description || null, 
@@ -1426,6 +1429,7 @@ app.put('/api/admin/organizations/:id', authenticateToken, async (req, res) => {
         contact_phone || null, 
         website || null,
         category || null,
+        logo_url || null,
         is_approved !== false, 
         id
       ]
