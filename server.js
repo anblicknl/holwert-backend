@@ -180,7 +180,7 @@ app.get('/api/database/create-tables', async (req, res) => {
         contact_email VARCHAR(255),
         contact_phone VARCHAR(20),
         website VARCHAR(255),
-        logo_url VARCHAR(500),
+        logo_url TEXT,
         category VARCHAR(100),
         facebook_url VARCHAR(255),
         instagram_url VARCHAR(255),
