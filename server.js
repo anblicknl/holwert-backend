@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const mysql = require('mysql2/promise');
+const { Pool } = require('pg');
 require('dotenv').config();
 
 const app = express();
@@ -10,26 +10,20 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Database connection - gebruik environment variable
-const dbConfig = {
-  host: process.env.DB_HOST || 'holwert.appenvloed.com',
-  port: process.env.DB_PORT || 3306,
-  user: process.env.DB_USER || 'holwert_user',
-  password: process.env.DB_PASSWORD || 'Holwert_app2.33!',
-  database: process.env.DB_NAME || 'appenvlo_holwert',
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0
-};
-
-const pool = mysql.createPool(dbConfig);
+// Database connection
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false
+  }
+});
 
 // Test database connection
 async function testDatabase() {
   try {
-    const connection = await pool.getConnection();
+    const client = await pool.connect();
     console.log('✅ Database connected successfully');
-    connection.release();
+    client.release();
   } catch (error) {
     console.error('❌ Database connection failed:', error.message);
   }
@@ -41,7 +35,7 @@ app.get('/', (req, res) => {
     message: 'Holwert Backend is running!',
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
-    database: 'Connected to MySQL'
+    database: 'Connected to PostgreSQL'
   });
 });
 
@@ -51,17 +45,17 @@ app.get('/api/health', (req, res) => {
     status: 'OK', 
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
-    database: 'Connected to MySQL'
+    database: 'Connected to PostgreSQL'
   });
 });
 
 // Database test route
 app.get('/api/database/test', async (req, res) => {
   try {
-    const [rows] = await pool.execute('SELECT 1 as test');
+    const result = await pool.query('SELECT 1 as test');
     res.json({ 
       status: 'Database connected',
-      test: rows[0].test,
+      test: result.rows[0].test,
       timestamp: new Date().toISOString()
     });
   } catch (error) {
