@@ -3,6 +3,9 @@ const cors = require('cors');
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 require('dotenv').config();
 
 const app = express();
@@ -11,6 +14,42 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// Multer configuration for file uploads
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const uploadDir = 'uploads/';
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 5MB limit
+  },
+  fileFilter: function (req, file, cb) {
+    const allowedTypes = /jpeg|jpg|png|gif|webp/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedTypes.test(file.mimetype);
+
+    if (mimetype && extname) {
+      return cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed'));
+    }
+  }
+});
+
+// Serve uploaded files
+app.use('/uploads', express.static('uploads'));
 
 // Database connection
 const pool = new Pool({
@@ -444,12 +483,40 @@ app.post('/api/organizations/register', async (req, res) => {
   }
 });
 
+// ===== UPLOAD ROUTES =====
+
+// Upload image
+app.post('/api/upload/image', authenticateToken, upload.single('image'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        error: 'No image file provided'
+      });
+    }
+
+    const imageUrl = `/uploads/${req.file.filename}`;
+    
+    res.json({
+      message: 'Image uploaded successfully',
+      imageUrl: imageUrl,
+      filename: req.file.filename
+    });
+
+  } catch (error) {
+    console.error('Upload error:', error);
+    res.status(500).json({
+      error: 'Failed to upload image',
+      message: error.message
+    });
+  }
+});
+
 // ===== CONTENT ROUTES =====
 
 // Create news article with workflow logic
 app.post('/api/news', authenticateToken, async (req, res) => {
   try {
-    const { title, content, category, organization_id } = req.body;
+    const { title, content, category, organization_id, image_url } = req.body;
     const authorId = req.user.userId;
 
     // Validation
@@ -479,8 +546,8 @@ app.post('/api/news', authenticateToken, async (req, res) => {
 
     // Insert into news table
     const result = await pool.query(
-      'INSERT INTO news (title, content, author_id, organization_id, is_published) VALUES ($1, $2, $3, $4, $5) RETURNING id',
-      [title, content, authorId, organization_id || null, isPublished]
+      'INSERT INTO news (title, content, author_id, organization_id, image_url, is_published) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
+      [title, content, authorId, organization_id || null, image_url || null, isPublished]
     );
 
     const message = isPublished 
@@ -506,7 +573,7 @@ app.post('/api/news', authenticateToken, async (req, res) => {
 // Create event with workflow logic
 app.post('/api/events', authenticateToken, async (req, res) => {
   try {
-    const { title, description, event_date, location, organization_id } = req.body;
+    const { title, description, event_date, location, organization_id, image_url } = req.body;
     const organizerId = req.user.userId;
 
     // Validation
@@ -536,8 +603,8 @@ app.post('/api/events', authenticateToken, async (req, res) => {
 
     // Insert into events table
     const result = await pool.query(
-      'INSERT INTO events (title, description, event_date, location, organizer_id, organization_id, is_published) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id',
-      [title, description, event_date, location, organizerId, organization_id || null, isPublished]
+      'INSERT INTO events (title, description, event_date, location, organizer_id, organization_id, image_url, is_published) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id',
+      [title, description, event_date, location, organizerId, organization_id || null, image_url || null, isPublished]
     );
 
     const message = isPublished 
