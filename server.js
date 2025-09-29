@@ -472,7 +472,7 @@ app.post('/api/organizations/register', async (req, res) => {
 
 // ===== UPLOAD ROUTES =====
 
-// Upload image to holwert.appenvloed.com/upload
+// Upload image (using base64 data URLs for now)
 app.post('/api/upload/image', authenticateToken, async (req, res) => {
   try {
     const { imageData, filename } = req.body;
@@ -484,67 +484,29 @@ app.post('/api/upload/image', authenticateToken, async (req, res) => {
       });
     }
 
-    // Generate organized folder structure: uploads/year/month/
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
+    // Generate unique filename
     const uniqueFilename = filename || `image-${Date.now()}-${Math.round(Math.random() * 1E9)}.jpg`;
-    const folderPath = `uploads/${year}/${month}/`;
-    const fullPath = `${folderPath}${uniqueFilename}`;
     
-    // Convert base64 to buffer
-    const base64Data = imageData.replace(/^data:image\/[a-z]+;base64,/, '');
-    const imageBuffer = Buffer.from(base64Data, 'base64');
-
-    console.log('Uploading image to holwert.appenvloed.com:', {
+    console.log('Processing image upload:', {
       filename: uniqueFilename,
-      folderPath: folderPath,
-      bufferSize: imageBuffer.length
+      dataLength: imageData.length
     });
 
-    // Create form data for upload
-    const formData = new FormData();
-    formData.append('file', imageBuffer, {
-      filename: uniqueFilename,
-      contentType: 'image/jpeg'
-    });
-    formData.append('folder', folderPath);
-
-    // Upload to holwert.appenvloed.com using HTTP (not HTTPS due to SSL issues)
-    const uploadResponse = await fetch('http://holwert.appenvloed.com/upload/', {
-      method: 'POST',
-      body: formData,
-      headers: {
-        'User-Agent': 'Holwert-Backend/1.0'
-      }
-    });
-
-    console.log('Upload response status:', uploadResponse.status);
-    console.log('Upload response headers:', Object.fromEntries(uploadResponse.headers.entries()));
-
-    if (!uploadResponse.ok) {
-      const errorText = await uploadResponse.text();
-      console.error('Upload failed:', errorText);
-      throw new Error(`Upload failed: ${uploadResponse.status} ${uploadResponse.statusText} - ${errorText}`);
-    }
-
-    const uploadResult = await uploadResponse.json();
-    console.log('Upload result:', uploadResult);
-    
-    // Return the full URL to the uploaded image
-    const imageUrl = `http://holwert.appenvloed.com/${fullPath}`;
+    // For now, just return the base64 data URL as the image URL
+    // This works perfectly for profile images and other small images
+    const imageUrl = imageData;
     
     res.json({
-      message: 'Image uploaded successfully to holwert.appenvloed.com',
+      message: 'Image processed successfully (using base64 data URL)',
       imageUrl: imageUrl,
       filename: uniqueFilename,
-      folderPath: folderPath
+      note: 'Using base64 data URL - works perfectly for profile images'
     });
 
   } catch (error) {
     console.error('Upload error:', error);
     res.status(500).json({
-      error: 'Failed to upload image',
+      error: 'Failed to process image',
       message: error.message,
       details: error.toString()
     });
