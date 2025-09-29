@@ -1104,6 +1104,77 @@ app.put('/api/admin/users/:id/role', authenticateToken, async (req, res) => {
   }
 });
 
+// Update user (admin only) - Full update
+app.put('/api/admin/users/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { first_name, last_name, email, phone, role, is_active, profile_image_url } = req.body;
+
+    // Validate required fields
+    if (!first_name || !last_name || !email) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        message: 'First name, last name and email are required'
+      });
+    }
+
+    // Check if email is already taken by another user
+    const existingUser = await pool.query(
+      'SELECT id FROM users WHERE email = $1 AND id != $2',
+      [email, id]
+    );
+
+    if (existingUser.rows.length > 0) {
+      return res.status(400).json({
+        error: 'Email already exists',
+        message: 'A user with this email already exists'
+      });
+    }
+
+    // Validate role
+    const validRoles = ['user', 'admin', 'superadmin'];
+    if (role && !validRoles.includes(role)) {
+      return res.status(400).json({
+        error: 'Invalid role',
+        message: 'Role must be one of: ' + validRoles.join(', ')
+      });
+    }
+
+    const result = await pool.query(
+      `UPDATE users SET 
+        first_name = $1, 
+        last_name = $2, 
+        email = $3, 
+        phone = $4, 
+        role = $5, 
+        is_active = $6, 
+        profile_image_url = $7,
+        updated_at = CURRENT_TIMESTAMP 
+      WHERE id = $8 
+      RETURNING id, email, first_name, last_name, phone, profile_image_url, role, is_active, created_at`,
+      [first_name, last_name, email, phone || null, role || 'user', is_active !== false, profile_image_url || null, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: 'User not found'
+      });
+    }
+
+    res.json({
+      message: 'User updated successfully',
+      user: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error('Error updating user:', error);
+    res.status(500).json({
+      error: 'Failed to update user',
+      message: error.message
+    });
+  }
+});
+
 // Delete user (admin only)
 app.delete('/api/admin/users/:id', authenticateToken, async (req, res) => {
   try {
