@@ -733,6 +733,377 @@ app.post('/api/admin/approve-organization/:id', authenticateToken, async (req, r
   }
 });
 
+// ===== CONTENT MANAGEMENT ROUTES =====
+
+// Get all published news (public)
+app.get('/api/news', async (req, res) => {
+  try {
+    const { page = 1, limit = 20, category } = req.query;
+    const offset = (page - 1) * limit;
+
+    let query = `
+      SELECT n.id, n.title, n.content, n.image_url, n.created_at,
+             u.first_name, u.last_name, o.name as organization_name
+      FROM news n
+      JOIN users u ON n.author_id = u.id
+      LEFT JOIN organizations o ON n.organization_id = o.id
+      WHERE n.is_published = true
+    `;
+    const params = [];
+
+    if (category) {
+      query += ' AND n.category = $1';
+      params.push(category);
+    }
+
+    query += ' ORDER BY n.created_at DESC LIMIT $' + (params.length + 1) + ' OFFSET $' + (params.length + 2);
+    params.push(parseInt(limit), parseInt(offset));
+
+    const result = await pool.query(query, params);
+
+    // Get total count
+    let countQuery = 'SELECT COUNT(*) as total FROM news WHERE is_published = true';
+    const countParams = [];
+    
+    if (category) {
+      countQuery += ' AND category = $1';
+      countParams.push(category);
+    }
+
+    const countResult = await pool.query(countQuery, countParams);
+
+    res.json({
+      news: result.rows,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: parseInt(countResult.rows[0].total),
+        pages: Math.ceil(countResult.rows[0].total / limit)
+      }
+    });
+
+  } catch (error) {
+    console.error('Get news error:', error);
+    res.status(500).json({
+      error: 'Failed to get news',
+      message: error.message
+    });
+  }
+});
+
+// Get single news article (public)
+app.get('/api/news/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query(`
+      SELECT n.id, n.title, n.content, n.image_url, n.created_at,
+             u.first_name, u.last_name, o.name as organization_name
+      FROM news n
+      JOIN users u ON n.author_id = u.id
+      LEFT JOIN organizations o ON n.organization_id = o.id
+      WHERE n.id = $1 AND n.is_published = true
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: 'News article not found'
+      });
+    }
+
+    res.json({
+      article: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error('Get news article error:', error);
+    res.status(500).json({
+      error: 'Failed to get news article',
+      message: error.message
+    });
+  }
+});
+
+// Get all published events (public)
+app.get('/api/events', async (req, res) => {
+  try {
+    const { page = 1, limit = 20, category } = req.query;
+    const offset = (page - 1) * limit;
+
+    let query = `
+      SELECT e.id, e.title, e.description, e.event_date, e.location, e.image_url, e.created_at,
+             u.first_name, u.last_name, o.name as organization_name
+      FROM events e
+      JOIN users u ON e.organizer_id = u.id
+      LEFT JOIN organizations o ON e.organization_id = o.id
+      WHERE e.is_published = true AND e.event_date > NOW()
+    `;
+    const params = [];
+
+    if (category) {
+      query += ' AND e.category = $1';
+      params.push(category);
+    }
+
+    query += ' ORDER BY e.event_date ASC LIMIT $' + (params.length + 1) + ' OFFSET $' + (params.length + 2);
+    params.push(parseInt(limit), parseInt(offset));
+
+    const result = await pool.query(query, params);
+
+    // Get total count
+    let countQuery = 'SELECT COUNT(*) as total FROM events WHERE is_published = true AND event_date > NOW()';
+    const countParams = [];
+    
+    if (category) {
+      countQuery += ' AND category = $1';
+      countParams.push(category);
+    }
+
+    const countResult = await pool.query(countQuery, countParams);
+
+    res.json({
+      events: result.rows,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: parseInt(countResult.rows[0].total),
+        pages: Math.ceil(countResult.rows[0].total / limit)
+      }
+    });
+
+  } catch (error) {
+    console.error('Get events error:', error);
+    res.status(500).json({
+      error: 'Failed to get events',
+      message: error.message
+    });
+  }
+});
+
+// Get single event (public)
+app.get('/api/events/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query(`
+      SELECT e.id, e.title, e.description, e.event_date, e.location, e.image_url, e.created_at,
+             u.first_name, u.last_name, o.name as organization_name
+      FROM events e
+      JOIN users u ON e.organizer_id = u.id
+      LEFT JOIN organizations o ON e.organization_id = o.id
+      WHERE e.id = $1 AND e.is_published = true
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Event not found'
+      });
+    }
+
+    res.json({
+      event: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error('Get event error:', error);
+    res.status(500).json({
+      error: 'Failed to get event',
+      message: error.message
+    });
+  }
+});
+
+// ===== USER MANAGEMENT ROUTES =====
+
+// Get all users (admin only)
+app.get('/api/admin/users', authenticateToken, async (req, res) => {
+  try {
+    const { page = 1, limit = 20, search, role, is_active } = req.query;
+    const offset = (page - 1) * limit;
+
+    let query = `
+      SELECT u.id, u.email, u.first_name, u.last_name, u.phone, u.role, u.is_active, u.created_at,
+             o.name as organization_name
+      FROM users u
+      LEFT JOIN organizations o ON u.organization_id = o.id
+      WHERE 1=1
+    `;
+    const params = [];
+    let paramCount = 0;
+
+    if (search) {
+      paramCount++;
+      query += ` AND (u.first_name ILIKE $${paramCount} OR u.last_name ILIKE $${paramCount} OR u.email ILIKE $${paramCount})`;
+      params.push(`%${search}%`);
+    }
+
+    if (role) {
+      paramCount++;
+      query += ` AND u.role = $${paramCount}`;
+      params.push(role);
+    }
+
+    if (is_active !== undefined) {
+      paramCount++;
+      query += ` AND u.is_active = $${paramCount}`;
+      params.push(is_active === 'true');
+    }
+
+    query += ` ORDER BY u.created_at DESC LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}`;
+    params.push(parseInt(limit), parseInt(offset));
+
+    const result = await pool.query(query, params);
+
+    // Get total count
+    let countQuery = 'SELECT COUNT(*) as total FROM users WHERE 1=1';
+    const countParams = [];
+    let countParamCount = 0;
+
+    if (search) {
+      countParamCount++;
+      countQuery += ` AND (first_name ILIKE $${countParamCount} OR last_name ILIKE $${countParamCount} OR email ILIKE $${countParamCount})`;
+      countParams.push(`%${search}%`);
+    }
+
+    if (role) {
+      countParamCount++;
+      countQuery += ` AND role = $${countParamCount}`;
+      countParams.push(role);
+    }
+
+    if (is_active !== undefined) {
+      countParamCount++;
+      countQuery += ` AND is_active = $${countParamCount}`;
+      countParams.push(is_active === 'true');
+    }
+
+    const countResult = await pool.query(countQuery, countParams);
+
+    res.json({
+      users: result.rows,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: parseInt(countResult.rows[0].total),
+        pages: Math.ceil(countResult.rows[0].total / limit)
+      }
+    });
+
+  } catch (error) {
+    console.error('Get users error:', error);
+    res.status(500).json({
+      error: 'Failed to get users',
+      message: error.message
+    });
+  }
+});
+
+// Update user status (admin only)
+app.put('/api/admin/users/:id/status', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { is_active } = req.body;
+
+    if (typeof is_active !== 'boolean') {
+      return res.status(400).json({
+        error: 'is_active must be a boolean value'
+      });
+    }
+
+    const result = await pool.query(
+      'UPDATE users SET is_active = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING id, email, first_name, last_name, is_active',
+      [is_active, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: 'User not found'
+      });
+    }
+
+    res.json({
+      message: `User ${is_active ? 'activated' : 'deactivated'} successfully`,
+      user: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error('Update user status error:', error);
+    res.status(500).json({
+      error: 'Failed to update user status',
+      message: error.message
+    });
+  }
+});
+
+// Update user role (admin only)
+app.put('/api/admin/users/:id/role', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { role } = req.body;
+
+    const validRoles = ['user', 'admin', 'superadmin'];
+    if (!validRoles.includes(role)) {
+      return res.status(400).json({
+        error: 'Invalid role',
+        message: 'Role must be one of: ' + validRoles.join(', ')
+      });
+    }
+
+    const result = await pool.query(
+      'UPDATE users SET role = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING id, email, first_name, last_name, role',
+      [role, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: 'User not found'
+      });
+    }
+
+    res.json({
+      message: 'User role updated successfully',
+      user: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error('Update user role error:', error);
+    res.status(500).json({
+      error: 'Failed to update user role',
+      message: error.message
+    });
+  }
+});
+
+// Delete user (admin only)
+app.delete('/api/admin/users/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Check if user exists
+    const userResult = await pool.query('SELECT id, email FROM users WHERE id = $1', [id]);
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({
+        error: 'User not found'
+      });
+    }
+
+    // Delete user
+    await pool.query('DELETE FROM users WHERE id = $1', [id]);
+
+    res.json({
+      message: 'User deleted successfully',
+      deletedUser: userResult.rows[0]
+    });
+
+  } catch (error) {
+    console.error('Delete user error:', error);
+    res.status(500).json({
+      error: 'Failed to delete user',
+      message: error.message
+    });
+  }
+});
+
 // ===== ADMIN STATS ROUTES =====
 
 // Get dashboard stats
