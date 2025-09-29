@@ -472,7 +472,7 @@ app.post('/api/organizations/register', async (req, res) => {
 
 // ===== UPLOAD ROUTES =====
 
-// Upload image to holwert.appenvloed.com
+// Upload image to holwert.appenvloed.com/upload
 app.post('/api/upload/image', authenticateToken, async (req, res) => {
   try {
     const { imageData, filename } = req.body;
@@ -484,7 +484,7 @@ app.post('/api/upload/image', authenticateToken, async (req, res) => {
       });
     }
 
-    // Generate organized folder structure: uploads/jaar/maand/
+    // Generate organized folder structure: uploads/year/month/
     const now = new Date();
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -496,37 +496,57 @@ app.post('/api/upload/image', authenticateToken, async (req, res) => {
     const base64Data = imageData.replace(/^data:image\/[a-z]+;base64,/, '');
     const imageBuffer = Buffer.from(base64Data, 'base64');
 
-    // Upload to holwert.appenvloed.com with organized structure
+    console.log('Uploading image to holwert.appenvloed.com:', {
+      filename: uniqueFilename,
+      folderPath: folderPath,
+      bufferSize: imageBuffer.length
+    });
+
+    // Create form data for upload
     const formData = new FormData();
     formData.append('file', imageBuffer, {
       filename: uniqueFilename,
       contentType: 'image/jpeg'
     });
-    formData.append('folder', folderPath); // Send folder structure
+    formData.append('folder', folderPath);
 
-    const uploadResponse = await fetch('https://holwert.appenvloed.com/upload', {
+    // Upload to holwert.appenvloed.com using HTTP (not HTTPS due to SSL issues)
+    const uploadResponse = await fetch('http://holwert.appenvloed.com/upload/', {
       method: 'POST',
-      body: formData
+      body: formData,
+      headers: {
+        'User-Agent': 'Holwert-Backend/1.0'
+      }
     });
 
+    console.log('Upload response status:', uploadResponse.status);
+    console.log('Upload response headers:', Object.fromEntries(uploadResponse.headers.entries()));
+
     if (!uploadResponse.ok) {
-      throw new Error(`Upload failed: ${uploadResponse.statusText}`);
+      const errorText = await uploadResponse.text();
+      console.error('Upload failed:', errorText);
+      throw new Error(`Upload failed: ${uploadResponse.status} ${uploadResponse.statusText} - ${errorText}`);
     }
 
     const uploadResult = await uploadResponse.json();
-    const imageUrl = `https://holwert.appenvloed.com/${fullPath}`;
+    console.log('Upload result:', uploadResult);
+    
+    // Return the full URL to the uploaded image
+    const imageUrl = `http://holwert.appenvloed.com/${fullPath}`;
     
     res.json({
       message: 'Image uploaded successfully to holwert.appenvloed.com',
       imageUrl: imageUrl,
-      filename: uniqueFilename
+      filename: uniqueFilename,
+      folderPath: folderPath
     });
 
   } catch (error) {
     console.error('Upload error:', error);
     res.status(500).json({
       error: 'Failed to upload image',
-      message: error.message
+      message: error.message,
+      details: error.toString()
     });
   }
 });
