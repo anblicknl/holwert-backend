@@ -1,6 +1,8 @@
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
 const app = express();
@@ -17,6 +19,9 @@ const pool = new Pool({
     rejectUnauthorized: false
   }
 });
+
+// JWT Secret
+const JWT_SECRET = process.env.JWT_SECRET || 'holwert-secret-key-2024';
 
 // Test database connection
 async function testDatabase() {
@@ -179,6 +184,200 @@ app.get('/api/database/tables', async (req, res) => {
   } catch (error) {
     res.status(500).json({ 
       error: 'Failed to get tables',
+      message: error.message
+    });
+  }
+});
+
+// ===== AUTHENTICATION ROUTES =====
+
+// User registration
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const { email, password, first_name, last_name, phone } = req.body;
+
+    // Validation
+    if (!email || !password || !first_name || !last_name) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        message: 'Email, password, first name and last name are required'
+      });
+    }
+
+    // Check if user already exists
+    const existingUser = await pool.query(
+      'SELECT id FROM users WHERE email = $1',
+      [email]
+    );
+
+    if (existingUser.rows.length > 0) {
+      return res.status(400).json({
+        error: 'User already exists',
+        message: 'A user with this email already exists'
+      });
+    }
+
+    // Hash password
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+    // Create user
+    const result = await pool.query(
+      'INSERT INTO users (email, password, first_name, last_name, phone) VALUES ($1, $2, $3, $4, $5) RETURNING id, email, first_name, last_name, role, created_at',
+      [email, hashedPassword, first_name, last_name, phone]
+    );
+
+    const user = result.rows[0];
+
+    // Generate JWT token
+    const token = jwt.sign(
+      { userId: user.id, email: user.email, role: user.role },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    res.status(201).json({
+      message: 'User registered successfully',
+      user: {
+        id: user.id,
+        email: user.email,
+        first_name: user.first_name,
+        last_name: user.last_name,
+        role: user.role,
+        created_at: user.created_at
+      },
+      token
+    });
+
+  } catch (error) {
+    console.error('Registration error:', error);
+    res.status(500).json({
+      error: 'Registration failed',
+      message: error.message
+    });
+  }
+});
+
+// User login
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    // Validation
+    if (!email || !password) {
+      return res.status(400).json({
+        error: 'Missing credentials',
+        message: 'Email and password are required'
+      });
+    }
+
+    // Find user
+    const result = await pool.query(
+      'SELECT id, email, password, first_name, last_name, role, is_active FROM users WHERE email = $1',
+      [email]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({
+        error: 'Invalid credentials',
+        message: 'Email not found'
+      });
+    }
+
+    const user = result.rows[0];
+
+    // Check if user is active
+    if (!user.is_active) {
+      return res.status(401).json({
+        error: 'Account deactivated',
+        message: 'Your account has been deactivated'
+      });
+    }
+
+    // Verify password
+    const isValidPassword = await bcrypt.compare(password, user.password);
+
+    if (!isValidPassword) {
+      return res.status(401).json({
+        error: 'Invalid credentials',
+        message: 'Incorrect password'
+      });
+    }
+
+    // Generate JWT token
+    const token = jwt.sign(
+      { userId: user.id, email: user.email, role: user.role },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    res.json({
+      message: 'Login successful',
+      user: {
+        id: user.id,
+        email: user.email,
+        first_name: user.first_name,
+        last_name: user.last_name,
+        role: user.role
+      },
+      token
+    });
+
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({
+      error: 'Login failed',
+      message: error.message
+    });
+  }
+});
+
+// Middleware to verify JWT token
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({
+      error: 'Access denied',
+      message: 'No token provided'
+    });
+  }
+
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) {
+      return res.status(403).json({
+        error: 'Invalid token',
+        message: 'Token is invalid or expired'
+      });
+    }
+    req.user = user;
+    next();
+  });
+};
+
+// Protected route example
+app.get('/api/auth/profile', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT id, email, first_name, last_name, phone, role, created_at FROM users WHERE id = $1',
+      [req.user.userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: 'User not found'
+      });
+    }
+
+    res.json({
+      user: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error('Profile error:', error);
+    res.status(500).json({
+      error: 'Failed to get profile',
       message: error.message
     });
   }
