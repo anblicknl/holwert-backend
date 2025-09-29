@@ -21,6 +21,8 @@ const pool = new Pool({
 // Initialize database tables
 async function initializeDatabase() {
   try {
+    console.log('🔄 Starting database initialization...');
+    
     // Users table
     await pool.query(`
       CREATE TABLE IF NOT EXISTS users (
@@ -37,9 +39,24 @@ async function initializeDatabase() {
       )
     `);
 
-    console.log('✅ Users table created');
+    console.log('✅ Users table created successfully');
+    
+    // Test if table exists
+    const result = await pool.query(`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public' AND table_name = 'users'
+    `);
+    
+    if (result.rows.length > 0) {
+      console.log('✅ Users table confirmed in database');
+    } else {
+      console.log('❌ Users table not found in database');
+    }
+    
   } catch (error) {
     console.error('❌ Database initialization failed:', error.message);
+    console.error('❌ Full error:', error);
   }
 }
 
