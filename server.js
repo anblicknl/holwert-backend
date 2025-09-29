@@ -1187,6 +1187,193 @@ app.delete('/api/admin/users/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// ===== ADMIN ROUTES =====
+
+// Get all organizations (admin only)
+app.get('/api/admin/organizations', authenticateToken, async (req, res) => {
+  try {
+    const { search, status, page = 1, limit = 50 } = req.query;
+    const offset = (page - 1) * limit;
+
+    let query = `
+      SELECT id, name, description, contact_email, contact_phone, website, is_approved, created_at
+      FROM organizations
+      WHERE 1=1
+    `;
+    const params = [];
+    let paramCount = 0;
+
+    // Add search filter
+    if (search) {
+      paramCount++;
+      query += ` AND (name ILIKE $${paramCount} OR contact_email ILIKE $${paramCount} OR description ILIKE $${paramCount})`;
+      params.push(`%${search}%`);
+    }
+
+    // Add status filter
+    if (status === 'approved') {
+      query += ` AND is_approved = true`;
+    } else if (status === 'pending') {
+      query += ` AND is_approved = false`;
+    }
+
+    // Add ordering and pagination
+    query += ` ORDER BY created_at DESC LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}`;
+    params.push(limit, offset);
+
+    const result = await pool.query(query, params);
+
+    // Get total count for pagination
+    let countQuery = `
+      SELECT COUNT(*) as total
+      FROM organizations
+      WHERE 1=1
+    `;
+    const countParams = [];
+    let countParamCount = 0;
+
+    if (search) {
+      countParamCount++;
+      countQuery += ` AND (name ILIKE $${countParamCount} OR contact_email ILIKE $${countParamCount} OR description ILIKE $${countParamCount})`;
+      countParams.push(`%${search}%`);
+    }
+
+    if (status === 'approved') {
+      countQuery += ` AND is_approved = true`;
+    } else if (status === 'pending') {
+      countQuery += ` AND is_approved = false`;
+    }
+
+    const countResult = await pool.query(countQuery, countParams);
+    const total = parseInt(countResult.rows[0].total);
+
+    res.json({
+      organizations: result.rows,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit)
+      },
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('Error fetching organizations:', error);
+    res.status(500).json({
+      error: 'Failed to fetch organizations',
+      message: error.message
+    });
+  }
+});
+
+// Update organization (admin only)
+app.put('/api/admin/organizations/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, description, contact_email, contact_phone, website, is_approved } = req.body;
+
+    // Validate required fields
+    if (!name || name.trim() === '') {
+      return res.status(400).json({
+        error: 'Organization name is required'
+      });
+    }
+
+    // Check if organization exists
+    const existingOrg = await pool.query('SELECT id FROM organizations WHERE id = $1', [id]);
+    if (existingOrg.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Organization not found'
+      });
+    }
+
+    // Check for duplicate name (excluding current organization)
+    if (name) {
+      const duplicateCheck = await pool.query(
+        'SELECT id FROM organizations WHERE name = $1 AND id != $2',
+        [name, id]
+      );
+      if (duplicateCheck.rows.length > 0) {
+        return res.status(400).json({
+          error: 'Organization name already exists'
+        });
+      }
+    }
+
+    // Update organization
+    const result = await pool.query(
+      `UPDATE organizations SET
+        name = $1,
+        description = $2,
+        contact_email = $3,
+        contact_phone = $4,
+        website = $5,
+        is_approved = $6,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $7
+      RETURNING id, name, description, contact_email, contact_phone, website, is_approved, created_at`,
+      [name, description || null, contact_email || null, contact_phone || null, website || null, is_approved !== false, id]
+    );
+
+    res.json({
+      message: 'Organization updated successfully',
+      organization: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error('Error updating organization:', error);
+    res.status(500).json({
+      error: 'Failed to update organization',
+      message: error.message
+    });
+  }
+});
+
+// Delete organization (admin only)
+app.delete('/api/admin/organizations/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Check if organization exists
+    const existingOrg = await pool.query('SELECT id, name FROM organizations WHERE id = $1', [id]);
+    if (existingOrg.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Organization not found'
+      });
+    }
+
+    // Check if organization has associated content
+    const [newsCount, eventsCount] = await Promise.all([
+      pool.query('SELECT COUNT(*) as count FROM news WHERE organization_id = $1', [id]),
+      pool.query('SELECT COUNT(*) as count FROM events WHERE organization_id = $1', [id])
+    ]);
+
+    const totalContent = parseInt(newsCount.rows[0].count) + parseInt(eventsCount.rows[0].count);
+    if (totalContent > 0) {
+      return res.status(400).json({
+        error: 'Cannot delete organization with associated content',
+        message: `This organization has ${totalContent} associated news articles or events. Please remove or reassign this content first.`
+      });
+    }
+
+    // Delete organization
+    await pool.query('DELETE FROM organizations WHERE id = $1', [id]);
+
+    res.json({
+      message: 'Organization deleted successfully',
+      organization: existingOrg.rows[0]
+    });
+
+  } catch (error) {
+    console.error('Error deleting organization:', error);
+    res.status(500).json({
+      error: 'Failed to delete organization',
+      message: error.message
+    });
+  }
+});
+
 // ===== ADMIN STATS ROUTES =====
 
 // Get dashboard stats
