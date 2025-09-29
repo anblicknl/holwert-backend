@@ -84,6 +84,7 @@ app.get('/api/database/create-tables', async (req, res) => {
         first_name VARCHAR(100) NOT NULL,
         last_name VARCHAR(100) NOT NULL,
         phone VARCHAR(20),
+        profile_image_url TEXT,
         role VARCHAR(20) DEFAULT 'user',
         is_active BOOLEAN DEFAULT true,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -197,7 +198,7 @@ app.get('/api/database/tables', async (req, res) => {
 // User registration
 app.post('/api/auth/register', async (req, res) => {
   try {
-    const { email, password, first_name, last_name, phone } = req.body;
+    const { email, password, first_name, last_name, phone, profile_image_url } = req.body;
 
     // Validation
     if (!email || !password || !first_name || !last_name) {
@@ -226,8 +227,8 @@ app.post('/api/auth/register', async (req, res) => {
 
     // Create user (automatically active)
     const result = await pool.query(
-      'INSERT INTO users (email, password, first_name, last_name, phone, is_active) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, email, first_name, last_name, role, created_at',
-      [email, hashedPassword, first_name, last_name, phone, true]
+      'INSERT INTO users (email, password, first_name, last_name, phone, profile_image_url, is_active) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, email, first_name, last_name, phone, profile_image_url, role, created_at',
+      [email, hashedPassword, first_name, last_name, phone, profile_image_url, true]
     );
 
     const user = result.rows[0];
@@ -246,6 +247,8 @@ app.post('/api/auth/register', async (req, res) => {
         email: user.email,
         first_name: user.first_name,
         last_name: user.last_name,
+        phone: user.phone,
+        profile_image_url: user.profile_image_url,
         role: user.role,
         created_at: user.created_at
       },
@@ -922,7 +925,7 @@ app.get('/api/admin/users', authenticateToken, async (req, res) => {
     const offset = (page - 1) * limit;
 
     let query = `
-      SELECT u.id, u.email, u.first_name, u.last_name, u.phone, u.role, u.is_active, u.created_at
+      SELECT u.id, u.email, u.first_name, u.last_name, u.phone, u.profile_image_url, u.role, u.is_active, u.created_at
       FROM users u
       WHERE 1=1
     `;
