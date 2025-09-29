@@ -124,6 +124,13 @@ app.get('/api/database/create-tables', async (req, res) => {
         contact_phone VARCHAR(20),
         website VARCHAR(255),
         logo_url VARCHAR(500),
+        category VARCHAR(100),
+        facebook_url VARCHAR(255),
+        instagram_url VARCHAR(255),
+        twitter_url VARCHAR(255),
+        linkedin_url VARCHAR(255),
+        youtube_url VARCHAR(255),
+        tiktok_url VARCHAR(255),
         is_approved BOOLEAN DEFAULT false,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -1196,7 +1203,7 @@ app.get('/api/admin/organizations', authenticateToken, async (req, res) => {
     const offset = (page - 1) * limit;
 
     let query = `
-      SELECT id, name, description, contact_email, contact_phone, website, is_approved, created_at
+      SELECT id, name, description, contact_email, contact_phone, website, category, facebook_url, instagram_url, twitter_url, linkedin_url, youtube_url, tiktok_url, is_approved, created_at
       FROM organizations
       WHERE 1=1
     `;
@@ -1206,7 +1213,7 @@ app.get('/api/admin/organizations', authenticateToken, async (req, res) => {
     // Add search filter
     if (search) {
       paramCount++;
-      query += ` AND (name ILIKE $${paramCount} OR contact_email ILIKE $${paramCount} OR description ILIKE $${paramCount})`;
+      query += ` AND (name ILIKE $${paramCount} OR contact_email ILIKE $${paramCount} OR description ILIKE $${paramCount} OR category ILIKE $${paramCount})`;
       params.push(`%${search}%`);
     }
 
@@ -1234,7 +1241,7 @@ app.get('/api/admin/organizations', authenticateToken, async (req, res) => {
 
     if (search) {
       countParamCount++;
-      countQuery += ` AND (name ILIKE $${countParamCount} OR contact_email ILIKE $${countParamCount} OR description ILIKE $${countParamCount})`;
+      countQuery += ` AND (name ILIKE $${countParamCount} OR contact_email ILIKE $${countParamCount} OR description ILIKE $${countParamCount} OR category ILIKE $${countParamCount})`;
       countParams.push(`%${search}%`);
     }
 
@@ -1271,7 +1278,21 @@ app.get('/api/admin/organizations', authenticateToken, async (req, res) => {
 app.put('/api/admin/organizations/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, description, contact_email, contact_phone, website, is_approved } = req.body;
+    const { 
+      name, 
+      description, 
+      contact_email, 
+      contact_phone, 
+      website, 
+      category,
+      facebook_url,
+      instagram_url,
+      twitter_url,
+      linkedin_url,
+      youtube_url,
+      tiktok_url,
+      is_approved 
+    } = req.body;
 
     // Validate required fields
     if (!name || name.trim() === '') {
@@ -1309,11 +1330,33 @@ app.put('/api/admin/organizations/:id', authenticateToken, async (req, res) => {
         contact_email = $3,
         contact_phone = $4,
         website = $5,
-        is_approved = $6,
+        category = $6,
+        facebook_url = $7,
+        instagram_url = $8,
+        twitter_url = $9,
+        linkedin_url = $10,
+        youtube_url = $11,
+        tiktok_url = $12,
+        is_approved = $13,
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $7
-      RETURNING id, name, description, contact_email, contact_phone, website, is_approved, created_at`,
-      [name, description || null, contact_email || null, contact_phone || null, website || null, is_approved !== false, id]
+      WHERE id = $14
+      RETURNING id, name, description, contact_email, contact_phone, website, category, facebook_url, instagram_url, twitter_url, linkedin_url, youtube_url, tiktok_url, is_approved, created_at`,
+      [
+        name, 
+        description || null, 
+        contact_email || null, 
+        contact_phone || null, 
+        website || null,
+        category || null,
+        facebook_url || null,
+        instagram_url || null,
+        twitter_url || null,
+        linkedin_url || null,
+        youtube_url || null,
+        tiktok_url || null,
+        is_approved !== false, 
+        id
+      ]
     );
 
     res.json({
