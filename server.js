@@ -105,7 +105,7 @@ app.get('/api/database/update-schema', async (req, res) => {
     
   } catch (error) {
     console.error('❌ Error updating database schema:', error);
-    res.status(500).json({
+  res.status(500).json({ 
       error: 'Failed to update database schema',
       message: error.message
     });
@@ -201,9 +201,12 @@ app.get('/api/database/create-tables', async (req, res) => {
         id SERIAL PRIMARY KEY,
         title VARCHAR(255) NOT NULL,
         content TEXT NOT NULL,
+        excerpt TEXT,
         author_id INTEGER REFERENCES users(id),
         organization_id INTEGER REFERENCES organizations(id),
-        image_url VARCHAR(500),
+        image_url TEXT,
+        category VARCHAR(100) DEFAULT 'dorpsnieuws',
+        custom_category VARCHAR(100),
         is_published BOOLEAN DEFAULT false,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -583,7 +586,7 @@ app.post('/api/upload/image', authenticateToken, async (req, res) => {
 // Create news article with workflow logic
 app.post('/api/news', authenticateToken, async (req, res) => {
   try {
-    const { title, content, category, organization_id, image_url } = req.body;
+    const { title, content, excerpt, category, custom_category, organization_id, image_url } = req.body;
     const authorId = req.user.userId;
 
     // Validation
@@ -595,7 +598,6 @@ app.post('/api/news', authenticateToken, async (req, res) => {
 
     // Determine publication status based on user type
     let isPublished = false;
-    let requiresModeration = true;
 
     // Check if user is associated with an approved organization
     if (organization_id) {
@@ -607,14 +609,21 @@ app.post('/api/news', authenticateToken, async (req, res) => {
       if (orgResult.rows.length > 0 && orgResult.rows[0].is_approved) {
         // Organization content: publish immediately
         isPublished = true;
-        requiresModeration = false;
       }
+    }
+
+    // Handle category logic
+    let finalCategory = category || 'dorpsnieuws';
+    let finalCustomCategory = null;
+    
+    if (category === 'overig' && custom_category) {
+      finalCustomCategory = custom_category;
     }
 
     // Insert into news table
     const result = await pool.query(
-      'INSERT INTO news (title, content, author_id, organization_id, image_url, is_published) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
-      [title, content, authorId, organization_id || null, image_url || null, isPublished]
+      'INSERT INTO news (title, content, excerpt, author_id, organization_id, image_url, category, custom_category, is_published) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id',
+      [title, content, excerpt || null, authorId, organization_id || null, image_url || null, finalCategory, finalCustomCategory, isPublished]
     );
 
     const message = isPublished 
@@ -625,7 +634,7 @@ app.post('/api/news', authenticateToken, async (req, res) => {
       message: message,
       articleId: result.rows[0].id,
       isPublished: isPublished,
-      requiresModeration: requiresModeration
+      requiresModeration: !isPublished
     });
 
   } catch (error) {
@@ -1254,6 +1263,183 @@ app.delete('/api/admin/users/:id', authenticateToken, async (req, res) => {
 
 // ===== ADMIN ROUTES =====
 
+// Get all news for admin management
+app.get('/api/admin/news', authenticateToken, async (req, res) => {
+  try {
+    const { page = 1, limit = 20, search, category, status } = req.query;
+    const offset = (page - 1) * limit;
+
+    let query = `
+      SELECT n.id, n.title, n.excerpt, n.category, n.custom_category, n.is_published, n.created_at, n.updated_at,
+             u.first_name, u.last_name, u.email,
+             o.name as organization_name, o.logo_url as organization_logo, o.brand_color as organization_color
+      FROM news n
+      JOIN users u ON n.author_id = u.id
+      LEFT JOIN organizations o ON n.organization_id = o.id
+      WHERE 1=1
+    `;
+    const params = [];
+    let paramCount = 0;
+
+    if (search) {
+      paramCount++;
+      query += ` AND (n.title ILIKE $${paramCount} OR n.excerpt ILIKE $${paramCount})`;
+      params.push(`%${search}%`);
+    }
+
+    if (category) {
+      paramCount++;
+      query += ` AND n.category = $${paramCount}`;
+      params.push(category);
+    }
+
+    if (status === 'published') {
+      query += ` AND n.is_published = true`;
+    } else if (status === 'pending') {
+      query += ` AND n.is_published = false`;
+    }
+
+    query += ` ORDER BY n.created_at DESC LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}`;
+    params.push(parseInt(limit), parseInt(offset));
+
+    const result = await pool.query(query, params);
+
+    // Get total count
+    let countQuery = `
+      SELECT COUNT(*) as total 
+      FROM news n
+      JOIN users u ON n.author_id = u.id
+      LEFT JOIN organizations o ON n.organization_id = o.id
+      WHERE 1=1
+    `;
+    const countParams = [];
+    let countParamCount = 0;
+
+    if (search) {
+      countParamCount++;
+      countQuery += ` AND (n.title ILIKE $${countParamCount} OR n.excerpt ILIKE $${countParamCount})`;
+      countParams.push(`%${search}%`);
+    }
+
+    if (category) {
+      countParamCount++;
+      countQuery += ` AND n.category = $${countParamCount}`;
+      countParams.push(category);
+    }
+
+    if (status === 'published') {
+      countQuery += ` AND n.is_published = true`;
+    } else if (status === 'pending') {
+      countQuery += ` AND n.is_published = false`;
+    }
+
+    const countResult = await pool.query(countQuery, countParams);
+
+    res.json({
+      news: result.rows,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: parseInt(countResult.rows[0].total),
+        pages: Math.ceil(countResult.rows[0].total / limit)
+      }
+    });
+
+  } catch (error) {
+    console.error('Get admin news error:', error);
+    res.status(500).json({
+      error: 'Failed to get news',
+      message: error.message
+    });
+  }
+});
+
+// Update news article
+app.put('/api/admin/news/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, content, excerpt, category, custom_category, image_url, is_published } = req.body;
+
+    // Validation
+    if (!title || !content) {
+      return res.status(400).json({
+        error: 'Title and content are required'
+      });
+    }
+
+    // Handle category logic
+    let finalCategory = category || 'dorpsnieuws';
+    let finalCustomCategory = null;
+    
+    if (category === 'overig' && custom_category) {
+      finalCustomCategory = custom_category;
+    }
+
+    const result = await pool.query(
+      `UPDATE news SET 
+        title = $1, 
+        content = $2, 
+        excerpt = $3, 
+        category = $4, 
+        custom_category = $5, 
+        image_url = $6, 
+        is_published = $7, 
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $8
+      RETURNING id, title, content, excerpt, category, custom_category, image_url, is_published, created_at, updated_at`,
+      [title, content, excerpt || null, finalCategory, finalCustomCategory, image_url || null, is_published !== false, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: 'News article not found'
+      });
+    }
+
+    res.json({
+      message: 'News article updated successfully',
+      article: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error('Update news error:', error);
+    res.status(500).json({
+      error: 'Failed to update news article',
+      message: error.message
+    });
+  }
+});
+
+// Delete news article
+app.delete('/api/admin/news/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query(
+      'DELETE FROM news WHERE id = $1 RETURNING id, title',
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: 'News article not found'
+      });
+    }
+
+    res.json({
+      message: 'News article deleted successfully',
+      deletedArticle: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error('Delete news error:', error);
+    res.status(500).json({
+      error: 'Failed to delete news article',
+      message: error.message
+    });
+  }
+});
+
 // Get all organizations (admin only)
 app.get('/api/admin/organizations', authenticateToken, async (req, res) => {
   try {
@@ -1272,6 +1458,12 @@ app.get('/api/admin/organizations', authenticateToken, async (req, res) => {
       await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS brand_color VARCHAR(7) DEFAULT '#667eea'`);
       // Extend logo_url column to support base64 images
       await pool.query(`ALTER TABLE organizations ALTER COLUMN logo_url TYPE TEXT`);
+      
+      // Add news table columns if they don't exist
+      await pool.query(`ALTER TABLE news ADD COLUMN IF NOT EXISTS excerpt TEXT`);
+      await pool.query(`ALTER TABLE news ADD COLUMN IF NOT EXISTS category VARCHAR(100) DEFAULT 'dorpsnieuws'`);
+      await pool.query(`ALTER TABLE news ADD COLUMN IF NOT EXISTS custom_category VARCHAR(100)`);
+      await pool.query(`ALTER TABLE news ALTER COLUMN image_url TYPE TEXT`);
     } catch (alterError) {
       console.log('Columns may already exist:', alterError.message);
     }
@@ -1366,6 +1558,12 @@ app.put('/api/admin/organizations/:id', authenticateToken, async (req, res) => {
       await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS brand_color VARCHAR(7) DEFAULT '#667eea'`);
       // Extend logo_url column to support base64 images
       await pool.query(`ALTER TABLE organizations ALTER COLUMN logo_url TYPE TEXT`);
+      
+      // Add news table columns if they don't exist
+      await pool.query(`ALTER TABLE news ADD COLUMN IF NOT EXISTS excerpt TEXT`);
+      await pool.query(`ALTER TABLE news ADD COLUMN IF NOT EXISTS category VARCHAR(100) DEFAULT 'dorpsnieuws'`);
+      await pool.query(`ALTER TABLE news ADD COLUMN IF NOT EXISTS custom_category VARCHAR(100)`);
+      await pool.query(`ALTER TABLE news ALTER COLUMN image_url TYPE TEXT`);
     } catch (alterError) {
       console.log('Columns may already exist:', alterError.message);
     }
