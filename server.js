@@ -224,10 +224,10 @@ app.post('/api/auth/register', async (req, res) => {
     const saltRounds = 10;
     const hashedPassword = await bcrypt.hash(password, saltRounds);
 
-    // Create user
+    // Create user (automatically active)
     const result = await pool.query(
-      'INSERT INTO users (email, password, first_name, last_name, phone) VALUES ($1, $2, $3, $4, $5) RETURNING id, email, first_name, last_name, role, created_at',
-      [email, hashedPassword, first_name, last_name, phone]
+      'INSERT INTO users (email, password, first_name, last_name, phone, is_active) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, email, first_name, last_name, role, created_at',
+      [email, hashedPassword, first_name, last_name, phone, true]
     );
 
     const user = result.rows[0];
@@ -1141,16 +1141,15 @@ app.get('/api/admin/pending', authenticateToken, async (req, res) => {
     // Allow all authenticated users to see pending content for now
     // TODO: Add proper admin check later
 
-    // Get pending content (users and organizations that need approval)
-    const [pendingUsers, pendingOrgs, pendingNews, pendingEvents] = await Promise.all([
-      pool.query('SELECT id, email, first_name, last_name, created_at FROM users WHERE is_active = false'),
+    // Get pending content (only content that needs approval, not users)
+    const [pendingOrgs, pendingNews, pendingEvents] = await Promise.all([
       pool.query('SELECT id, name, contact_email, created_at FROM organizations WHERE is_approved = false'),
       pool.query('SELECT id, title, author_id, created_at FROM news WHERE is_published = false'),
       pool.query('SELECT id, title, organizer_id, event_date, created_at FROM events WHERE is_published = false')
     ]);
 
     res.json({
-      users: pendingUsers.rows,
+      users: [], // No pending users anymore
       organizations: pendingOrgs.rows,
       news: pendingNews.rows,
       events: pendingEvents.rows,
