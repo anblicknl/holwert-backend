@@ -389,12 +389,67 @@ app.get('/api/auth/profile', authenticateToken, async (req, res) => {
 // Note: Route files are not loaded yet as they use MySQL syntax
 // We'll add simple PostgreSQL routes directly in server.js for now
 
+// ===== ORGANIZATION ROUTES =====
+
+// Organization registration
+app.post('/api/organizations/register', async (req, res) => {
+  try {
+    const { name, description, contact_email, contact_phone, website } = req.body;
+
+    // Validation
+    if (!name || !contact_email) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        message: 'Name and contact email are required'
+      });
+    }
+
+    // Check if organization already exists
+    const existingOrg = await pool.query(
+      'SELECT id FROM organizations WHERE name = $1 OR contact_email = $2',
+      [name, contact_email]
+    );
+
+    if (existingOrg.rows.length > 0) {
+      return res.status(400).json({
+        error: 'Organization already exists',
+        message: 'An organization with this name or email already exists'
+      });
+    }
+
+    // Create organization
+    const result = await pool.query(
+      'INSERT INTO organizations (name, description, contact_email, contact_phone, website, is_approved) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, name, contact_email, created_at',
+      [name, description, contact_email, contact_phone, website, false]
+    );
+
+    const organization = result.rows[0];
+
+    res.status(201).json({
+      message: 'Organization registered successfully',
+      organization: {
+        id: organization.id,
+        name: organization.name,
+        contact_email: organization.contact_email,
+        created_at: organization.created_at
+      }
+    });
+
+  } catch (error) {
+    console.error('Organization registration error:', error);
+    res.status(500).json({
+      error: 'Registration failed',
+      message: error.message
+    });
+  }
+});
+
 // ===== CONTENT ROUTES =====
 
-// Create news article (simple test)
+// Create news article with workflow logic
 app.post('/api/news', authenticateToken, async (req, res) => {
   try {
-    const { title, content, category } = req.body;
+    const { title, content, category, organization_id } = req.body;
     const authorId = req.user.userId;
 
     // Validation
@@ -404,15 +459,39 @@ app.post('/api/news', authenticateToken, async (req, res) => {
       });
     }
 
+    // Determine publication status based on user type
+    let isPublished = false;
+    let requiresModeration = true;
+
+    // Check if user is associated with an approved organization
+    if (organization_id) {
+      const orgResult = await pool.query(
+        'SELECT is_approved FROM organizations WHERE id = $1',
+        [organization_id]
+      );
+      
+      if (orgResult.rows.length > 0 && orgResult.rows[0].is_approved) {
+        // Organization content: publish immediately
+        isPublished = true;
+        requiresModeration = false;
+      }
+    }
+
     // Insert into news table
     const result = await pool.query(
-      'INSERT INTO news (title, content, author_id, is_published) VALUES ($1, $2, $3, $4) RETURNING id',
-      [title, content, authorId, false]
+      'INSERT INTO news (title, content, author_id, organization_id, is_published) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+      [title, content, authorId, organization_id || null, isPublished]
     );
 
+    const message = isPublished 
+      ? 'News article published successfully' 
+      : 'News article created and submitted for moderation';
+
     res.status(201).json({
-      message: 'News article created successfully',
-      articleId: result.rows[0].id
+      message: message,
+      articleId: result.rows[0].id,
+      isPublished: isPublished,
+      requiresModeration: requiresModeration
     });
 
   } catch (error) {
@@ -424,10 +503,10 @@ app.post('/api/news', authenticateToken, async (req, res) => {
   }
 });
 
-// Create event (simple test)
+// Create event with workflow logic
 app.post('/api/events', authenticateToken, async (req, res) => {
   try {
-    const { title, description, event_date, location } = req.body;
+    const { title, description, event_date, location, organization_id } = req.body;
     const organizerId = req.user.userId;
 
     // Validation
@@ -437,21 +516,156 @@ app.post('/api/events', authenticateToken, async (req, res) => {
       });
     }
 
+    // Determine publication status based on user type
+    let isPublished = false;
+    let requiresModeration = true;
+
+    // Check if user is associated with an approved organization
+    if (organization_id) {
+      const orgResult = await pool.query(
+        'SELECT is_approved FROM organizations WHERE id = $1',
+        [organization_id]
+      );
+      
+      if (orgResult.rows.length > 0 && orgResult.rows[0].is_approved) {
+        // Organization content: publish immediately
+        isPublished = true;
+        requiresModeration = false;
+      }
+    }
+
     // Insert into events table
     const result = await pool.query(
-      'INSERT INTO events (title, description, event_date, location, organizer_id, is_published) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
-      [title, description, event_date, location, organizerId, false]
+      'INSERT INTO events (title, description, event_date, location, organizer_id, organization_id, is_published) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id',
+      [title, description, event_date, location, organizerId, organization_id || null, isPublished]
     );
 
+    const message = isPublished 
+      ? 'Event published successfully' 
+      : 'Event created and submitted for moderation';
+
     res.status(201).json({
-      message: 'Event created successfully',
-      eventId: result.rows[0].id
+      message: message,
+      eventId: result.rows[0].id,
+      isPublished: isPublished,
+      requiresModeration: requiresModeration
     });
 
   } catch (error) {
     console.error('Create event error:', error);
     res.status(500).json({
       error: 'Failed to create event',
+      message: error.message
+    });
+  }
+});
+
+// ===== MODERATION ROUTES =====
+
+// Approve content (news or event)
+app.post('/api/admin/approve/:type/:id', authenticateToken, async (req, res) => {
+  try {
+    const { type, id } = req.params;
+    
+    if (!['news', 'events'].includes(type)) {
+      return res.status(400).json({
+        error: 'Invalid content type'
+      });
+    }
+
+    const tableName = type === 'news' ? 'news' : 'events';
+    
+    // Update content to published
+    const result = await pool.query(
+      `UPDATE ${tableName} SET is_published = true WHERE id = $1 RETURNING id`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Content not found'
+      });
+    }
+
+    res.json({
+      message: `${type} approved and published successfully`,
+      id: result.rows[0].id
+    });
+
+  } catch (error) {
+    console.error('Approve content error:', error);
+    res.status(500).json({
+      error: 'Failed to approve content',
+      message: error.message
+    });
+  }
+});
+
+// Reject content (news or event)
+app.post('/api/admin/reject/:type/:id', authenticateToken, async (req, res) => {
+  try {
+    const { type, id } = req.params;
+    
+    if (!['news', 'events'].includes(type)) {
+      return res.status(400).json({
+        error: 'Invalid content type'
+      });
+    }
+
+    const tableName = type === 'news' ? 'news' : 'events';
+    
+    // Delete content (or mark as rejected)
+    const result = await pool.query(
+      `DELETE FROM ${tableName} WHERE id = $1 RETURNING id`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Content not found'
+      });
+    }
+
+    res.json({
+      message: `${type} rejected and removed successfully`,
+      id: result.rows[0].id
+    });
+
+  } catch (error) {
+    console.error('Reject content error:', error);
+    res.status(500).json({
+      error: 'Failed to reject content',
+      message: error.message
+    });
+  }
+});
+
+// Approve organization
+app.post('/api/admin/approve-organization/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Update organization to approved
+    const result = await pool.query(
+      'UPDATE organizations SET is_approved = true WHERE id = $1 RETURNING id, name',
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Organization not found'
+      });
+    }
+
+    res.json({
+      message: 'Organization approved successfully',
+      organization: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error('Approve organization error:', error);
+    res.status(500).json({
+      error: 'Failed to approve organization',
       message: error.message
     });
   }
