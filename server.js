@@ -55,6 +55,63 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Update database schema
+app.get('/api/database/update-schema', async (req, res) => {
+  try {
+    console.log('🔄 Updating database schema...');
+    
+    // Add missing columns to organizations table
+    await pool.query(`
+      ALTER TABLE organizations 
+      ADD COLUMN IF NOT EXISTS category VARCHAR(100)
+    `);
+    
+    await pool.query(`
+      ALTER TABLE organizations 
+      ADD COLUMN IF NOT EXISTS facebook_url VARCHAR(255)
+    `);
+    
+    await pool.query(`
+      ALTER TABLE organizations 
+      ADD COLUMN IF NOT EXISTS instagram_url VARCHAR(255)
+    `);
+    
+    await pool.query(`
+      ALTER TABLE organizations 
+      ADD COLUMN IF NOT EXISTS twitter_url VARCHAR(255)
+    `);
+    
+    await pool.query(`
+      ALTER TABLE organizations 
+      ADD COLUMN IF NOT EXISTS linkedin_url VARCHAR(255)
+    `);
+    
+    await pool.query(`
+      ALTER TABLE organizations 
+      ADD COLUMN IF NOT EXISTS youtube_url VARCHAR(255)
+    `);
+    
+    await pool.query(`
+      ALTER TABLE organizations 
+      ADD COLUMN IF NOT EXISTS tiktok_url VARCHAR(255)
+    `);
+
+    console.log('✅ Database schema updated successfully');
+    
+    res.json({
+      message: 'Database schema updated successfully',
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('❌ Error updating database schema:', error);
+    res.status(500).json({
+      error: 'Failed to update database schema',
+      message: error.message
+    });
+  }
+});
+
 // Database test route
 app.get('/api/database/test', async (req, res) => {
   try {
@@ -1202,8 +1259,22 @@ app.get('/api/admin/organizations', authenticateToken, async (req, res) => {
     const { search, status, page = 1, limit = 50 } = req.query;
     const offset = (page - 1) * limit;
 
+    // First, ensure all columns exist
+    try {
+      await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS category VARCHAR(100)`);
+      await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS facebook_url VARCHAR(255)`);
+      await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS instagram_url VARCHAR(255)`);
+      await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS twitter_url VARCHAR(255)`);
+      await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS linkedin_url VARCHAR(255)`);
+      await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS youtube_url VARCHAR(255)`);
+      await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS tiktok_url VARCHAR(255)`);
+    } catch (alterError) {
+      console.log('Columns may already exist:', alterError.message);
+    }
+
     let query = `
-      SELECT id, name, description, contact_email, contact_phone, website, category, facebook_url, instagram_url, twitter_url, linkedin_url, youtube_url, tiktok_url, is_approved, created_at
+      SELECT id, name, description, contact_email, contact_phone, website, is_approved, created_at,
+             COALESCE(category, '') as category
       FROM organizations
       WHERE 1=1
     `;
@@ -1213,7 +1284,7 @@ app.get('/api/admin/organizations', authenticateToken, async (req, res) => {
     // Add search filter
     if (search) {
       paramCount++;
-      query += ` AND (name ILIKE $${paramCount} OR contact_email ILIKE $${paramCount} OR description ILIKE $${paramCount} OR category ILIKE $${paramCount})`;
+      query += ` AND (name ILIKE $${paramCount} OR contact_email ILIKE $${paramCount} OR description ILIKE $${paramCount})`;
       params.push(`%${search}%`);
     }
 
@@ -1241,7 +1312,7 @@ app.get('/api/admin/organizations', authenticateToken, async (req, res) => {
 
     if (search) {
       countParamCount++;
-      countQuery += ` AND (name ILIKE $${countParamCount} OR contact_email ILIKE $${countParamCount} OR description ILIKE $${countParamCount} OR category ILIKE $${countParamCount})`;
+      countQuery += ` AND (name ILIKE $${countParamCount} OR contact_email ILIKE $${countParamCount} OR description ILIKE $${countParamCount})`;
       countParams.push(`%${search}%`);
     }
 
@@ -1277,6 +1348,19 @@ app.get('/api/admin/organizations', authenticateToken, async (req, res) => {
 // Update organization (admin only)
 app.put('/api/admin/organizations/:id', authenticateToken, async (req, res) => {
   try {
+    // First, ensure all columns exist
+    try {
+      await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS category VARCHAR(100)`);
+      await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS facebook_url VARCHAR(255)`);
+      await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS instagram_url VARCHAR(255)`);
+      await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS twitter_url VARCHAR(255)`);
+      await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS linkedin_url VARCHAR(255)`);
+      await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS youtube_url VARCHAR(255)`);
+      await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS tiktok_url VARCHAR(255)`);
+    } catch (alterError) {
+      console.log('Columns may already exist:', alterError.message);
+    }
+
     const { id } = req.params;
     const { 
       name, 
@@ -1331,16 +1415,10 @@ app.put('/api/admin/organizations/:id', authenticateToken, async (req, res) => {
         contact_phone = $4,
         website = $5,
         category = $6,
-        facebook_url = $7,
-        instagram_url = $8,
-        twitter_url = $9,
-        linkedin_url = $10,
-        youtube_url = $11,
-        tiktok_url = $12,
-        is_approved = $13,
+        is_approved = $7,
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $14
-      RETURNING id, name, description, contact_email, contact_phone, website, category, facebook_url, instagram_url, twitter_url, linkedin_url, youtube_url, tiktok_url, is_approved, created_at`,
+      WHERE id = $8
+      RETURNING id, name, description, contact_email, contact_phone, website, COALESCE(category, '') as category, is_approved, created_at`,
       [
         name, 
         description || null, 
@@ -1348,12 +1426,6 @@ app.put('/api/admin/organizations/:id', authenticateToken, async (req, res) => {
         contact_phone || null, 
         website || null,
         category || null,
-        facebook_url || null,
-        instagram_url || null,
-        twitter_url || null,
-        linkedin_url || null,
-        youtube_url || null,
-        tiktok_url || null,
         is_approved !== false, 
         id
       ]
