@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug Login</title>
+</head>
+<body>
+    <h1>Debug Login Test</h1>
+    <form id="loginForm">
+        <div>
+            <label for="email">Email:</label>
+            <input type="email" id="email" value="admin@holwert.nl" required>
+        </div>
+        <div>
+            <label for="password">Password:</label>
+            <input type="password" id="password" value="admin123" required>
+        </div>
+        <button type="submit">Login</button>
+    </form>
+    <div id="result"></div>
+
+    <script>
+        document.getElementById('loginForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const resultDiv = document.getElementById('result');
+            
+            resultDiv.innerHTML = 'Logging in...';
+            
+            try {
+                console.log('Attempting login...');
+                const response = await fetch('http://localhost:3000/api/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ email, password }),
+                });
+                
+                console.log('Response status:', response.status);
+                const data = await response.json();
+                console.log('Response data:', data);
+                
+                if (response.ok) {
+                    resultDiv.innerHTML = `<div style="color: green;">Login successful! Token: ${data.token.substring(0, 50)}...</div>`;
+                } else {
+                    resultDiv.innerHTML = `<div style="color: red;">Login failed: ${data.message || 'Unknown error'}</div>`;
+                }
+            } catch (error) {
+                console.error('Login error:', error);
+                resultDiv.innerHTML = `<div style="color: red;">Error: ${error.message}</div>`;
+            }
+        });
+    </script>
+</body>
+</html>

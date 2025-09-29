@@ -1,0 +1,35 @@
+{
+  "name": "Holwert Dorpsapp",
+  "description": "Backend voor Holwert Dorpsapp - Community platform",
+  "repository": "https://github.com/your-username/holwert-backend",
+  "logo": "https://cdn.jsdelivr.net/npm/simple-icons@v3/icons/node-dot-js.svg",
+  "keywords": ["node", "express", "mysql", "community", "holwert"],
+  "image": "heroku/nodejs",
+  "stack": "heroku-18",
+  "addons": [
+    {
+      "plan": "heroku-postgresql:mini",
+      "as": "DATABASE"
+    }
+  ],
+  "env": {
+    "NODE_ENV": {
+      "description": "Environment",
+      "value": "production"
+    },
+    "JWT_SECRET": {
+      "description": "Secret key for JWT tokens",
+      "generator": "secret"
+    },
+    "PORT": {
+      "description": "Port for the application",
+      "value": "3000"
+    }
+  },
+  "formation": {
+    "web": {
+      "quantity": 1,
+      "size": "free"
+    }
+  }
+}
