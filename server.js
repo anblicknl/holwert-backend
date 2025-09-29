@@ -18,6 +18,31 @@ const pool = new Pool({
   }
 });
 
+// Initialize database tables
+async function initializeDatabase() {
+  try {
+    // Users table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        password VARCHAR(255) NOT NULL,
+        first_name VARCHAR(100) NOT NULL,
+        last_name VARCHAR(100) NOT NULL,
+        phone VARCHAR(20),
+        role VARCHAR(20) DEFAULT 'user',
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    console.log('✅ Users table created');
+  } catch (error) {
+    console.error('❌ Database initialization failed:', error.message);
+  }
+}
+
 // Test database connection
 async function testDatabase() {
   try {
@@ -66,6 +91,26 @@ app.get('/api/database/test', async (req, res) => {
   }
 });
 
+// Database tables info
+app.get('/api/database/tables', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public'
+    `);
+    res.json({ 
+      tables: result.rows.map(row => row.table_name),
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to get tables',
+      message: error.message
+    });
+  }
+});
+
 // 404 handler
 app.use('*', (req, res) => {
   res.status(404).json({ error: 'Route not found' });
@@ -76,6 +121,7 @@ app.listen(PORT, async () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
   await testDatabase();
+  await initializeDatabase();
 });
 
 module.exports = app;
