@@ -66,8 +66,8 @@ app.get('/api/database/test', async (req, res) => {
   }
 });
 
-// Create tables endpoint
-app.post('/api/database/create-tables', async (req, res) => {
+// Create tables endpoint (GET for easy testing)
+app.get('/api/database/create-tables', async (req, res) => {
   try {
     // Users table
     await pool.query(`
@@ -85,8 +85,75 @@ app.post('/api/database/create-tables', async (req, res) => {
       )
     `);
 
+    // Organizations table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS organizations (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        description TEXT,
+        contact_email VARCHAR(255),
+        contact_phone VARCHAR(20),
+        website VARCHAR(255),
+        logo_url VARCHAR(500),
+        is_approved BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // News table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS news (
+        id SERIAL PRIMARY KEY,
+        title VARCHAR(255) NOT NULL,
+        content TEXT NOT NULL,
+        author_id INTEGER REFERENCES users(id),
+        organization_id INTEGER REFERENCES organizations(id),
+        image_url VARCHAR(500),
+        is_published BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Events table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS events (
+        id SERIAL PRIMARY KEY,
+        title VARCHAR(255) NOT NULL,
+        description TEXT NOT NULL,
+        event_date TIMESTAMP NOT NULL,
+        location VARCHAR(255),
+        organizer_id INTEGER REFERENCES users(id),
+        organization_id INTEGER REFERENCES organizations(id),
+        image_url VARCHAR(500),
+        is_published BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Found/Lost table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS found_lost (
+        id SERIAL PRIMARY KEY,
+        type VARCHAR(10) NOT NULL CHECK (type IN ('found', 'lost')),
+        title VARCHAR(255) NOT NULL,
+        description TEXT NOT NULL,
+        location VARCHAR(255),
+        contact_name VARCHAR(100),
+        contact_phone VARCHAR(20),
+        contact_email VARCHAR(255),
+        image_url VARCHAR(500),
+        is_resolved BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     res.json({ 
-      message: 'Tables created successfully',
+      message: 'All tables created successfully',
+      tables: ['users', 'organizations', 'news', 'events', 'found_lost'],
       timestamp: new Date().toISOString()
     });
   } catch (error) {
