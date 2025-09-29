@@ -385,6 +385,78 @@ app.get('/api/auth/profile', authenticateToken, async (req, res) => {
   }
 });
 
+// ===== ROUTES =====
+// Note: Route files are not loaded yet as they use MySQL syntax
+// We'll add simple PostgreSQL routes directly in server.js for now
+
+// ===== CONTENT ROUTES =====
+
+// Create news article (simple test)
+app.post('/api/news', authenticateToken, async (req, res) => {
+  try {
+    const { title, content, category } = req.body;
+    const authorId = req.user.userId;
+
+    // Validation
+    if (!title || !content) {
+      return res.status(400).json({
+        error: 'Title and content are required'
+      });
+    }
+
+    // Insert into news table
+    const result = await pool.query(
+      'INSERT INTO news (title, content, author_id, is_published) VALUES ($1, $2, $3, $4) RETURNING id',
+      [title, content, authorId, false]
+    );
+
+    res.status(201).json({
+      message: 'News article created successfully',
+      articleId: result.rows[0].id
+    });
+
+  } catch (error) {
+    console.error('Create news error:', error);
+    res.status(500).json({
+      error: 'Failed to create news article',
+      message: error.message
+    });
+  }
+});
+
+// Create event (simple test)
+app.post('/api/events', authenticateToken, async (req, res) => {
+  try {
+    const { title, description, event_date, location } = req.body;
+    const organizerId = req.user.userId;
+
+    // Validation
+    if (!title || !description || !event_date || !location) {
+      return res.status(400).json({
+        error: 'Title, description, event date and location are required'
+      });
+    }
+
+    // Insert into events table
+    const result = await pool.query(
+      'INSERT INTO events (title, description, event_date, location, organizer_id, is_published) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
+      [title, description, event_date, location, organizerId, false]
+    );
+
+    res.status(201).json({
+      message: 'Event created successfully',
+      eventId: result.rows[0].id
+    });
+
+  } catch (error) {
+    console.error('Create event error:', error);
+    res.status(500).json({
+      error: 'Failed to create event',
+      message: error.message
+    });
+  }
+});
+
 // ===== ADMIN STATS ROUTES =====
 
 // Get dashboard stats
