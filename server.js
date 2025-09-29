@@ -10,13 +10,13 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Database connection
+// Database connection - gebruik environment variable
 const dbConfig = {
-  host: 'localhost',
-  port: 3306,
-  user: 'holwert_user',
-  password: 'Holwert_app2.33!',
-  database: 'appenvlo_holwert',
+  host: process.env.DB_HOST || 'holwert.appenvloed.com',
+  port: process.env.DB_PORT || 3306,
+  user: process.env.DB_USER || 'holwert_user',
+  password: process.env.DB_PASSWORD || 'Holwert_app2.33!',
+  database: process.env.DB_NAME || 'appenvlo_holwert',
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0
