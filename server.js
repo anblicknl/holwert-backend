@@ -1,102 +1,388 @@
 const express = require('express');
 const cors = require('cors');
-const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
+const { Pool } = require('pg');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 require('dotenv').config();
-
-// Import utilities (with fallbacks)
-let logRequest, errorHandler, logSystemEvent, ensureUploadDirs;
-try {
-    const logger = require('./utils/logger');
-    logRequest = logger.logRequest;
-    errorHandler = logger.errorHandler;
-    logSystemEvent = logger.logSystemEvent;
-} catch (error) {
-    console.log('Logger not available, using fallbacks');
-    logRequest = (req, res, next) => next();
-    errorHandler = (err, req, res, next) => {
-        console.error(err.stack);
-        res.status(500).json({ error: 'Something went wrong!' });
-    };
-    logSystemEvent = () => {};
-}
-
-try {
-    const imageUpload = require('./utils/imageUpload');
-    ensureUploadDirs = imageUpload.ensureUploadDirs;
-} catch (error) {
-    console.log('Image upload not available, using fallback');
-    ensureUploadDirs = () => {};
-}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Initialize upload directories
-ensureUploadDirs();
+// Middleware
+app.use(cors());
+app.use(express.json());
 
-// Security middleware
-app.use(helmet({
-  crossOriginResourcePolicy: { policy: "cross-origin" }
-}));
-
-app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? ['https://holwert.appenvloed.com', 'https://holwert-backend-production.up.railway.app'] 
-    : true, // Allow all origins in development
-  credentials: true
-}));
-
-// Compression middleware (optional)
-try {
-    const compression = require('compression');
-    app.use(compression());
-} catch (error) {
-    console.log('Compression not available, skipping');
-}
-
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  message: {
-    error: 'Te veel verzoeken, probeer het later opnieuw'
+// Database connection
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false
   }
 });
-app.use('/api/', limiter);
 
-// Request logging
-app.use(logRequest);
+// JWT Secret
+const JWT_SECRET = process.env.JWT_SECRET || 'holwert-secret-key-2024';
 
-// Body parsing middleware
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// Test database connection
+async function testDatabase() {
+  try {
+    const client = await pool.connect();
+    console.log('✅ Database connected successfully');
+    client.release();
+  } catch (error) {
+    console.error('❌ Database connection failed:', error.message);
+  }
+}
 
-// Static files
-app.use('/uploads', express.static('uploads'));
+// Test route
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'Holwert Backend is running!',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development',
+    database: 'Connected to PostgreSQL'
+  });
+});
 
-// Routes
-app.use('/api/auth', require('./routes/auth'));
-// app.use('/api/register', require('./routes/registration')); // Temporarily disabled
-app.use('/api/users', require('./routes/users'));
-app.use('/api/organizations', require('./routes/organizations'));
-app.use('/api/news', require('./routes/news'));
-app.use('/api/events', require('./routes/events'));
-app.use('/api/found-lost', require('./routes/foundLost'));
-app.use('/api/admin', require('./routes/admin'));
-
-// Health check endpoint
+// Health check
 app.get('/api/health', (req, res) => {
   res.json({ 
     status: 'OK', 
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV 
+    environment: process.env.NODE_ENV || 'development',
+    database: 'Connected to PostgreSQL'
   });
 });
 
-// 404 handler
-app.use('*', (req, res) => {
-  res.status(404).json({ error: 'Route not found' });
+// Database test route
+app.get('/api/database/test', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT 1 as test');
+    res.json({ 
+      status: 'Database connected',
+      test: result.rows[0].test,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Database connection failed',
+      message: error.message
+    });
+  }
+});
+
+// Create tables endpoint (GET for easy testing)
+app.get('/api/database/create-tables', async (req, res) => {
+  try {
+    // Users table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        password VARCHAR(255) NOT NULL,
+        first_name VARCHAR(100) NOT NULL,
+        last_name VARCHAR(100) NOT NULL,
+        phone VARCHAR(20),
+        role VARCHAR(20) DEFAULT 'user',
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Organizations table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS organizations (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        description TEXT,
+        contact_email VARCHAR(255),
+        contact_phone VARCHAR(20),
+        website VARCHAR(255),
+        logo_url VARCHAR(500),
+        is_approved BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // News table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS news (
+        id SERIAL PRIMARY KEY,
+        title VARCHAR(255) NOT NULL,
+        content TEXT NOT NULL,
+        author_id INTEGER REFERENCES users(id),
+        organization_id INTEGER REFERENCES organizations(id),
+        image_url VARCHAR(500),
+        is_published BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Events table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS events (
+        id SERIAL PRIMARY KEY,
+        title VARCHAR(255) NOT NULL,
+        description TEXT NOT NULL,
+        event_date TIMESTAMP NOT NULL,
+        location VARCHAR(255),
+        organizer_id INTEGER REFERENCES users(id),
+        organization_id INTEGER REFERENCES organizations(id),
+        image_url VARCHAR(500),
+        is_published BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Found/Lost table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS found_lost (
+        id SERIAL PRIMARY KEY,
+        type VARCHAR(10) NOT NULL CHECK (type IN ('found', 'lost')),
+        title VARCHAR(255) NOT NULL,
+        description TEXT NOT NULL,
+        location VARCHAR(255),
+        contact_name VARCHAR(100),
+        contact_phone VARCHAR(20),
+        contact_email VARCHAR(255),
+        image_url VARCHAR(500),
+        is_resolved BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    res.status(200).json({ 
+      message: 'All tables created successfully',
+      tables: ['users', 'organizations', 'news', 'events', 'found_lost'],
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Failed to create tables:', error);
+    res.status(500).json({ 
+      error: 'Failed to create tables',
+      message: error.message
+    });
+  }
+});
+
+// Database tables info
+app.get('/api/database/tables', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public'
+    `);
+    res.json({ 
+      tables: result.rows.map(row => row.table_name),
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Failed to get tables:', error);
+    res.status(500).json({ 
+      error: 'Failed to get tables',
+      message: error.message
+    });
+  }
+});
+
+// ===== AUTHENTICATION ROUTES =====
+
+// User registration
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const { email, password, first_name, last_name, phone } = req.body;
+
+    // Validation
+    if (!email || !password || !first_name || !last_name) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        message: 'Email, password, first name and last name are required'
+      });
+    }
+
+    // Check if user already exists
+    const existingUser = await pool.query(
+      'SELECT id FROM users WHERE email = $1',
+      [email]
+    );
+
+    if (existingUser.rows.length > 0) {
+      return res.status(400).json({
+        error: 'User already exists',
+        message: 'A user with this email already exists'
+      });
+    }
+
+    // Hash password
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+    // Create user
+    const result = await pool.query(
+      'INSERT INTO users (email, password, first_name, last_name, phone) VALUES ($1, $2, $3, $4, $5) RETURNING id, email, first_name, last_name, role, created_at',
+      [email, hashedPassword, first_name, last_name, phone]
+    );
+
+    const user = result.rows[0];
+
+    // Generate JWT token
+    const token = jwt.sign(
+      { userId: user.id, email: user.email, role: user.role },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    res.status(201).json({
+      message: 'User registered successfully',
+      user: {
+        id: user.id,
+        email: user.email,
+        first_name: user.first_name,
+        last_name: user.last_name,
+        role: user.role,
+        created_at: user.created_at
+      },
+      token
+    });
+
+  } catch (error) {
+    console.error('Registration error:', error);
+    res.status(500).json({
+      error: 'Registration failed',
+      message: error.message
+    });
+  }
+});
+
+// User login
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    // Validation
+    if (!email || !password) {
+      return res.status(400).json({
+        error: 'Missing credentials',
+        message: 'Email and password are required'
+      });
+    }
+
+    // Find user
+    const result = await pool.query(
+      'SELECT id, email, password, first_name, last_name, role, is_active FROM users WHERE email = $1',
+      [email]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({
+        error: 'Invalid credentials',
+        message: 'Email not found'
+      });
+    }
+
+    const user = result.rows[0];
+
+    // Check if user is active
+    if (!user.is_active) {
+      return res.status(401).json({
+        error: 'Account deactivated',
+        message: 'Your account has been deactivated'
+      });
+    }
+
+    // Verify password
+    const isValidPassword = await bcrypt.compare(password, user.password);
+
+    if (!isValidPassword) {
+      return res.status(401).json({
+        error: 'Invalid credentials',
+        message: 'Incorrect password'
+      });
+    }
+
+    // Generate JWT token
+    const token = jwt.sign(
+      { userId: user.id, email: user.email, role: user.role },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    res.json({
+      message: 'Login successful',
+      user: {
+        id: user.id,
+        email: user.email,
+        first_name: user.first_name,
+        last_name: user.last_name,
+        role: user.role
+      },
+      token
+    });
+
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({
+      error: 'Login failed',
+      message: error.message
+    });
+  }
+});
+
+// Middleware to verify JWT token
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({
+      error: 'Access denied',
+      message: 'No token provided'
+    });
+  }
+
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) {
+      return res.status(403).json({
+        error: 'Invalid token',
+        message: 'Token is invalid or expired'
+      });
+    }
+    req.user = user;
+    next();
+  });
+};
+
+// Protected route example
+app.get('/api/auth/profile', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT id, email, first_name, last_name, phone, role, created_at FROM users WHERE id = $1',
+      [req.user.userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: 'User not found'
+      });
+    }
+
+    res.json({
+      user: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error('Profile error:', error);
+    res.status(500).json({
+      error: 'Failed to get profile',
+      message: error.message
+    });
+  }
 });
 
 // ===== ADMIN STATS ROUTES =====
@@ -163,14 +449,16 @@ app.get('/api/admin/pending', authenticateToken, async (req, res) => {
   }
 });
 
-// Error handler
-// Error handling middleware
-app.use(errorHandler);
+// 404 handler
+app.use('*', (req, res) => {
+  res.status(404).json({ error: 'Route not found' });
+});
 
-app.listen(PORT, () => {
-  console.log(`🚀 Holwert Backend server running on port ${PORT}`);
-  console.log(`📱 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🌐 API Base URL: ${process.env.API_BASE_URL || `http://localhost:${PORT}/api`}`);
+// Start server
+app.listen(PORT, async () => {
+  console.log(`Server running on port ${PORT}`);
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  await testDatabase();
 });
 
 module.exports = app;
