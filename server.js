@@ -181,6 +181,7 @@ app.get('/api/database/create-tables', async (req, res) => {
         contact_phone VARCHAR(20),
         website VARCHAR(255),
         logo_url TEXT,
+        brand_color VARCHAR(7) DEFAULT '#667eea',
         category VARCHAR(100),
         facebook_url VARCHAR(255),
         instagram_url VARCHAR(255),
@@ -1268,6 +1269,9 @@ app.get('/api/admin/organizations', authenticateToken, async (req, res) => {
       await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS linkedin_url VARCHAR(255)`);
       await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS youtube_url VARCHAR(255)`);
       await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS tiktok_url VARCHAR(255)`);
+      await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS brand_color VARCHAR(7) DEFAULT '#667eea'`);
+      // Extend logo_url column to support base64 images
+      await pool.query(`ALTER TABLE organizations ALTER COLUMN logo_url TYPE TEXT`);
     } catch (alterError) {
       console.log('Columns may already exist:', alterError.message);
     }
@@ -1275,7 +1279,8 @@ app.get('/api/admin/organizations', authenticateToken, async (req, res) => {
     let query = `
       SELECT id, name, description, contact_email, contact_phone, website, is_approved, created_at,
              COALESCE(category, '') as category,
-             COALESCE(logo_url, '') as logo_url
+             COALESCE(logo_url, '') as logo_url,
+             COALESCE(brand_color, '#667eea') as brand_color
       FROM organizations
       WHERE 1=1
     `;
@@ -1358,6 +1363,9 @@ app.put('/api/admin/organizations/:id', authenticateToken, async (req, res) => {
       await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS linkedin_url VARCHAR(255)`);
       await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS youtube_url VARCHAR(255)`);
       await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS tiktok_url VARCHAR(255)`);
+      await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS brand_color VARCHAR(7) DEFAULT '#667eea'`);
+      // Extend logo_url column to support base64 images
+      await pool.query(`ALTER TABLE organizations ALTER COLUMN logo_url TYPE TEXT`);
     } catch (alterError) {
       console.log('Columns may already exist:', alterError.message);
     }
@@ -1371,6 +1379,7 @@ app.put('/api/admin/organizations/:id', authenticateToken, async (req, res) => {
       website, 
       category,
       logo_url,
+      brand_color,
       facebook_url,
       instagram_url,
       twitter_url,
@@ -1418,10 +1427,11 @@ app.put('/api/admin/organizations/:id', authenticateToken, async (req, res) => {
         website = $5,
         category = $6,
         logo_url = $7,
-        is_approved = $8,
+        brand_color = $8,
+        is_approved = $9,
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $9
-      RETURNING id, name, description, contact_email, contact_phone, website, COALESCE(category, '') as category, COALESCE(logo_url, '') as logo_url, is_approved, created_at`,
+      WHERE id = $10
+      RETURNING id, name, description, contact_email, contact_phone, website, COALESCE(category, '') as category, COALESCE(logo_url, '') as logo_url, COALESCE(brand_color, '#667eea') as brand_color, is_approved, created_at`,
       [
         name, 
         description || null, 
@@ -1430,6 +1440,7 @@ app.put('/api/admin/organizations/:id', authenticateToken, async (req, res) => {
         website || null,
         category || null,
         logo_url || null,
+        brand_color || '#667eea',
         is_approved !== false, 
         id
       ]
@@ -1568,4 +1579,5 @@ app.listen(PORT, async () => {
   await testDatabase();
 });
 
-module.exports = app;
+module.exports = app;// Force Vercel redeploy - Tue Sep 30 00:37:38 CEST 2025
+// Force Vercel redeploy - Tue Sep 30 00:40:29 CEST 2025
