@@ -3,9 +3,7 @@ const cors = require('cors');
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
+const FormData = require('form-data');
 require('dotenv').config();
 
 const app = express();
@@ -14,42 +12,6 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 app.use(cors());
 app.use(express.json());
-
-// Multer configuration for file uploads
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    const uploadDir = 'uploads/';
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    cb(null, uploadDir);
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
-  }
-});
-
-const upload = multer({
-  storage: storage,
-  limits: {
-    fileSize: 5 * 1024 * 1024 // 5MB limit
-  },
-  fileFilter: function (req, file, cb) {
-    const allowedTypes = /jpeg|jpg|png|gif|webp/;
-    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-    const mimetype = allowedTypes.test(file.mimetype);
-
-    if (mimetype && extname) {
-      return cb(null, true);
-    } else {
-      cb(new Error('Only image files are allowed'));
-    }
-  }
-});
-
-// Serve uploaded files
-app.use('/uploads', express.static('uploads'));
 
 // Database connection
 const pool = new Pool({
@@ -485,21 +447,54 @@ app.post('/api/organizations/register', async (req, res) => {
 
 // ===== UPLOAD ROUTES =====
 
-// Upload image
-app.post('/api/upload/image', authenticateToken, upload.single('image'), async (req, res) => {
+// Upload image to holwert.appenvloed.com
+app.post('/api/upload/image', authenticateToken, async (req, res) => {
   try {
-    if (!req.file) {
+    const { imageData, filename } = req.body;
+
+    if (!imageData) {
       return res.status(400).json({
-        error: 'No image file provided'
+        error: 'No image data provided',
+        message: 'Please provide imageData (base64 encoded image)'
       });
     }
 
-    const imageUrl = `/uploads/${req.file.filename}`;
+    // Generate organized folder structure: uploads/jaar/maand/
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const uniqueFilename = filename || `image-${Date.now()}-${Math.round(Math.random() * 1E9)}.jpg`;
+    const folderPath = `uploads/${year}/${month}/`;
+    const fullPath = `${folderPath}${uniqueFilename}`;
+    
+    // Convert base64 to buffer
+    const base64Data = imageData.replace(/^data:image\/[a-z]+;base64,/, '');
+    const imageBuffer = Buffer.from(base64Data, 'base64');
+
+    // Upload to holwert.appenvloed.com with organized structure
+    const formData = new FormData();
+    formData.append('file', imageBuffer, {
+      filename: uniqueFilename,
+      contentType: 'image/jpeg'
+    });
+    formData.append('folder', folderPath); // Send folder structure
+
+    const uploadResponse = await fetch('https://holwert.appenvloed.com/upload', {
+      method: 'POST',
+      body: formData
+    });
+
+    if (!uploadResponse.ok) {
+      throw new Error(`Upload failed: ${uploadResponse.statusText}`);
+    }
+
+    const uploadResult = await uploadResponse.json();
+    const imageUrl = `https://holwert.appenvloed.com/${fullPath}`;
     
     res.json({
-      message: 'Image uploaded successfully',
+      message: 'Image uploaded successfully to holwert.appenvloed.com',
       imageUrl: imageUrl,
-      filename: req.file.filename
+      filename: uniqueFilename
     });
 
   } catch (error) {
