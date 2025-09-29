@@ -72,6 +72,28 @@ app.get('/api/database/test', async (req, res) => {
   }
 });
 
+// Add missing columns to existing tables
+app.get('/api/database/update-schema', async (req, res) => {
+  try {
+    // Add profile_image_url column to users table if it doesn't exist
+    await pool.query(`
+      ALTER TABLE users 
+      ADD COLUMN IF NOT EXISTS profile_image_url TEXT
+    `);
+    
+    res.json({
+      message: 'Database schema updated successfully',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Schema update error:', error);
+    res.status(500).json({
+      error: 'Failed to update schema',
+      message: error.message
+    });
+  }
+});
+
 // Create tables endpoint (GET for easy testing)
 app.get('/api/database/create-tables', async (req, res) => {
   try {
@@ -924,8 +946,15 @@ app.get('/api/admin/users', authenticateToken, async (req, res) => {
     const { page = 1, limit = 20, search, role, is_active } = req.query;
     const offset = (page - 1) * limit;
 
+    // Try to add the profile_image_url column if it doesn't exist
+    try {
+      await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_image_url TEXT');
+    } catch (alterError) {
+      console.log('Column might already exist or alter failed:', alterError.message);
+    }
+
     let query = `
-      SELECT u.id, u.email, u.first_name, u.last_name, u.phone, u.profile_image_url, u.role, u.is_active, u.created_at
+      SELECT u.id, u.email, u.first_name, u.last_name, u.phone, COALESCE(u.profile_image_url, '') as profile_image_url, u.role, u.is_active, u.created_at
       FROM users u
       WHERE 1=1
     `;
