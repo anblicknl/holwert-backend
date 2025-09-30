@@ -112,6 +112,21 @@ app.get('/api/database/update-schema', async (req, res) => {
     await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS large_url TEXT`);
     await pool.query(`ALTER TABLE events ALTER COLUMN image_url TYPE TEXT`);
     await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS event_end_date TIMESTAMP NULL`);
+    // Backfill: zet event_end_date = event_date waar nog leeg
+    await pool.query(`UPDATE events SET event_end_date = event_date WHERE event_end_date IS NULL`);
+    // Constraint: einddatum mag niet vóór startdatum liggen
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint WHERE conname = 'events_end_after_start'
+        ) THEN
+          ALTER TABLE events
+          ADD CONSTRAINT events_end_after_start
+          CHECK (event_end_date IS NULL OR event_end_date >= event_date);
+        END IF;
+      END $$;
+    `);
 
     res.json({ message: 'Database schema updated successfully', timestamp: new Date().toISOString() });
   } catch (error) {
@@ -141,7 +156,21 @@ app.get('/api/database/test', async (req, res) => {
 app.get('/api/database/migrate-events-end-date', async (req, res) => {
   try {
     await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS event_end_date TIMESTAMP NULL`);
-    res.json({ message: 'event_end_date ensured on events table', timestamp: new Date().toISOString() });
+    const result = await pool.query(`UPDATE events SET event_end_date = event_date WHERE event_end_date IS NULL`);
+    // ensure constraint
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint WHERE conname = 'events_end_after_start'
+        ) THEN
+          ALTER TABLE events
+          ADD CONSTRAINT events_end_after_start
+          CHECK (event_end_date IS NULL OR event_end_date >= event_date);
+        END IF;
+      END $$;
+    `);
+    res.json({ message: 'event_end_date ensured, backfilled and constrained', updated: result.rowCount, timestamp: new Date().toISOString() });
   } catch (error) {
     console.error('migrate-events-end-date error:', error);
     res.status(500).json({ error: 'Failed to migrate events end date', message: error.message });
