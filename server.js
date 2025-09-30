@@ -2368,7 +2368,7 @@ app.get('/api/admin/pending', authenticateToken, async (req, res) => {
       pool.query('SELECT id, title, organizer_id, event_date, created_at FROM events WHERE is_published = false')
     ]);
 
-    const pendingFoundLost = await pool.query('SELECT id, item_type, title, contact_info, status, rejection_reason, revision_deadline, created_at FROM found_lost WHERE is_published = false');
+    const pendingFoundLost = await pool.query('SELECT id, item_type, title, contact_info, status, rejection_reason, revision_deadline, created_at FROM found_lost WHERE is_published = false AND status = \'pending\'');
 
     res.json({
       users: [],
