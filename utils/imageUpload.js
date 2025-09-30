@@ -2,7 +2,7 @@ const multer = require('multer');
 const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs').promises;
-const { v4: uuidv4 } = require('crypto');
+const { randomUUID } = require('crypto');
 const FormData = require('form-data');
 const fetch = require('node-fetch');
 
@@ -111,7 +111,7 @@ const generateFilename = (originalName, type, size = 'original') => {
   const ext = path.extname(originalName).toLowerCase();
   const baseName = path.basename(originalName, ext);
   const timestamp = Date.now();
-  const randomId = uuidv4().substring(0, 8);
+  const randomId = randomUUID().substring(0, 8);
   
   return `${baseName}_${timestamp}_${randomId}_${size}${ext}`;
 };
