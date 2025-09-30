@@ -129,9 +129,21 @@ app.get('/api/database/update-schema', async (req, res) => {
     await pool.query(`ALTER TABLE found_lost ADD COLUMN IF NOT EXISTS item_type VARCHAR(10)`);
     await pool.query(`ALTER TABLE found_lost ADD COLUMN IF NOT EXISTS contact_info TEXT`);
     
-    // Migrate data from old columns to new columns
-    await pool.query(`UPDATE found_lost SET item_type = type WHERE item_type IS NULL AND type IS NOT NULL`);
-    await pool.query(`UPDATE found_lost SET contact_info = CONCAT_WS(' | ', contact_name, contact_phone, contact_email) WHERE contact_info IS NULL AND (contact_name IS NOT NULL OR contact_phone IS NOT NULL OR contact_email IS NOT NULL)`);
+    // Set default values for new columns if they are NULL
+    await pool.query(`UPDATE found_lost SET item_type = 'found' WHERE item_type IS NULL`);
+    
+    // Migrate data from old columns to new columns (only if old columns exist)
+    try {
+      await pool.query(`UPDATE found_lost SET item_type = type WHERE item_type IS NULL AND type IS NOT NULL`);
+    } catch (err) {
+      console.log('Column "type" does not exist, skipping migration');
+    }
+    
+    try {
+      await pool.query(`UPDATE found_lost SET contact_info = CONCAT_WS(' | ', contact_name, contact_phone, contact_email) WHERE contact_info IS NULL AND (contact_name IS NOT NULL OR contact_phone IS NOT NULL OR contact_email IS NOT NULL)`);
+    } catch (err) {
+      console.log('Old contact columns do not exist, skipping migration');
+    }
     
     // Drop old columns if they exist
     await pool.query(`ALTER TABLE found_lost DROP COLUMN IF EXISTS type`);
@@ -193,8 +205,8 @@ app.get('/api/database/test', async (req, res) => {
 app.get('/api/database/quick-test', async (req, res) => {
   try {
     const result = await pool.query(`
-      INSERT INTO found_lost (item_type, title, description, location, contact_info, is_published, created_at)
-      VALUES ('found', 'Test Gevonden Item', 'Dit is een test item', 'Test Locatie', 'test@example.com', false, NOW())
+      INSERT INTO found_lost (item_type, title, description, location, contact_info, is_published, status, created_at)
+      VALUES ('found', 'Test Gevonden Item', 'Dit is een test item', 'Test Locatie', 'test@example.com', false, 'pending', NOW())
       RETURNING id
     `);
     res.json({ 
@@ -207,6 +219,35 @@ app.get('/api/database/quick-test', async (req, res) => {
       error: 'Failed to create test item',
       message: error.message
     });
+  }
+});
+
+// Test database connection and schema
+app.get('/api/database/test', async (req, res) => {
+  try {
+    // Test basic connection
+    const connectionTest = await pool.query('SELECT NOW() as current_time');
+    
+    // Test found_lost table structure
+    const tableTest = await pool.query(`
+      SELECT column_name, data_type, is_nullable 
+      FROM information_schema.columns 
+      WHERE table_name = 'found_lost' 
+      ORDER BY ordinal_position
+    `);
+    
+    // Test if we can query found_lost
+    const dataTest = await pool.query('SELECT COUNT(*) as count FROM found_lost');
+    
+    res.json({
+      message: 'Database test successful',
+      connection: connectionTest.rows[0],
+      table_structure: tableTest.rows,
+      item_count: dataTest.rows[0].count
+    });
+  } catch (error) {
+    console.error('Database test error:', error);
+    res.status(500).json({ error: 'Database test failed', message: error.message });
   }
 });
 
