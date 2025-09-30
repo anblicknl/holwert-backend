@@ -4,6 +4,7 @@ const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const FormData = require('form-data');
+const path = require('path');
 require('dotenv').config();
 
 const app = express();
@@ -12,6 +13,8 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 app.use(cors());
 app.use(express.json());
+// Serve uploaded images (local storage)
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads'), { maxAge: '7d' }));
 
 // Database connection
 const pool = new Pool({
@@ -205,6 +208,9 @@ app.get('/api/database/create-tables', async (req, res) => {
         author_id INTEGER REFERENCES users(id),
         organization_id INTEGER REFERENCES organizations(id),
         image_url TEXT,
+        thumbnail_url TEXT,
+        medium_url TEXT,
+        large_url TEXT,
         category VARCHAR(100) DEFAULT 'dorpsnieuws',
         custom_category VARCHAR(100),
         is_published BOOLEAN DEFAULT false,
@@ -223,7 +229,10 @@ app.get('/api/database/create-tables', async (req, res) => {
         location VARCHAR(255),
         organizer_id INTEGER REFERENCES users(id),
         organization_id INTEGER REFERENCES organizations(id),
-        image_url VARCHAR(500),
+        image_url TEXT,
+        thumbnail_url TEXT,
+        medium_url TEXT,
+        large_url TEXT,
         is_published BOOLEAN DEFAULT false,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -1358,7 +1367,7 @@ app.get('/api/admin/news', authenticateToken, async (req, res) => {
 app.put('/api/admin/news/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, content, excerpt, category, custom_category, image_url, is_published } = req.body;
+    const { title, content, excerpt, category, custom_category, image_url, thumbnail_url, medium_url, large_url, is_published } = req.body;
 
     // Validation
     if (!title || !content) {
@@ -1382,12 +1391,15 @@ app.put('/api/admin/news/:id', authenticateToken, async (req, res) => {
         excerpt = $3, 
         category = $4, 
         custom_category = $5, 
-        image_url = $6, 
-        is_published = $7, 
+        image_url = $6,
+        thumbnail_url = COALESCE($7, thumbnail_url),
+        medium_url = COALESCE($8, medium_url),
+        large_url = COALESCE($9, large_url),
+        is_published = $10, 
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $8
+      WHERE id = $11
       RETURNING id, title, content, excerpt, category, custom_category, image_url, is_published, created_at, updated_at`,
-      [title, content, excerpt || null, finalCategory, finalCustomCategory, image_url || null, is_published !== false, id]
+      [title, content, excerpt || null, finalCategory, finalCustomCategory, image_url || null, thumbnail_url || null, medium_url || null, large_url || null, is_published !== false, id]
     );
 
     if (result.rows.length === 0) {
@@ -1437,6 +1449,175 @@ app.delete('/api/admin/news/:id', authenticateToken, async (req, res) => {
       error: 'Failed to delete news article',
       message: error.message
     });
+  }
+});
+
+// ===== ADMIN EVENTS ROUTES =====
+
+// Get all events for admin management
+app.get('/api/admin/events', authenticateToken, async (req, res) => {
+  try {
+    const { page = 1, limit = 20, search, status, organization_id } = req.query;
+    const offset = (page - 1) * limit;
+
+    let query = `
+      SELECT e.id, e.title, e.description, e.event_date, e.location, e.image_url,
+             e.is_published, e.created_at, e.updated_at,
+             u.first_name, u.last_name, u.email,
+             o.name as organization_name
+      FROM events e
+      LEFT JOIN users u ON e.organizer_id = u.id
+      LEFT JOIN organizations o ON e.organization_id = o.id
+      WHERE 1=1`;
+    const params = [];
+    let paramCount = 0;
+
+    if (search) {
+      paramCount++;
+      query += ` AND (e.title ILIKE $${paramCount} OR e.description ILIKE $${paramCount} OR e.location ILIKE $${paramCount})`;
+      params.push(`%${search}%`);
+    }
+
+    if (status === 'published') {
+      query += ` AND e.is_published = true`;
+    } else if (status === 'pending') {
+      query += ` AND e.is_published = false`;
+    }
+
+    if (organization_id) {
+      paramCount++;
+      query += ` AND e.organization_id = $${paramCount}`;
+      params.push(parseInt(organization_id));
+    }
+
+    query += ` ORDER BY e.event_date DESC NULLS LAST, e.created_at DESC LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}`;
+    params.push(parseInt(limit), parseInt(offset));
+
+    const result = await pool.query(query, params);
+
+    // Total count
+    let countQuery = `
+      SELECT COUNT(*) as total
+      FROM events e
+      LEFT JOIN users u ON e.organizer_id = u.id
+      LEFT JOIN organizations o ON e.organization_id = o.id
+      WHERE 1=1`;
+    const countParams = [];
+    let countParamCount = 0;
+
+    if (search) {
+      countParamCount++;
+      countQuery += ` AND (e.title ILIKE $${countParamCount} OR e.description ILIKE $${countParamCount} OR e.location ILIKE $${countParamCount})`;
+      countParams.push(`%${search}%`);
+    }
+    if (status === 'published') {
+      countQuery += ` AND e.is_published = true`;
+    } else if (status === 'pending') {
+      countQuery += ` AND e.is_published = false`;
+    }
+    if (organization_id) {
+      countParamCount++;
+      countQuery += ` AND e.organization_id = $${countParamCount}`;
+      countParams.push(parseInt(organization_id));
+    }
+
+    const countResult = await pool.query(countQuery, countParams);
+
+    res.json({
+      events: result.rows,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: parseInt(countResult.rows[0].total),
+        pages: Math.ceil(countResult.rows[0].total / limit)
+      }
+    });
+
+  } catch (error) {
+    console.error('Get admin events error:', error);
+    res.status(500).json({
+      error: 'Failed to get events',
+      message: error.message
+    });
+  }
+});
+
+// Create event (admin)
+app.post('/api/admin/events', authenticateToken, async (req, res) => {
+  try {
+    const { title, description, event_date, location, organization_id, image_url, is_published } = req.body;
+    const organizerId = req.user.userId;
+
+    if (!title || !description || !event_date || !location) {
+      return res.status(400).json({ error: 'Title, description, event_date and location are required' });
+    }
+
+    const insert = await pool.query(
+      'INSERT INTO events (title, description, event_date, location, organizer_id, organization_id, image_url, is_published) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id',
+      [title, description, event_date, location, organizerId, organization_id || null, image_url || null, is_published === true]
+    );
+
+    res.status(201).json({
+      message: 'Event created successfully',
+      eventId: insert.rows[0].id
+    });
+
+  } catch (error) {
+    console.error('Create admin event error:', error);
+    res.status(500).json({ error: 'Failed to create event', message: error.message });
+  }
+});
+
+// Update event (admin)
+app.put('/api/admin/events/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, description, event_date, location, organization_id, image_url, is_published } = req.body;
+
+    if (!title || !description || !event_date || !location) {
+      return res.status(400).json({ error: 'Title, description, event_date and location are required' });
+    }
+
+    const existing = await pool.query('SELECT id FROM events WHERE id = $1', [id]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Event not found' });
+    }
+
+    const update = await pool.query(
+      `UPDATE events SET
+        title = $1,
+        description = $2,
+        event_date = $3,
+        location = $4,
+        organization_id = $5,
+        image_url = $6,
+        is_published = $7,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $8
+      RETURNING id, title, description, event_date, location, organization_id, image_url, is_published, created_at, updated_at`,
+      [title, description, event_date, location, organization_id || null, image_url || null, is_published === true, id]
+    );
+
+    res.json({ message: 'Event updated successfully', event: update.rows[0] });
+
+  } catch (error) {
+    console.error('Update admin event error:', error);
+    res.status(500).json({ error: 'Failed to update event', message: error.message });
+  }
+});
+
+// Delete event (admin)
+app.delete('/api/admin/events/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const del = await pool.query('DELETE FROM events WHERE id = $1 RETURNING id, title', [id]);
+    if (del.rows.length === 0) {
+      return res.status(404).json({ error: 'Event not found' });
+    }
+    res.json({ message: 'Event deleted successfully', event: del.rows[0] });
+  } catch (error) {
+    console.error('Delete admin event error:', error);
+    res.status(500).json({ error: 'Failed to delete event', message: error.message });
   }
 });
 
@@ -1734,6 +1915,47 @@ app.get('/api/admin/stats', authenticateToken, async (req, res) => {
     });
   }
 });
+
+// ===== IMAGE UPLOAD (UNIFORM) =====
+try {
+  const { upload, processImageSizes } = require('./utils/imageUpload');
+  const authenticateToken = (req, res, next) => {
+    try {
+      const authHeader = req.headers['authorization'];
+      const token = authHeader && authHeader.split(' ')[1];
+      if (!token) return res.status(401).json({ error: 'Missing token' });
+      const payload = jwt.verify(token, JWT_SECRET);
+      req.user = { userId: payload.userId, email: payload.email, role: payload.role };
+      next();
+    } catch (err) {
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+  };
+
+  app.post('/api/upload', authenticateToken, upload.single('image'), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: 'No image provided' });
+      }
+      const type = (req.body.type || 'event').toLowerCase();
+      const results = await processImageSizes(req.file.buffer, req.file.originalname || 'upload.jpg', type);
+      // Prefer large/medium urls if available
+      const bestUrl = (results.large && (results.large.url || results.large.path))
+        || (results.medium && (results.medium.url || results.medium.path))
+        || (results.original && (results.original.url || results.original.path));
+      res.json({
+        message: 'Image uploaded successfully',
+        url: bestUrl,
+        sizes: results
+      });
+    } catch (error) {
+      console.error('Image upload error:', error);
+      res.status(500).json({ error: 'Failed to upload image', message: error.message });
+    }
+  });
+} catch (e) {
+  console.warn('Image upload module not available or failed to init:', e.message);
+}
 
 // Get pending content
 app.get('/api/admin/pending', authenticateToken, async (req, res) => {
