@@ -118,6 +118,28 @@ app.get('/api/database/update-schema', async (req, res) => {
     // Found/Lost
     await pool.query(`ALTER TABLE found_lost ADD COLUMN IF NOT EXISTS is_published BOOLEAN DEFAULT false`);
     await pool.query(`ALTER TABLE found_lost ALTER COLUMN image_url TYPE TEXT`);
+    
+    // Migrate found_lost column names
+    await pool.query(`ALTER TABLE found_lost ADD COLUMN IF NOT EXISTS item_type VARCHAR(10)`);
+    await pool.query(`ALTER TABLE found_lost ADD COLUMN IF NOT EXISTS contact_info TEXT`);
+    
+    // Migrate data from old columns to new columns
+    await pool.query(`UPDATE found_lost SET item_type = type WHERE item_type IS NULL AND type IS NOT NULL`);
+    await pool.query(`UPDATE found_lost SET contact_info = CONCAT_WS(' | ', contact_name, contact_phone, contact_email) WHERE contact_info IS NULL AND (contact_name IS NOT NULL OR contact_phone IS NOT NULL OR contact_email IS NOT NULL)`);
+    
+    // Add constraints for new columns
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint WHERE conname = 'found_lost_item_type_check'
+        ) THEN
+          ALTER TABLE found_lost
+          ADD CONSTRAINT found_lost_item_type_check
+          CHECK (item_type IN ('found', 'lost'));
+        END IF;
+      END $$;
+    `);
     await pool.query(`
       DO $$
       BEGIN
@@ -150,6 +172,82 @@ app.get('/api/database/test', async (req, res) => {
   } catch (error) {
     res.status(500).json({ 
       error: 'Database connection failed',
+      message: error.message
+    });
+  }
+});
+
+// Quick test data creation
+app.get('/api/database/quick-test', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      INSERT INTO found_lost (item_type, title, description, location, contact_info, is_published, created_at)
+      VALUES ('found', 'Test Gevonden Item', 'Dit is een test item', 'Test Locatie', 'test@example.com', false, NOW())
+      RETURNING id
+    `);
+    res.json({ 
+      message: 'Test item created',
+      id: result.rows[0].id,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to create test item',
+      message: error.message
+    });
+  }
+});
+
+// Test data endpoint (temporary)
+app.get('/api/database/create-test-data', async (req, res) => {
+  try {
+    // Create test found/lost items
+    const testItems = [
+      {
+        item_type: 'found',
+        title: 'Gevonden: Zwarte portemonnee',
+        description: 'Ik heb een zwarte portemonnee gevonden bij de bushalte. Bevat een bankpas en wat contant geld.',
+        location: 'Busstation Holwert',
+        contact_info: 'Jan de Vries - 06-12345678 - jan@example.com',
+        is_published: false
+      },
+      {
+        item_type: 'lost',
+        title: 'Verloren: Rode fiets',
+        description: 'Mijn rode fiets is gestolen uit de fietsenstalling. Heeft een zwarte bagagedrager en een bel.',
+        location: 'Centrum Holwert',
+        contact_info: 'Maria Jansen - 06-87654321 - maria@example.com',
+        is_published: false
+      },
+      {
+        item_type: 'found',
+        title: 'Gevonden: Sleutelbos',
+        description: 'Een sleutelbos met 3 sleutels gevonden op het schoolplein.',
+        location: 'Basisschool Holwert',
+        contact_info: 'Piet Bakker - piet@example.com',
+        is_published: true
+      }
+    ];
+
+    const results = [];
+    for (const item of testItems) {
+      const result = await pool.query(
+        `INSERT INTO found_lost (item_type, title, description, location, contact_info, is_published, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW()) RETURNING id`,
+        [item.item_type, item.title, item.description, item.location, item.contact_info, item.is_published]
+      );
+      results.push({ id: result.rows[0].id, title: item.title });
+    }
+
+    res.json({ 
+      message: 'Test data created successfully',
+      items: results,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Create test data error:', error);
+    res.status(500).json({ 
+      error: 'Failed to create test data',
       message: error.message
     });
   }
@@ -306,15 +404,13 @@ app.get('/api/database/create-tables', async (req, res) => {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS found_lost (
         id SERIAL PRIMARY KEY,
-        type VARCHAR(10) NOT NULL CHECK (type IN ('found', 'lost')),
+        item_type VARCHAR(10) NOT NULL CHECK (item_type IN ('found', 'lost')),
         title VARCHAR(255) NOT NULL,
         description TEXT NOT NULL,
         location VARCHAR(255),
-        contact_name VARCHAR(100),
-        contact_phone VARCHAR(20),
-        contact_email VARCHAR(255),
-        image_url VARCHAR(500),
-        is_resolved BOOLEAN DEFAULT false,
+        contact_info TEXT,
+        image_url TEXT,
+        is_published BOOLEAN DEFAULT false,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
@@ -721,16 +817,16 @@ app.post('/api/news', authenticateToken, async (req, res) => {
 // Create Found/Lost (user submits -> always pending)
 app.post('/api/found-lost', authenticateToken, async (req, res) => {
   try {
-    const { type, title, description, location, contact_name, contact_phone, contact_email, image_url } = req.body;
+    const { item_type, title, description, location, contact_info, image_url } = req.body;
 
-    if (!type || !['found','lost'].includes(type) || !title || !description) {
-      return res.status(400).json({ error: 'Invalid payload', message: 'type(found|lost), title, description verplicht' });
+    if (!item_type || !['found','lost'].includes(item_type) || !title || !description) {
+      return res.status(400).json({ error: 'Invalid payload', message: 'item_type(found|lost), title, description verplicht' });
     }
 
     const insert = await pool.query(
-      `INSERT INTO found_lost (type, title, description, location, contact_name, contact_phone, contact_email, image_url, is_published)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,false) RETURNING id`,
-      [type, title, description, location || null, contact_name || null, contact_phone || null, contact_email || null, image_url || null]
+      `INSERT INTO found_lost (item_type, title, description, location, contact_info, image_url, is_published)
+       VALUES ($1,$2,$3,$4,$5,$6,false) RETURNING id`,
+      [item_type, title, description, location || null, contact_info || null, image_url || null]
     );
 
     res.status(201).json({
@@ -750,12 +846,12 @@ app.get('/api/found-lost', async (req, res) => {
     const { page = 1, limit = 20, type, q } = req.query;
     const offset = (page - 1) * limit;
 
-    let query = `SELECT id, type, title, description, location, contact_name, contact_phone, contact_email, image_url, created_at
+    let query = `SELECT id, item_type, title, description, location, contact_info, image_url, created_at
                  FROM found_lost WHERE is_published = true`;
     const params = [];
     if (type && ['found','lost'].includes(type)) {
       params.push(type);
-      query += ` AND type = $${params.length}`;
+      query += ` AND item_type = $${params.length}`;
     }
     if (q) {
       params.push(`%${q}%`);
@@ -798,7 +894,7 @@ app.get('/api/found-lost', async (req, res) => {
 app.get('/api/found-lost/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const r = await pool.query(`SELECT id, type, title, description, location, contact_name, contact_phone, contact_email, image_url, created_at
+    const r = await pool.query(`SELECT id, item_type, title, description, location, contact_info, image_url, created_at
                                 FROM found_lost WHERE id = $1 AND is_published = true`, [id]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'Not found' });
     res.json(r.rows[0]);
@@ -937,7 +1033,7 @@ app.get('/api/admin/found-lost', authenticateToken, async (req, res) => {
   try {
     const { status, page = 1, limit = 20, q } = req.query;
     const offset = (page - 1) * limit;
-    let query = `SELECT id, type, title, is_published, created_at FROM found_lost WHERE 1=1`;
+    let query = `SELECT id, item_type, title, description, contact_info, is_published, created_at FROM found_lost WHERE 1=1`;
     const params = [];
     if (status === 'published') query += ' AND is_published = true';
     if (status === 'pending') query += ' AND is_published = false';
@@ -2171,7 +2267,7 @@ app.get('/api/admin/pending', authenticateToken, async (req, res) => {
       pool.query('SELECT id, title, organizer_id, event_date, created_at FROM events WHERE is_published = false')
     ]);
 
-    const pendingFoundLost = await pool.query('SELECT id, type, title, created_at FROM found_lost WHERE is_published = false');
+    const pendingFoundLost = await pool.query('SELECT id, item_type, title, contact_info, created_at FROM found_lost WHERE is_published = false');
 
     res.json({
       users: [],
