@@ -115,6 +115,9 @@ app.get('/api/database/update-schema', async (req, res) => {
     // Backfill: zet event_end_date = event_date waar nog leeg
     await pool.query(`UPDATE events SET event_end_date = event_date WHERE event_end_date IS NULL`);
     // Constraint: einddatum mag niet vóór startdatum liggen
+    // Found/Lost
+    await pool.query(`ALTER TABLE found_lost ADD COLUMN IF NOT EXISTS is_published BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE found_lost ALTER COLUMN image_url TYPE TEXT`);
     await pool.query(`
       DO $$
       BEGIN
@@ -715,6 +718,96 @@ app.post('/api/news', authenticateToken, async (req, res) => {
   }
 });
 
+// Create Found/Lost (user submits -> always pending)
+app.post('/api/found-lost', authenticateToken, async (req, res) => {
+  try {
+    const { type, title, description, location, contact_name, contact_phone, contact_email, image_url } = req.body;
+
+    if (!type || !['found','lost'].includes(type) || !title || !description) {
+      return res.status(400).json({ error: 'Invalid payload', message: 'type(found|lost), title, description verplicht' });
+    }
+
+    const insert = await pool.query(
+      `INSERT INTO found_lost (type, title, description, location, contact_name, contact_phone, contact_email, image_url, is_published)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,false) RETURNING id`,
+      [type, title, description, location || null, contact_name || null, contact_phone || null, contact_email || null, image_url || null]
+    );
+
+    res.status(201).json({
+      message: 'Bericht aangemaakt en wacht op goedkeuring',
+      id: insert.rows[0].id,
+      requiresModeration: true
+    });
+  } catch (error) {
+    console.error('Create found_lost error:', error);
+    res.status(500).json({ error: 'Failed to create found/lost', message: error.message });
+  }
+});
+
+// Public list Found/Lost (only approved)
+app.get('/api/found-lost', async (req, res) => {
+  try {
+    const { page = 1, limit = 20, type, q } = req.query;
+    const offset = (page - 1) * limit;
+
+    let query = `SELECT id, type, title, description, location, contact_name, contact_phone, contact_email, image_url, created_at
+                 FROM found_lost WHERE is_published = true`;
+    const params = [];
+    if (type && ['found','lost'].includes(type)) {
+      params.push(type);
+      query += ` AND type = $${params.length}`;
+    }
+    if (q) {
+      params.push(`%${q}%`);
+      query += ` AND (title ILIKE $${params.length} OR description ILIKE $${params.length})`;
+    }
+    params.push(parseInt(limit), parseInt(offset));
+    query += ` ORDER BY created_at DESC LIMIT $${params.length-1} OFFSET $${params.length}`;
+
+    const result = await pool.query(query, params);
+
+    // Count
+    let countQuery = `SELECT COUNT(*) AS total FROM found_lost WHERE is_published = true`;
+    const countParams = [];
+    if (type && ['found','lost'].includes(type)) {
+      countParams.push(type);
+      countQuery += ` AND type = $${countParams.length}`;
+    }
+    if (q) {
+      countParams.push(`%${q}%`);
+      countQuery += ` AND (title ILIKE $${countParams.length} OR description ILIKE $${countParams.length})`;
+    }
+    const totalRes = await pool.query(countQuery, countParams);
+
+    res.json({
+      items: result.rows,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: parseInt(totalRes.rows[0].total),
+        pages: Math.ceil(parseInt(totalRes.rows[0].total) / parseInt(limit))
+      }
+    });
+  } catch (error) {
+    console.error('List found_lost error:', error);
+    res.status(500).json({ error: 'Failed to get found/lost', message: error.message });
+  }
+});
+
+// Single Found/Lost (only approved)
+app.get('/api/found-lost/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const r = await pool.query(`SELECT id, type, title, description, location, contact_name, contact_phone, contact_email, image_url, created_at
+                                FROM found_lost WHERE id = $1 AND is_published = true`, [id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    res.json(r.rows[0]);
+  } catch (error) {
+    console.error('Get found_lost error:', error);
+    res.status(500).json({ error: 'Failed to get found/lost', message: error.message });
+  }
+});
+
 // Create event with workflow logic
 app.post('/api/events', authenticateToken, async (req, res) => {
   try {
@@ -810,6 +903,53 @@ app.post('/api/admin/approve/:type/:id', authenticateToken, async (req, res) => 
       error: 'Failed to approve content',
       message: error.message
     });
+  }
+});
+
+// Approve Found/Lost
+app.post('/api/admin/found-lost/:id/approve', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const r = await pool.query('UPDATE found_lost SET is_published = true WHERE id = $1 RETURNING id', [id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    res.json({ message: 'Found/Lost approved', id: r.rows[0].id });
+  } catch (error) {
+    console.error('Approve found_lost error:', error);
+    res.status(500).json({ error: 'Failed to approve found/lost', message: error.message });
+  }
+});
+
+// Reject/Delete Found/Lost
+app.post('/api/admin/found-lost/:id/reject', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const r = await pool.query('DELETE FROM found_lost WHERE id = $1 RETURNING id', [id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    res.json({ message: 'Found/Lost rejected and removed', id: r.rows[0].id });
+  } catch (error) {
+    console.error('Reject found_lost error:', error);
+    res.status(500).json({ error: 'Failed to reject found/lost', message: error.message });
+  }
+});
+
+// Admin list Found/Lost
+app.get('/api/admin/found-lost', authenticateToken, async (req, res) => {
+  try {
+    const { status, page = 1, limit = 20, q } = req.query;
+    const offset = (page - 1) * limit;
+    let query = `SELECT id, type, title, is_published, created_at FROM found_lost WHERE 1=1`;
+    const params = [];
+    if (status === 'published') query += ' AND is_published = true';
+    if (status === 'pending') query += ' AND is_published = false';
+    if (q) { params.push(`%${q}%`); query += ` AND (title ILIKE $${params.length})`; }
+    params.push(parseInt(limit), parseInt(offset));
+    query += ` ORDER BY created_at DESC LIMIT $${params.length-1} OFFSET $${params.length}`;
+    const list = await pool.query(query, params);
+    const cnt = await pool.query('SELECT COUNT(*) AS total FROM found_lost');
+    res.json({ items: list.rows, pagination: { page: parseInt(page), limit: parseInt(limit), total: parseInt(cnt.rows[0].total) }});
+  } catch (error) {
+    console.error('Admin list found_lost error:', error);
+    res.status(500).json({ error: 'Failed to get found/lost admin list', message: error.message });
   }
 });
 
@@ -2031,11 +2171,14 @@ app.get('/api/admin/pending', authenticateToken, async (req, res) => {
       pool.query('SELECT id, title, organizer_id, event_date, created_at FROM events WHERE is_published = false')
     ]);
 
+    const pendingFoundLost = await pool.query('SELECT id, type, title, created_at FROM found_lost WHERE is_published = false');
+
     res.json({
-      users: [], // No pending users anymore
+      users: [],
       organizations: pendingOrgs.rows,
       news: pendingNews.rows,
       events: pendingEvents.rows,
+      found_lost: pendingFoundLost.rows,
       timestamp: new Date().toISOString()
     });
 
