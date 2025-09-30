@@ -140,6 +140,20 @@ app.get('/api/database/update-schema', async (req, res) => {
       ALTER TABLE users 
       ADD COLUMN IF NOT EXISTS profile_image_url TEXT
     `);
+
+    // Extend news table with variant URLs
+    await pool.query(`ALTER TABLE news ADD COLUMN IF NOT EXISTS thumbnail_url TEXT`);
+    await pool.query(`ALTER TABLE news ADD COLUMN IF NOT EXISTS medium_url TEXT`);
+    await pool.query(`ALTER TABLE news ADD COLUMN IF NOT EXISTS large_url TEXT`);
+    await pool.query(`ALTER TABLE news ALTER COLUMN image_url TYPE TEXT`);
+
+    // Extend events table with variant URLs
+    await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS thumbnail_url TEXT`);
+    await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS medium_url TEXT`);
+    await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS large_url TEXT`);
+    await pool.query(`ALTER TABLE events ALTER COLUMN image_url TYPE TEXT`);
+    // Add optional end datetime for events
+    await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS event_end_date TIMESTAMP NULL`);
     
     res.json({
       message: 'Database schema updated successfully',
@@ -226,6 +240,7 @@ app.get('/api/database/create-tables', async (req, res) => {
         title VARCHAR(255) NOT NULL,
         description TEXT NOT NULL,
         event_date TIMESTAMP NOT NULL,
+        event_end_date TIMESTAMP NULL,
         location VARCHAR(255),
         organizer_id INTEGER REFERENCES users(id),
         organization_id INTEGER REFERENCES organizations(id),
@@ -658,7 +673,7 @@ app.post('/api/news', authenticateToken, async (req, res) => {
 // Create event with workflow logic
 app.post('/api/events', authenticateToken, async (req, res) => {
   try {
-    const { title, description, event_date, location, organization_id, image_url } = req.body;
+    const { title, description, event_date, event_end_date, location, organization_id, image_url } = req.body;
     const organizerId = req.user.userId;
 
     // Validation
@@ -688,8 +703,8 @@ app.post('/api/events', authenticateToken, async (req, res) => {
 
     // Insert into events table
     const result = await pool.query(
-      'INSERT INTO events (title, description, event_date, location, organizer_id, organization_id, image_url, is_published) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id',
-      [title, description, event_date, location, organizerId, organization_id || null, image_url || null, isPublished]
+      'INSERT INTO events (title, description, event_date, event_end_date, location, organizer_id, organization_id, image_url, is_published) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id',
+      [title, description, event_date, event_end_date || null, location, organizerId, organization_id || null, image_url || null, isPublished]
     );
 
     const message = isPublished 
@@ -921,12 +936,12 @@ app.get('/api/events', async (req, res) => {
     const offset = (page - 1) * limit;
 
     let query = `
-      SELECT e.id, e.title, e.description, e.event_date, e.location, e.image_url, e.created_at,
+      SELECT e.id, e.title, e.description, e.event_date, e.event_end_date, e.location, e.image_url, e.created_at,
              u.first_name, u.last_name, o.name as organization_name
       FROM events e
       JOIN users u ON e.organizer_id = u.id
       LEFT JOIN organizations o ON e.organization_id = o.id
-      WHERE e.is_published = true AND e.event_date > NOW()
+      WHERE e.is_published = true AND COALESCE(e.event_end_date, e.event_date) > NOW()
     `;
     const params = [];
 
@@ -935,13 +950,13 @@ app.get('/api/events', async (req, res) => {
       params.push(category);
     }
 
-    query += ' ORDER BY e.event_date ASC LIMIT $' + (params.length + 1) + ' OFFSET $' + (params.length + 2);
+    query += ' ORDER BY COALESCE(e.event_date, NOW()) ASC LIMIT $' + (params.length + 1) + ' OFFSET $' + (params.length + 2);
     params.push(parseInt(limit), parseInt(offset));
 
     const result = await pool.query(query, params);
 
     // Get total count
-    let countQuery = 'SELECT COUNT(*) as total FROM events WHERE is_published = true AND event_date > NOW()';
+    let countQuery = 'SELECT COUNT(*) as total FROM events WHERE is_published = true AND COALESCE(event_end_date, event_date) > NOW()';
     const countParams = [];
     
     if (category) {
@@ -976,7 +991,7 @@ app.get('/api/events/:id', async (req, res) => {
     const { id } = req.params;
 
     const result = await pool.query(`
-      SELECT e.id, e.title, e.description, e.event_date, e.location, e.image_url, e.created_at,
+      SELECT e.id, e.title, e.description, e.event_date, e.event_end_date, e.location, e.image_url, e.created_at,
              u.first_name, u.last_name, o.name as organization_name
       FROM events e
       JOIN users u ON e.organizer_id = u.id
@@ -1461,7 +1476,7 @@ app.get('/api/admin/events', authenticateToken, async (req, res) => {
     const offset = (page - 1) * limit;
 
     let query = `
-      SELECT e.id, e.title, e.description, e.event_date, e.location, e.image_url,
+      SELECT e.id, e.title, e.description, e.event_date, e.event_end_date, e.location, e.image_url,
              e.is_published, e.created_at, e.updated_at,
              u.first_name, u.last_name, u.email,
              o.name as organization_name
@@ -1490,7 +1505,7 @@ app.get('/api/admin/events', authenticateToken, async (req, res) => {
       params.push(parseInt(organization_id));
     }
 
-    query += ` ORDER BY e.event_date DESC NULLS LAST, e.created_at DESC LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}`;
+    query += ` ORDER BY COALESCE(e.event_date, e.created_at) DESC NULLS LAST, e.created_at DESC LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}`;
     params.push(parseInt(limit), parseInt(offset));
 
     const result = await pool.query(query, params);
@@ -1545,7 +1560,7 @@ app.get('/api/admin/events', authenticateToken, async (req, res) => {
 // Create event (admin)
 app.post('/api/admin/events', authenticateToken, async (req, res) => {
   try {
-    const { title, description, event_date, location, organization_id, image_url, is_published } = req.body;
+    const { title, description, event_date, event_end_date, location, organization_id, image_url, is_published } = req.body;
     const organizerId = req.user.userId;
 
     if (!title || !description || !event_date || !location) {
@@ -1553,8 +1568,8 @@ app.post('/api/admin/events', authenticateToken, async (req, res) => {
     }
 
     const insert = await pool.query(
-      'INSERT INTO events (title, description, event_date, location, organizer_id, organization_id, image_url, is_published) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id',
-      [title, description, event_date, location, organizerId, organization_id || null, image_url || null, is_published === true]
+      'INSERT INTO events (title, description, event_date, event_end_date, location, organizer_id, organization_id, image_url, is_published) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id',
+      [title, description, event_date, event_end_date || null, location, organizerId, organization_id || null, image_url || null, is_published === true]
     );
 
     res.status(201).json({
@@ -1572,7 +1587,7 @@ app.post('/api/admin/events', authenticateToken, async (req, res) => {
 app.put('/api/admin/events/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, description, event_date, location, organization_id, image_url, is_published } = req.body;
+    const { title, description, event_date, event_end_date, location, organization_id, image_url, is_published } = req.body;
 
     if (!title || !description || !event_date || !location) {
       return res.status(400).json({ error: 'Title, description, event_date and location are required' });
@@ -1588,14 +1603,15 @@ app.put('/api/admin/events/:id', authenticateToken, async (req, res) => {
         title = $1,
         description = $2,
         event_date = $3,
-        location = $4,
-        organization_id = $5,
-        image_url = $6,
-        is_published = $7,
+        event_end_date = $4,
+        location = $5,
+        organization_id = $6,
+        image_url = $7,
+        is_published = $8,
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $8
-      RETURNING id, title, description, event_date, location, organization_id, image_url, is_published, created_at, updated_at`,
-      [title, description, event_date, location, organization_id || null, image_url || null, is_published === true, id]
+      WHERE id = $9
+      RETURNING id, title, description, event_date, event_end_date, location, organization_id, image_url, is_published, created_at, updated_at`,
+      [title, description, event_date, event_end_date || null, location, organization_id || null, image_url || null, is_published === true, id]
     );
 
     res.json({ message: 'Event updated successfully', event: update.rows[0] });
@@ -1992,10 +2008,24 @@ app.use('*', (req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });
 
+// Simple, safe migrations at boot (idempotent)
+async function runBootMigrations() {
+  try {
+    // Ensure optional end date exists for events
+    await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS event_end_date TIMESTAMP NULL`);
+    // Keep image_url TEXT for larger external URLs
+    await pool.query(`ALTER TABLE events ALTER COLUMN image_url TYPE TEXT`);
+    console.log('✅ Boot migrations executed');
+  } catch (e) {
+    console.warn('⚠️ Boot migrations skipped:', e.message);
+  }
+}
+
 // Start server
 app.listen(PORT, async () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  await runBootMigrations();
   await testDatabase();
 });
 
