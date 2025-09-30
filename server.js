@@ -1225,12 +1225,13 @@ app.post('/api/admin/approve-organization/:id', authenticateToken, async (req, r
 // Get all published news (public)
 app.get('/api/news', async (req, res) => {
   try {
-    const { page = 1, limit = 20, category } = req.query;
+    const { page = 1, limit = 20, category, organization, search, featured } = req.query;
     const offset = (page - 1) * limit;
 
     let query = `
-      SELECT n.id, n.title, n.content, n.image_url, n.created_at,
-             u.first_name, u.last_name, o.name as organization_name
+      SELECT n.id, n.title, n.content, n.excerpt, n.image_url, n.thumbnail_url, n.medium_url, n.large_url,
+             n.category, n.created_at, n.updated_at,
+             u.first_name, u.last_name, o.name as organization_name, o.logo_url as organization_logo
       FROM news n
       JOIN users u ON n.author_id = u.id
       LEFT JOIN organizations o ON n.organization_id = o.id
@@ -1239,8 +1240,22 @@ app.get('/api/news', async (req, res) => {
     const params = [];
 
     if (category) {
-      query += ' AND n.category = $1';
       params.push(category);
+      query += ` AND n.category = $${params.length}`;
+    }
+
+    if (organization) {
+      params.push(`%${organization}%`);
+      query += ` AND o.name ILIKE $${params.length}`;
+    }
+
+    if (search) {
+      params.push(`%${search}%`);
+      query += ` AND (n.title ILIKE $${params.length} OR n.content ILIKE $${params.length} OR n.excerpt ILIKE $${params.length})`;
+    }
+
+    if (featured === 'true') {
+      query += ` AND n.is_featured = true`;
     }
 
     query += ' ORDER BY n.created_at DESC LIMIT $' + (params.length + 1) + ' OFFSET $' + (params.length + 2);
@@ -1248,13 +1263,33 @@ app.get('/api/news', async (req, res) => {
 
     const result = await pool.query(query, params);
 
-    // Get total count
-    let countQuery = 'SELECT COUNT(*) as total FROM news WHERE is_published = true';
+    // Get total count with same filters
+    let countQuery = `
+      SELECT COUNT(*) as total
+      FROM news n
+      JOIN users u ON n.author_id = u.id
+      LEFT JOIN organizations o ON n.organization_id = o.id
+      WHERE n.is_published = true
+    `;
     const countParams = [];
     
     if (category) {
-      countQuery += ' AND category = $1';
       countParams.push(category);
+      countQuery += ` AND n.category = $${countParams.length}`;
+    }
+
+    if (organization) {
+      countParams.push(`%${organization}%`);
+      countQuery += ` AND o.name ILIKE $${countParams.length}`;
+    }
+
+    if (search) {
+      countParams.push(`%${search}%`);
+      countQuery += ` AND (n.title ILIKE $${countParams.length} OR n.content ILIKE $${countParams.length} OR n.excerpt ILIKE $${countParams.length})`;
+    }
+
+    if (featured === 'true') {
+      countQuery += ` AND n.is_featured = true`;
     }
 
     const countResult = await pool.query(countQuery, countParams);
@@ -1664,6 +1699,204 @@ app.delete('/api/admin/users/:id', authenticateToken, async (req, res) => {
       error: 'Failed to delete user',
       message: error.message
     });
+  }
+});
+
+// ===== MOBILE APP SPECIFIC ENDPOINTS =====
+
+// Get app configuration and metadata
+app.get('/api/app/config', async (req, res) => {
+  try {
+    const config = {
+      app_name: 'Dorpsapp Holwert',
+      version: '1.0.0',
+      api_version: 'v1',
+      features: {
+        news: true,
+        events: true,
+        organizations: true,
+        found_lost: true,
+        push_notifications: true
+      },
+      settings: {
+        max_image_size: 5242880, // 5MB
+        supported_image_formats: ['jpg', 'jpeg', 'png', 'webp'],
+        pagination_default_limit: 20,
+        search_min_length: 2
+      }
+    };
+    
+    res.json(config);
+  } catch (error) {
+    console.error('App config error:', error);
+    res.status(500).json({ error: 'Failed to get app config' });
+  }
+});
+
+// Get categories for filtering
+app.get('/api/categories', async (req, res) => {
+  try {
+    const [newsCategories, eventCategories, orgCategories] = await Promise.all([
+      pool.query('SELECT DISTINCT category FROM news WHERE category IS NOT NULL AND is_published = true'),
+      pool.query('SELECT DISTINCT category FROM events WHERE category IS NOT NULL AND is_published = true'),
+      pool.query('SELECT DISTINCT category FROM organizations WHERE category IS NOT NULL AND is_approved = true')
+    ]);
+    
+    res.json({
+      news: newsCategories.rows.map(r => r.category),
+      events: eventCategories.rows.map(r => r.category),
+      organizations: orgCategories.rows.map(r => r.category)
+    });
+  } catch (error) {
+    console.error('Categories error:', error);
+    res.status(500).json({ error: 'Failed to get categories' });
+  }
+});
+
+// Search across all content types
+app.get('/api/search', async (req, res) => {
+  try {
+    const { q, type, limit = 10 } = req.query;
+    
+    if (!q || q.length < 2) {
+      return res.status(400).json({ error: 'Search query too short' });
+    }
+    
+    const searchTerm = `%${q}%`;
+    const results = {};
+    
+    // Search news
+    if (!type || type === 'news') {
+      const newsResults = await pool.query(`
+        SELECT 'news' as type, id, title, excerpt, image_url, thumbnail_url, created_at
+        FROM news 
+        WHERE is_published = true 
+        AND (title ILIKE $1 OR content ILIKE $1 OR excerpt ILIKE $1)
+        ORDER BY created_at DESC 
+        LIMIT $2
+      `, [searchTerm, parseInt(limit)]);
+      results.news = newsResults.rows;
+    }
+    
+    // Search events
+    if (!type || type === 'events') {
+      const eventResults = await pool.query(`
+        SELECT 'events' as type, id, title, description, image_url, thumbnail_url, event_date, location
+        FROM events 
+        WHERE is_published = true 
+        AND (title ILIKE $1 OR description ILIKE $1 OR location ILIKE $1)
+        ORDER BY event_date DESC 
+        LIMIT $2
+      `, [searchTerm, parseInt(limit)]);
+      results.events = eventResults.rows;
+    }
+    
+    // Search organizations
+    if (!type || type === 'organizations') {
+      const orgResults = await pool.query(`
+        SELECT 'organizations' as type, id, name, description, logo_url, category
+        FROM organizations 
+        WHERE is_approved = true 
+        AND (name ILIKE $1 OR description ILIKE $1)
+        ORDER BY name ASC 
+        LIMIT $2
+      `, [searchTerm, parseInt(limit)]);
+      results.organizations = orgResults.rows;
+    }
+    
+    // Search found/lost items
+    if (!type || type === 'found_lost') {
+      const foundLostResults = await pool.query(`
+        SELECT 'found_lost' as type, id, title, description, item_type, location, created_at
+        FROM found_lost 
+        WHERE is_published = true 
+        AND (title ILIKE $1 OR description ILIKE $1 OR location ILIKE $1)
+        ORDER BY created_at DESC 
+        LIMIT $2
+      `, [searchTerm, parseInt(limit)]);
+      results.found_lost = foundLostResults.rows;
+    }
+    
+    res.json({
+      query: q,
+      results,
+      total: Object.values(results).reduce((sum, arr) => sum + arr.length, 0)
+    });
+    
+  } catch (error) {
+    console.error('Search error:', error);
+    res.status(500).json({ error: 'Search failed' });
+  }
+});
+
+// Get featured content for home screen
+app.get('/api/featured', async (req, res) => {
+  try {
+    const [featuredNews, upcomingEvents, recentFoundLost] = await Promise.all([
+      pool.query(`
+        SELECT n.id, n.title, n.excerpt, n.thumbnail_url, n.created_at, o.name as organization_name
+        FROM news n
+        LEFT JOIN organizations o ON n.organization_id = o.id
+        WHERE n.is_published = true AND n.is_featured = true
+        ORDER BY n.created_at DESC
+        LIMIT 5
+      `),
+      pool.query(`
+        SELECT e.id, e.title, e.description, e.thumbnail_url, e.event_date, e.location, o.name as organization_name
+        FROM events e
+        LEFT JOIN organizations o ON e.organization_id = o.id
+        WHERE e.is_published = true AND e.event_date >= NOW()
+        ORDER BY e.event_date ASC
+        LIMIT 5
+      `),
+      pool.query(`
+        SELECT id, title, description, item_type, location, created_at
+        FROM found_lost
+        WHERE is_published = true
+        ORDER BY created_at DESC
+        LIMIT 3
+      `)
+    ]);
+    
+    res.json({
+      featured_news: featuredNews.rows,
+      upcoming_events: upcomingEvents.rows,
+      recent_found_lost: recentFoundLost.rows
+    });
+    
+  } catch (error) {
+    console.error('Featured content error:', error);
+    res.status(500).json({ error: 'Failed to get featured content' });
+  }
+});
+
+// Submit found/lost item (public endpoint for mobile app)
+app.post('/api/found-lost/submit', async (req, res) => {
+  try {
+    const { item_type, title, description, location, contact_info, image_url } = req.body;
+    
+    if (!item_type || !['found','lost'].includes(item_type) || !title || !description) {
+      return res.status(400).json({ 
+        error: 'Invalid payload', 
+        message: 'item_type(found|lost), title, description verplicht' 
+      });
+    }
+    
+    const insert = await pool.query(
+      `INSERT INTO found_lost (item_type, title, description, location, contact_info, image_url, is_published, status, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,false,'pending',NOW()) RETURNING id`,
+      [item_type, title, description, location || null, contact_info || null, image_url || null]
+    );
+    
+    res.status(201).json({
+      message: 'Item succesvol ingediend voor moderatie',
+      id: insert.rows[0].id,
+      status: 'pending'
+    });
+    
+  } catch (error) {
+    console.error('Submit found/lost error:', error);
+    res.status(500).json({ error: 'Failed to submit item', message: error.message });
   }
 });
 
