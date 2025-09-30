@@ -58,60 +58,65 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Update database schema
+// Info + migratiestatus
+app.get('/api/info', async (req, res) => {
+  try {
+    const version = `v${new Date().getFullYear()}.${String(new Date().getMonth()+1).padStart(2,'0')}.${String(new Date().getDate()).padStart(2,'0')}`;
+    const colCheck = await pool.query(`
+      SELECT COUNT(*) AS cnt
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'events' AND column_name = 'event_end_date'
+    `);
+    const hasEventEnd = parseInt(colCheck.rows[0].cnt, 10) > 0;
+    res.json({
+      name: 'Holwert Backend',
+      version,
+      timestamp: new Date().toISOString(),
+      migrations: {
+        events_event_end_date: hasEventEnd ? 'present' : 'missing'
+      }
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to fetch info', message: e.message });
+  }
+});
+
+// Unified update-schema endpoint (idempotent)
 app.get('/api/database/update-schema', async (req, res) => {
   try {
-    console.log('🔄 Updating database schema...');
-    
-    // Add missing columns to organizations table
-    await pool.query(`
-      ALTER TABLE organizations 
-      ADD COLUMN IF NOT EXISTS category VARCHAR(100)
-    `);
-    
-    await pool.query(`
-      ALTER TABLE organizations 
-      ADD COLUMN IF NOT EXISTS facebook_url VARCHAR(255)
-    `);
-    
-    await pool.query(`
-      ALTER TABLE organizations 
-      ADD COLUMN IF NOT EXISTS instagram_url VARCHAR(255)
-    `);
-    
-    await pool.query(`
-      ALTER TABLE organizations 
-      ADD COLUMN IF NOT EXISTS twitter_url VARCHAR(255)
-    `);
-    
-    await pool.query(`
-      ALTER TABLE organizations 
-      ADD COLUMN IF NOT EXISTS linkedin_url VARCHAR(255)
-    `);
-    
-    await pool.query(`
-      ALTER TABLE organizations 
-      ADD COLUMN IF NOT EXISTS youtube_url VARCHAR(255)
-    `);
-    
-    await pool.query(`
-      ALTER TABLE organizations 
-      ADD COLUMN IF NOT EXISTS tiktok_url VARCHAR(255)
-    `);
+    // Organizations
+    await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS category VARCHAR(100)`);
+    await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS facebook_url VARCHAR(255)`);
+    await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS instagram_url VARCHAR(255)`);
+    await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS twitter_url VARCHAR(255)`);
+    await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS linkedin_url VARCHAR(255)`);
+    await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS youtube_url VARCHAR(255)`);
+    await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS tiktok_url VARCHAR(255)`);
+    await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS brand_color VARCHAR(7) DEFAULT '#667eea'`);
 
-    console.log('✅ Database schema updated successfully');
-    
-    res.json({
-      message: 'Database schema updated successfully',
-      timestamp: new Date().toISOString()
-    });
-    
+    // Users
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_image_url TEXT`);
+
+    // News
+    await pool.query(`ALTER TABLE news ADD COLUMN IF NOT EXISTS excerpt TEXT`);
+    await pool.query(`ALTER TABLE news ADD COLUMN IF NOT EXISTS category VARCHAR(100) DEFAULT 'dorpsnieuws'`);
+    await pool.query(`ALTER TABLE news ADD COLUMN IF NOT EXISTS custom_category VARCHAR(100)`);
+    await pool.query(`ALTER TABLE news ADD COLUMN IF NOT EXISTS thumbnail_url TEXT`);
+    await pool.query(`ALTER TABLE news ADD COLUMN IF NOT EXISTS medium_url TEXT`);
+    await pool.query(`ALTER TABLE news ADD COLUMN IF NOT EXISTS large_url TEXT`);
+    await pool.query(`ALTER TABLE news ALTER COLUMN image_url TYPE TEXT`);
+
+    // Events
+    await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS thumbnail_url TEXT`);
+    await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS medium_url TEXT`);
+    await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS large_url TEXT`);
+    await pool.query(`ALTER TABLE events ALTER COLUMN image_url TYPE TEXT`);
+    await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS event_end_date TIMESTAMP NULL`);
+
+    res.json({ message: 'Database schema updated successfully', timestamp: new Date().toISOString() });
   } catch (error) {
-    console.error('❌ Error updating database schema:', error);
-  res.status(500).json({ 
-      error: 'Failed to update database schema',
-      message: error.message
-    });
+    console.error('Schema update error:', error);
+    res.status(500).json({ error: 'Failed to update schema', message: error.message });
   }
 });
 
@@ -129,6 +134,17 @@ app.get('/api/database/test', async (req, res) => {
       error: 'Database connection failed',
       message: error.message
     });
+  }
+});
+
+// On-demand migration just for events end date
+app.get('/api/database/migrate-events-end-date', async (req, res) => {
+  try {
+    await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS event_end_date TIMESTAMP NULL`);
+    res.json({ message: 'event_end_date ensured on events table', timestamp: new Date().toISOString() });
+  } catch (error) {
+    console.error('migrate-events-end-date error:', error);
+    res.status(500).json({ error: 'Failed to migrate events end date', message: error.message });
   }
 });
 
