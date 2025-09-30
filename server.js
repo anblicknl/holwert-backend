@@ -104,12 +104,15 @@ app.get('/api/database/update-schema', async (req, res) => {
     await pool.query(`ALTER TABLE news ADD COLUMN IF NOT EXISTS thumbnail_url TEXT`);
     await pool.query(`ALTER TABLE news ADD COLUMN IF NOT EXISTS medium_url TEXT`);
     await pool.query(`ALTER TABLE news ADD COLUMN IF NOT EXISTS large_url TEXT`);
+    await pool.query(`ALTER TABLE news ADD COLUMN IF NOT EXISTS is_featured BOOLEAN DEFAULT false`);
     await pool.query(`ALTER TABLE news ALTER COLUMN image_url TYPE TEXT`);
 
     // Events
+    await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS category VARCHAR(100) DEFAULT 'evenement'`);
     await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS thumbnail_url TEXT`);
     await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS medium_url TEXT`);
     await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS large_url TEXT`);
+    await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS is_featured BOOLEAN DEFAULT false`);
     await pool.query(`ALTER TABLE events ALTER COLUMN image_url TYPE TEXT`);
     await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS event_end_date TIMESTAMP NULL`);
     // Backfill: zet event_end_date = event_date waar nog leeg
@@ -426,6 +429,7 @@ app.get('/api/database/create-tables', async (req, res) => {
         large_url TEXT,
         category VARCHAR(100) DEFAULT 'dorpsnieuws',
         custom_category VARCHAR(100),
+        is_featured BOOLEAN DEFAULT false,
         is_published BOOLEAN DEFAULT false,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -447,6 +451,8 @@ app.get('/api/database/create-tables', async (req, res) => {
         thumbnail_url TEXT,
         medium_url TEXT,
         large_url TEXT,
+        category VARCHAR(100) DEFAULT 'evenement',
+        is_featured BOOLEAN DEFAULT false,
         is_published BOOLEAN DEFAULT false,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -1349,12 +1355,12 @@ app.get('/api/news/:id', async (req, res) => {
 // Get all published events (public)
 app.get('/api/events', async (req, res) => {
   try {
-    const { page = 1, limit = 20, category } = req.query;
+    const { page = 1, limit = 20, category, organization, search, featured } = req.query;
     const offset = (page - 1) * limit;
 
     let query = `
-      SELECT e.id, e.title, e.description, e.event_date, e.event_end_date, e.location, e.image_url, e.created_at,
-             u.first_name, u.last_name, o.name as organization_name
+      SELECT e.id, e.title, e.description, e.event_date, e.event_end_date, e.location, e.image_url, e.thumbnail_url, e.medium_url, e.large_url, e.category, e.created_at,
+             u.first_name, u.last_name, o.name as organization_name, o.logo_url as organization_logo
       FROM events e
       JOIN users u ON e.organizer_id = u.id
       LEFT JOIN organizations o ON e.organization_id = o.id
@@ -1363,8 +1369,22 @@ app.get('/api/events', async (req, res) => {
     const params = [];
 
     if (category) {
-      query += ' AND e.category = $1';
       params.push(category);
+      query += ` AND e.category = $${params.length}`;
+    }
+
+    if (organization) {
+      params.push(`%${organization}%`);
+      query += ` AND o.name ILIKE $${params.length}`;
+    }
+
+    if (search) {
+      params.push(`%${search}%`);
+      query += ` AND (e.title ILIKE $${params.length} OR e.description ILIKE $${params.length} OR e.location ILIKE $${params.length})`;
+    }
+
+    if (featured === 'true') {
+      query += ` AND e.is_featured = true`;
     }
 
     query += ' ORDER BY COALESCE(e.event_date, NOW()) ASC LIMIT $' + (params.length + 1) + ' OFFSET $' + (params.length + 2);
@@ -1372,13 +1392,33 @@ app.get('/api/events', async (req, res) => {
 
     const result = await pool.query(query, params);
 
-    // Get total count
-    let countQuery = 'SELECT COUNT(*) as total FROM events WHERE is_published = true AND COALESCE(event_end_date, event_date) > NOW()';
+    // Get total count with same filters
+    let countQuery = `
+      SELECT COUNT(*) as total
+      FROM events e
+      JOIN users u ON e.organizer_id = u.id
+      LEFT JOIN organizations o ON e.organization_id = o.id
+      WHERE e.is_published = true AND COALESCE(e.event_end_date, e.event_date) > NOW()
+    `;
     const countParams = [];
     
     if (category) {
-      countQuery += ' AND category = $1';
       countParams.push(category);
+      countQuery += ` AND e.category = $${countParams.length}`;
+    }
+
+    if (organization) {
+      countParams.push(`%${organization}%`);
+      countQuery += ` AND o.name ILIKE $${countParams.length}`;
+    }
+
+    if (search) {
+      countParams.push(`%${search}%`);
+      countQuery += ` AND (e.title ILIKE $${countParams.length} OR e.description ILIKE $${countParams.length} OR e.location ILIKE $${countParams.length})`;
+    }
+
+    if (featured === 'true') {
+      countQuery += ` AND e.is_featured = true`;
     }
 
     const countResult = await pool.query(countQuery, countParams);
@@ -1697,6 +1737,99 @@ app.delete('/api/admin/users/:id', authenticateToken, async (req, res) => {
     console.error('Delete user error:', error);
     res.status(500).json({
       error: 'Failed to delete user',
+      message: error.message
+    });
+  }
+});
+
+// Get all approved organizations (public)
+app.get('/api/organizations', async (req, res) => {
+  try {
+    const { page = 1, limit = 20, category, search } = req.query;
+    const offset = (page - 1) * limit;
+
+    let query = `
+      SELECT id, name, description, contact_email, contact_phone, website, logo_url, brand_color, category, created_at
+      FROM organizations
+      WHERE is_approved = true
+    `;
+    const params = [];
+
+    if (category) {
+      params.push(category);
+      query += ` AND category = $${params.length}`;
+    }
+
+    if (search) {
+      params.push(`%${search}%`);
+      query += ` AND (name ILIKE $${params.length} OR description ILIKE $${params.length})`;
+    }
+
+    query += ` ORDER BY name ASC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+    params.push(parseInt(limit), parseInt(offset));
+
+    const result = await pool.query(query, params);
+
+    // Get total count
+    let countQuery = 'SELECT COUNT(*) as total FROM organizations WHERE is_approved = true';
+    const countParams = [];
+    
+    if (category) {
+      countParams.push(category);
+      countQuery += ` AND category = $${countParams.length}`;
+    }
+
+    if (search) {
+      countParams.push(`%${search}%`);
+      countQuery += ` AND (name ILIKE $${countParams.length} OR description ILIKE $${countParams.length})`;
+    }
+
+    const countResult = await pool.query(countQuery, countParams);
+
+    res.json({
+      organizations: result.rows,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: parseInt(countResult.rows[0].total),
+        pages: Math.ceil(countResult.rows[0].total / limit)
+      }
+    });
+
+  } catch (error) {
+    console.error('Get organizations error:', error);
+    res.status(500).json({
+      error: 'Failed to get organizations',
+      message: error.message
+    });
+  }
+});
+
+// Get single organization (public)
+app.get('/api/organizations/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query(`
+      SELECT id, name, description, contact_email, contact_phone, website, logo_url, brand_color, category, created_at
+      FROM organizations
+      WHERE id = $1 AND is_approved = true
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Organization not found'
+      });
+    }
+
+    res.json({
+      organization: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error('Get organization error:', error);
+    res.status(500).json({
+      error: 'Failed to get organization',
       message: error.message
     });
   }
