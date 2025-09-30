@@ -119,6 +119,12 @@ app.get('/api/database/update-schema', async (req, res) => {
     await pool.query(`ALTER TABLE found_lost ADD COLUMN IF NOT EXISTS is_published BOOLEAN DEFAULT false`);
     await pool.query(`ALTER TABLE found_lost ALTER COLUMN image_url TYPE TEXT`);
     
+    // Add rejection and revision tracking
+    await pool.query(`ALTER TABLE found_lost ADD COLUMN IF NOT EXISTS rejection_reason TEXT`);
+    await pool.query(`ALTER TABLE found_lost ADD COLUMN IF NOT EXISTS rejection_date TIMESTAMP`);
+    await pool.query(`ALTER TABLE found_lost ADD COLUMN IF NOT EXISTS revision_deadline TIMESTAMP`);
+    await pool.query(`ALTER TABLE found_lost ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'pending'`);
+    
     // Migrate found_lost column names
     await pool.query(`ALTER TABLE found_lost ADD COLUMN IF NOT EXISTS item_type VARCHAR(10)`);
     await pool.query(`ALTER TABLE found_lost ADD COLUMN IF NOT EXISTS contact_info TEXT`);
@@ -417,6 +423,10 @@ app.get('/api/database/create-tables', async (req, res) => {
         contact_info TEXT,
         image_url TEXT,
         is_published BOOLEAN DEFAULT false,
+        status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'needs_revision', 'expired')),
+        rejection_reason TEXT,
+        rejection_date TIMESTAMP,
+        revision_deadline TIMESTAMP,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
@@ -1012,22 +1022,66 @@ app.post('/api/admin/approve/:type/:id', authenticateToken, async (req, res) => 
 app.post('/api/admin/found-lost/:id/approve', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const r = await pool.query('UPDATE found_lost SET is_published = true WHERE id = $1 RETURNING id', [id]);
-    if (r.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-    res.json({ message: 'Found/Lost approved', id: r.rows[0].id });
+    const result = await pool.query(
+      `UPDATE found_lost 
+       SET is_published = true, 
+           status = 'approved',
+           rejection_reason = NULL,
+           rejection_date = NULL,
+           revision_deadline = NULL,
+           updated_at = NOW()
+       WHERE id = $1 
+       RETURNING id, title, status`,
+      [id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    res.json({ message: 'Found/Lost approved and published', item: result.rows[0] });
   } catch (error) {
     console.error('Approve found_lost error:', error);
     res.status(500).json({ error: 'Failed to approve found/lost', message: error.message });
   }
 });
 
-// Reject/Delete Found/Lost
+// Reject Found/Lost with reason and 3-day revision period
 app.post('/api/admin/found-lost/:id/reject', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const r = await pool.query('DELETE FROM found_lost WHERE id = $1 RETURNING id', [id]);
-    if (r.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-    res.json({ message: 'Found/Lost rejected and removed', id: r.rows[0].id });
+    const { reason, custom_reason } = req.body;
+    
+    if (!reason) {
+      return res.status(400).json({ error: 'Rejection reason is required' });
+    }
+    
+    // Combine predefined reason with custom reason if provided
+    let rejectionReason = reason;
+    if (custom_reason && custom_reason.trim()) {
+      rejectionReason = `${reason}: ${custom_reason.trim()}`;
+    }
+    
+    // Set revision deadline to 3 days from now
+    const revisionDeadline = new Date();
+    revisionDeadline.setDate(revisionDeadline.getDate() + 3);
+    
+    const result = await pool.query(
+      `UPDATE found_lost 
+       SET status = 'needs_revision', 
+           rejection_reason = $1, 
+           rejection_date = NOW(), 
+           revision_deadline = $2,
+           updated_at = NOW()
+       WHERE id = $3 
+       RETURNING id, title, status, revision_deadline`,
+      [rejectionReason, revisionDeadline, id]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Found/Lost item not found' });
+    }
+    
+    res.json({ 
+      message: 'Found/Lost item rejected with 3-day revision period', 
+      item: result.rows[0]
+    });
   } catch (error) {
     console.error('Reject found_lost error:', error);
     res.status(500).json({ error: 'Failed to reject found/lost', message: error.message });
@@ -1039,7 +1093,7 @@ app.get('/api/admin/found-lost', authenticateToken, async (req, res) => {
   try {
     const { status, page = 1, limit = 20, q } = req.query;
     const offset = (page - 1) * limit;
-    let query = `SELECT id, item_type, title, description, contact_info, is_published, created_at FROM found_lost WHERE 1=1`;
+    let query = `SELECT id, item_type, title, description, contact_info, is_published, status, rejection_reason, rejection_date, revision_deadline, created_at FROM found_lost WHERE 1=1`;
     const params = [];
     if (status === 'published') query += ' AND is_published = true';
     if (status === 'pending') query += ' AND is_published = false';
@@ -2273,7 +2327,7 @@ app.get('/api/admin/pending', authenticateToken, async (req, res) => {
       pool.query('SELECT id, title, organizer_id, event_date, created_at FROM events WHERE is_published = false')
     ]);
 
-    const pendingFoundLost = await pool.query('SELECT id, item_type, title, contact_info, created_at FROM found_lost WHERE is_published = false');
+    const pendingFoundLost = await pool.query('SELECT id, item_type, title, contact_info, status, rejection_reason, revision_deadline, created_at FROM found_lost WHERE is_published = false');
 
     res.json({
       users: [],
