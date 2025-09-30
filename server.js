@@ -127,6 +127,12 @@ app.get('/api/database/update-schema', async (req, res) => {
     await pool.query(`UPDATE found_lost SET item_type = type WHERE item_type IS NULL AND type IS NOT NULL`);
     await pool.query(`UPDATE found_lost SET contact_info = CONCAT_WS(' | ', contact_name, contact_phone, contact_email) WHERE contact_info IS NULL AND (contact_name IS NOT NULL OR contact_phone IS NOT NULL OR contact_email IS NOT NULL)`);
     
+    // Drop old columns if they exist
+    await pool.query(`ALTER TABLE found_lost DROP COLUMN IF EXISTS type`);
+    await pool.query(`ALTER TABLE found_lost DROP COLUMN IF EXISTS contact_name`);
+    await pool.query(`ALTER TABLE found_lost DROP COLUMN IF EXISTS contact_phone`);
+    await pool.query(`ALTER TABLE found_lost DROP COLUMN IF EXISTS contact_email`);
+    
     // Add constraints for new columns
     await pool.query(`
       DO $$
