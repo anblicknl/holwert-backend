@@ -1319,6 +1319,39 @@ app.get('/api/news', async (req, res) => {
   }
 });
 
+// Update news article image
+app.put('/api/news/:id/image', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { image_url } = req.body;
+    
+    if (!image_url) {
+      return res.status(400).json({ error: 'Image URL is required' });
+    }
+    
+    const result = await pool.query(
+      'UPDATE news SET image_url = $1 WHERE id = $2 RETURNING id, title, image_url',
+      [image_url, id]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'News article not found' });
+    }
+    
+    res.json({
+      message: 'Image updated successfully',
+      article: result.rows[0]
+    });
+    
+  } catch (error) {
+    console.error('Update news image error:', error);
+    res.status(500).json({
+      error: 'Failed to update image',
+      message: error.message
+    });
+  }
+});
+
 // Get single news article (public)
 app.get('/api/news/:id', async (req, res) => {
   try {
