@@ -367,6 +367,69 @@ app.post('/api/news', authenticateToken, async (req, res) => {
   }
 });
 
+// Get all approved organizations (public)
+app.get('/api/organizations', async (req, res) => {
+  try {
+    const { page = 1, limit = 20, category, search } = req.query;
+    const offset = (page - 1) * limit;
+
+    let query = `
+      SELECT id, name, description, contact_email, contact_phone, website, logo_url, brand_color, category, created_at
+      FROM organizations
+      WHERE is_approved = true
+    `;
+    const params = [];
+
+    if (category) {
+      params.push(category);
+      query += ` AND category = $${params.length}`;
+    }
+
+    if (search) {
+      params.push(`%${search}%`);
+      query += ` AND (name ILIKE $${params.length} OR description ILIKE $${params.length})`;
+    }
+
+    query += ` ORDER BY name ASC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+    params.push(parseInt(limit), parseInt(offset));
+
+    const result = await pool.query(query, params);
+
+    // Get total count
+    let countQuery = 'SELECT COUNT(*) as total FROM organizations WHERE is_approved = true';
+    const countParams = [];
+    
+    if (category) {
+      countParams.push(category);
+      countQuery += ` AND category = $${countParams.length}`;
+    }
+
+    if (search) {
+      countParams.push(`%${search}%`);
+      countQuery += ` AND (name ILIKE $${countParams.length} OR description ILIKE $${countParams.length})`;
+    }
+
+    const countResult = await pool.query(countQuery, countParams);
+
+    res.json({
+      organizations: result.rows,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: parseInt(countResult.rows[0].total),
+        pages: Math.ceil(countResult.rows[0].total / limit)
+      }
+    });
+
+  } catch (error) {
+    console.error('Get organizations error:', error);
+    res.status(500).json({
+      error: 'Failed to get organizations',
+      message: error.message
+    });
+  }
+});
+
 // 404 handler
 app.use('*', (req, res) => {
   res.status(404).json({ error: 'Route not found' });
