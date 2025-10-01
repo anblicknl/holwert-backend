@@ -16,6 +16,9 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
+// Routes temporarily disabled due to MySQL/PostgreSQL conflict
+// TODO: Fix database configuration in routes
+
 // Multer configuration for image uploads
 const storage = multer.memoryStorage();
 const upload = multer({
@@ -39,6 +42,9 @@ const pool = new Pool({
     rejectUnauthorized: false
   }
 });
+
+// Export pool for use in routes
+module.exports.pool = pool;
 
 // JWT Secret
 const JWT_SECRET = process.env.JWT_SECRET || 'holwert-secret-key-2024';
@@ -367,46 +373,104 @@ app.post('/api/news', authenticateToken, async (req, res) => {
   }
 });
 
-// Get all approved organizations (public)
-app.get('/api/organizations', async (req, res) => {
+// ===== ADMIN ENDPOINTS =====
+
+// Get all news articles (admin)
+app.get('/api/admin/news', authenticateToken, async (req, res) => {
   try {
-    const { page = 1, limit = 20, category, search } = req.query;
+    const { page = 1, limit = 20, status, category } = req.query;
     const offset = (page - 1) * limit;
 
     let query = `
-      SELECT id, name, description, contact_email, contact_phone, website, logo_url, brand_color, category, created_at
-      FROM organizations
-      WHERE is_approved = true
+      SELECT n.*, u.first_name, u.last_name, o.name as organization_name
+      FROM news_articles n
+      LEFT JOIN users u ON n.author_id = u.id
+      LEFT JOIN organizations o ON n.organization_id = o.id
+      WHERE 1=1
     `;
     const params = [];
 
+    if (status) {
+      params.push(status);
+      query += ` AND n.status = $${params.length}`;
+    }
+
     if (category) {
       params.push(category);
-      query += ` AND category = $${params.length}`;
+      query += ` AND n.category = $${params.length}`;
     }
 
-    if (search) {
-      params.push(`%${search}%`);
-      query += ` AND (name ILIKE $${params.length} OR description ILIKE $${params.length})`;
-    }
-
-    query += ` ORDER BY name ASC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+    query += ` ORDER BY n.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
     params.push(parseInt(limit), parseInt(offset));
 
     const result = await pool.query(query, params);
 
     // Get total count
-    let countQuery = 'SELECT COUNT(*) as total FROM organizations WHERE is_approved = true';
+    let countQuery = 'SELECT COUNT(*) as total FROM news_articles n WHERE 1=1';
     const countParams = [];
     
-    if (category) {
-      countParams.push(category);
-      countQuery += ` AND category = $${countParams.length}`;
+    if (status) {
+      countParams.push(status);
+      countQuery += ` AND n.status = $${countParams.length}`;
     }
 
-    if (search) {
-      countParams.push(`%${search}%`);
-      countQuery += ` AND (name ILIKE $${countParams.length} OR description ILIKE $${countParams.length})`;
+    if (category) {
+      countParams.push(category);
+      countQuery += ` AND n.category = $${countParams.length}`;
+    }
+
+    const countResult = await pool.query(countQuery, countParams);
+
+    res.json({
+      news: result.rows,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: parseInt(countResult.rows[0].total),
+        pages: Math.ceil(countResult.rows[0].total / limit)
+      }
+    });
+
+  } catch (error) {
+    console.error('Get admin news error:', error);
+    res.status(500).json({
+      error: 'Failed to get news articles',
+      message: error.message
+    });
+  }
+});
+
+// Get all organizations (admin)
+app.get('/api/admin/organizations', authenticateToken, async (req, res) => {
+  try {
+    const { page = 1, limit = 20, status } = req.query;
+    const offset = (page - 1) * limit;
+
+    let query = `
+      SELECT o.*, u.first_name, u.last_name
+      FROM organizations o
+      LEFT JOIN users u ON o.created_by = u.id
+      WHERE 1=1
+    `;
+    const params = [];
+
+    if (status) {
+      params.push(status);
+      query += ` AND o.is_approved = $${params.length}`;
+    }
+
+    query += ` ORDER BY o.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+    params.push(parseInt(limit), parseInt(offset));
+
+    const result = await pool.query(query, params);
+
+    // Get total count
+    let countQuery = 'SELECT COUNT(*) as total FROM organizations o WHERE 1=1';
+    const countParams = [];
+    
+    if (status) {
+      countParams.push(status);
+      countQuery += ` AND o.is_approved = $${countParams.length}`;
     }
 
     const countResult = await pool.query(countQuery, countParams);
@@ -422,9 +486,118 @@ app.get('/api/organizations', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Get organizations error:', error);
+    console.error('Get admin organizations error:', error);
     res.status(500).json({
       error: 'Failed to get organizations',
+      message: error.message
+    });
+  }
+});
+
+// Get all events (admin)
+app.get('/api/admin/events', authenticateToken, async (req, res) => {
+  try {
+    const { page = 1, limit = 20, status } = req.query;
+    const offset = (page - 1) * limit;
+
+    let query = `
+      SELECT e.*, u.first_name, u.last_name, o.name as organization_name
+      FROM events e
+      LEFT JOIN users u ON e.organizer_id = u.id
+      LEFT JOIN organizations o ON e.organization_id = o.id
+      WHERE 1=1
+    `;
+    const params = [];
+
+    if (status) {
+      params.push(status);
+      query += ` AND e.status = $${params.length}`;
+    }
+
+    query += ` ORDER BY e.event_date DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+    params.push(parseInt(limit), parseInt(offset));
+
+    const result = await pool.query(query, params);
+
+    // Get total count
+    let countQuery = 'SELECT COUNT(*) as total FROM events e WHERE 1=1';
+    const countParams = [];
+    
+    if (status) {
+      countParams.push(status);
+      countQuery += ` AND e.status = $${countParams.length}`;
+    }
+
+    const countResult = await pool.query(countQuery, countParams);
+
+    res.json({
+      events: result.rows,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: parseInt(countResult.rows[0].total),
+        pages: Math.ceil(countResult.rows[0].total / limit)
+      }
+    });
+
+  } catch (error) {
+    console.error('Get admin events error:', error);
+    res.status(500).json({
+      error: 'Failed to get events',
+      message: error.message
+    });
+  }
+});
+
+// Get all users (admin)
+app.get('/api/admin/users', authenticateToken, async (req, res) => {
+  try {
+    const { page = 1, limit = 20, role } = req.query;
+    const offset = (page - 1) * limit;
+
+    let query = `
+      SELECT u.*, o.name as organization_name
+      FROM users u
+      LEFT JOIN organizations o ON u.organization_id = o.id
+      WHERE 1=1
+    `;
+    const params = [];
+
+    if (role) {
+      params.push(role);
+      query += ` AND u.role = $${params.length}`;
+    }
+
+    query += ` ORDER BY u.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+    params.push(parseInt(limit), parseInt(offset));
+
+    const result = await pool.query(query, params);
+
+    // Get total count
+    let countQuery = 'SELECT COUNT(*) as total FROM users u WHERE 1=1';
+    const countParams = [];
+    
+    if (role) {
+      countParams.push(role);
+      countQuery += ` AND u.role = $${countParams.length}`;
+    }
+
+    const countResult = await pool.query(countQuery, countParams);
+
+    res.json({
+      users: result.rows,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: parseInt(countResult.rows[0].total),
+        pages: Math.ceil(countResult.rows[0].total / limit)
+      }
+    });
+
+  } catch (error) {
+    console.error('Get admin users error:', error);
+    res.status(500).json({
+      error: 'Failed to get users',
       message: error.message
     });
   }
