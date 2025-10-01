@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const mysql = require('mysql2/promise');
+const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const FormData = require('form-data');
@@ -33,21 +33,12 @@ const upload = multer({
   }
 });
 
-// Database connection - MySQL
-const pool = mysql.createPool({
-  host: process.env.DB_HOST || 'localhost',
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'holwert_db',
-  port: process.env.DB_PORT || 3306,
-  waitForConnections: true,
-  connectionLimit: 5,
-  queueLimit: 0,
-  acquireTimeout: 60000,
-  timeout: 60000,
-  reconnect: true,
-  ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
-  charset: 'utf8mb4'
+// Database connection - PostgreSQL (Neon)
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false
+  }
 });
 
 // JWT Secret
@@ -56,9 +47,9 @@ const JWT_SECRET = process.env.JWT_SECRET || 'holwert-secret-key-2024';
 // Test database connection
 async function testDatabase() {
   try {
-    const connection = await pool.getConnection();
+    const client = await pool.connect();
     console.log('✅ Database connected successfully');
-    connection.release();
+    client.release();
   } catch (error) {
     console.error('❌ Database connection failed:', error.message);
   }
@@ -70,7 +61,7 @@ app.get('/', (req, res) => {
     message: 'Holwert Backend is running!',
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
-    database: 'Connected to PostgreSQL'
+    database: 'Connected to PostgreSQL (Neon)'
   });
 });
 
@@ -80,7 +71,16 @@ app.get('/api/health', (req, res) => {
     status: 'OK', 
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
-    database: 'Connected to PostgreSQL'
+    database: 'Connected to PostgreSQL (Neon)'
+  });
+});
+
+// Simple test endpoint
+app.get('/api/test', (req, res) => {
+  res.json({ 
+    success: true,
+    message: 'Test endpoint working',
+    timestamp: new Date().toISOString()
   });
 });
 
@@ -1255,28 +1255,39 @@ app.post('/api/admin/approve-organization/:id', authenticateToken, async (req, r
 // ===== CONTENT MANAGEMENT ROUTES =====
 
 // Get all published news (public)
-app.get('/api/news', (req, res) => {
+app.get('/api/news', async (req, res) => {
   try {
-    console.log('News API called - simple response');
+    console.log('News API called - fetching from PostgreSQL');
     
+    // PostgreSQL query for published news articles
+    const result = await pool.query(`
+      SELECT 
+        n.id, 
+        n.title, 
+        n.content, 
+        n.image_url,
+        n.created_at,
+        u.first_name, 
+        u.last_name, 
+        o.name as organization_name,
+        o.logo_url as organization_logo
+      FROM news n
+      JOIN users u ON n.author_id = u.id
+      LEFT JOIN organizations o ON n.organization_id = o.id
+      WHERE n.is_published = true
+      ORDER BY n.created_at DESC
+      LIMIT 20
+    `);
+    
+    console.log('News query result:', result.rows.length, 'rows');
+
     res.json({
       success: true,
-      news: [
-        {
-          id: 1,
-          title: "Test Nieuwsbericht",
-          content: "Dit is een test nieuwsbericht.",
-          image_url: null,
-          created_at: new Date().toISOString(),
-          first_name: "Test",
-          last_name: "User",
-          organization_name: "Test Organisatie"
-        }
-      ],
+      news: result.rows,
       pagination: {
         page: 1,
-        limit: 10,
-        total: 1,
+        limit: 20,
+        total: result.rows.length,
         pages: 1
       }
     });
@@ -1286,7 +1297,8 @@ app.get('/api/news', (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to get news',
-      message: error.message
+      message: error.message,
+      stack: error.stack
     });
   }
 });
