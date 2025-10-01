@@ -1284,9 +1284,9 @@ app.get('/api/news', async (req, res) => {
       });
     }
     
-    // Get news articles
+    // Get news articles with image variants
     const result = await client.query(`
-      SELECT n.id, n.title, n.content, n.image_url,
+      SELECT n.id, n.title, n.content, n.image_url, n.image_data,
              n.created_at, n.updated_at,
              u.first_name, u.last_name, o.name as organization_name, o.logo_url as organization_logo
       FROM news n
@@ -1300,8 +1300,53 @@ app.get('/api/news', async (req, res) => {
     client.release();
     console.log('News query result:', result.rows.length, 'rows');
 
+    // Process image data to provide multiple variants
+    const processedNews = result.rows.map(article => {
+      let imageVariants = {};
+      
+      // Parse image_data if it exists
+      if (article.image_data) {
+        try {
+          const imageData = JSON.parse(article.image_data);
+          imageVariants = {
+            original: imageData.original?.url || article.image_url,
+            full: imageData.full?.url || imageData.large?.url || article.image_url,
+            large: imageData.large?.url || imageData.medium_large?.url || article.image_url,
+            medium: imageData.medium?.url || imageData.thumbnail?.url || article.image_url,
+            thumbnail: imageData.thumbnail?.url || article.image_url,
+            webp_large: imageData.webp_large?.url || imageData.large?.url || article.image_url,
+            webp_medium: imageData.webp_medium?.url || imageData.medium?.url || article.image_url
+          };
+        } catch (error) {
+          console.error('Error parsing image_data:', error);
+          imageVariants = {
+            original: article.image_url,
+            full: article.image_url,
+            large: article.image_url,
+            medium: article.image_url,
+            thumbnail: article.image_url
+          };
+        }
+      } else {
+        // Fallback to single image_url
+        imageVariants = {
+          original: article.image_url,
+          full: article.image_url,
+          large: article.image_url,
+          medium: article.image_url,
+          thumbnail: article.image_url
+        };
+      }
+
+      return {
+        ...article,
+        image_url: imageVariants.large, // Use large variant for mobile
+        image_variants: imageVariants
+      };
+    });
+
     res.json({
-      news: result.rows,
+      news: processedNews,
       pagination: {
         page: 1,
         limit: 20,
