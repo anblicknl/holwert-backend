@@ -1248,11 +1248,35 @@ app.post('/api/admin/approve-organization/:id', authenticateToken, async (req, r
 // Get all published news (public)
 app.get('/api/news', async (req, res) => {
   try {
-    console.log('News API called - testing basic connection');
+    console.log('News API called - starting');
+    
+    // First test if pool exists
+    if (!pool) {
+      throw new Error('Database pool not initialized');
+    }
+    
+    console.log('Pool exists, testing connection');
     
     // Test basic database connection first
     const testResult = await pool.query('SELECT 1 as test');
-    console.log('Database connection test:', testResult.rows[0]);
+    console.log('Database connection test successful:', testResult.rows[0]);
+    
+    // Check if news table exists
+    const tableCheck = await pool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_name = 'news'
+      ) as table_exists
+    `);
+    console.log('News table exists:', tableCheck.rows[0].table_exists);
+    
+    if (!tableCheck.rows[0].table_exists) {
+      return res.json({
+        success: true,
+        news: [],
+        message: 'News table does not exist yet'
+      });
+    }
     
     // Simple news query - only basic columns
     const result = await pool.query(`
