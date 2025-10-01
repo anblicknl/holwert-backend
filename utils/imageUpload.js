@@ -66,54 +66,82 @@ const upload = multer({
   }
 });
 
-// Image processing configurations
+// Image processing configurations - WordPress-style multiple formats
 const imageConfigs = {
   profile: {
     sizes: [
-      { name: 'original', width: null, height: null, quality: 90 },
-      { name: 'large', width: 800, height: 800, quality: 85 },
-      { name: 'medium', width: 400, height: 400, quality: 80 },
-      { name: 'thumbnail', width: 150, height: 150, quality: 75 }
+      { name: 'original', width: null, height: null, quality: 100, format: 'original' },
+      { name: 'full', width: 2048, height: 2048, quality: 95, format: 'jpeg' },
+      { name: 'large', width: 1024, height: 1024, quality: 90, format: 'jpeg' },
+      { name: 'medium_large', width: 768, height: 768, quality: 88, format: 'jpeg' },
+      { name: 'medium', width: 300, height: 300, quality: 85, format: 'jpeg' },
+      { name: 'thumbnail', width: 150, height: 150, quality: 80, format: 'jpeg' },
+      { name: 'webp_full', width: 2048, height: 2048, quality: 90, format: 'webp' },
+      { name: 'webp_large', width: 1024, height: 1024, quality: 85, format: 'webp' },
+      { name: 'webp_medium', width: 300, height: 300, quality: 80, format: 'webp' }
     ],
-    format: 'jpeg'
+    defaultFormat: 'jpeg'
   },
   news: {
     sizes: [
-      { name: 'original', width: null, height: null, quality: 95 },
-      { name: 'large', width: 1200, height: 800, quality: 92 },
-      { name: 'medium', width: 600, height: 400, quality: 90 },
-      { name: 'thumbnail', width: 300, height: 200, quality: 85 }
+      { name: 'original', width: null, height: null, quality: 100, format: 'original' },
+      { name: 'full', width: 2560, height: 1707, quality: 95, format: 'jpeg' },
+      { name: 'large', width: 1920, height: 1280, quality: 92, format: 'jpeg' },
+      { name: 'medium_large', width: 1024, height: 683, quality: 90, format: 'jpeg' },
+      { name: 'medium', width: 600, height: 400, quality: 88, format: 'jpeg' },
+      { name: 'thumbnail', width: 300, height: 200, quality: 85, format: 'jpeg' },
+      { name: 'webp_full', width: 2560, height: 1707, quality: 90, format: 'webp' },
+      { name: 'webp_large', width: 1920, height: 1280, quality: 88, format: 'webp' },
+      { name: 'webp_medium', width: 600, height: 400, quality: 85, format: 'webp' }
     ],
-    format: 'jpeg'
+    defaultFormat: 'jpeg'
   },
   event: {
     sizes: [
-      { name: 'original', width: null, height: null, quality: 95 },
-      { name: 'large', width: 1200, height: 800, quality: 92 },
-      { name: 'medium', width: 600, height: 400, quality: 90 },
-      { name: 'thumbnail', width: 300, height: 200, quality: 85 }
+      { name: 'original', width: null, height: null, quality: 100, format: 'original' },
+      { name: 'full', width: 2560, height: 1707, quality: 95, format: 'jpeg' },
+      { name: 'large', width: 1920, height: 1280, quality: 92, format: 'jpeg' },
+      { name: 'medium_large', width: 1024, height: 683, quality: 90, format: 'jpeg' },
+      { name: 'medium', width: 600, height: 400, quality: 88, format: 'jpeg' },
+      { name: 'thumbnail', width: 300, height: 200, quality: 85, format: 'jpeg' },
+      { name: 'webp_full', width: 2560, height: 1707, quality: 90, format: 'webp' },
+      { name: 'webp_large', width: 1920, height: 1280, quality: 88, format: 'webp' },
+      { name: 'webp_medium', width: 600, height: 400, quality: 85, format: 'webp' }
     ],
-    format: 'jpeg'
+    defaultFormat: 'jpeg'
   },
   organization: {
     sizes: [
-      { name: 'original', width: null, height: null, quality: 95 },
-      { name: 'large', width: 800, height: 600, quality: 92 },
-      { name: 'medium', width: 400, height: 300, quality: 90 },
-      { name: 'thumbnail', width: 200, height: 150, quality: 85 }
+      { name: 'original', width: null, height: null, quality: 100, format: 'original' },
+      { name: 'full', width: 2048, height: 1536, quality: 95, format: 'jpeg' },
+      { name: 'large', width: 1024, height: 768, quality: 92, format: 'jpeg' },
+      { name: 'medium_large', width: 768, height: 576, quality: 90, format: 'jpeg' },
+      { name: 'medium', width: 400, height: 300, quality: 88, format: 'jpeg' },
+      { name: 'thumbnail', width: 200, height: 150, quality: 85, format: 'jpeg' },
+      { name: 'webp_full', width: 2048, height: 1536, quality: 90, format: 'webp' },
+      { name: 'webp_large', width: 1024, height: 768, quality: 88, format: 'webp' },
+      { name: 'webp_medium', width: 400, height: 300, quality: 85, format: 'webp' }
     ],
-    format: 'jpeg'
+    defaultFormat: 'jpeg'
   }
 };
 
 // Generate unique filename
-const generateFilename = (originalName, type, size = 'original') => {
+const generateFilename = (originalName, type, size = 'original', format = 'jpeg') => {
   const ext = path.extname(originalName).toLowerCase();
   const baseName = path.basename(originalName, ext);
   const timestamp = Date.now();
   const randomId = randomUUID().substring(0, 8);
   
-  return `${baseName}_${timestamp}_${randomId}_${size}${ext}`;
+  // Determine file extension based on format
+  let fileExt = ext;
+  if (format === 'webp') {
+    fileExt = '.webp';
+  } else if (format === 'jpeg') {
+    fileExt = '.jpg';
+  }
+  
+  return `${baseName}_${timestamp}_${randomId}_${size}${fileExt}`;
 };
 
 // Upload image to external hosting
@@ -176,20 +204,31 @@ const processImage = async (buffer, originalName, type, size) => {
   }
 
   // Convert to specified format and apply quality
-  if (config.format === 'jpeg') {
+  if (sizeConfig.format === 'original') {
+    // Keep original format, just apply quality if it's JPEG
+    const metadata = await sharp(buffer).metadata();
+    if (metadata.format === 'jpeg') {
+      sharpInstance = sharpInstance.jpeg({ 
+        quality: sizeConfig.quality,
+        progressive: true,
+        mozjpeg: true
+      });
+    }
+  } else if (sizeConfig.format === 'jpeg') {
     sharpInstance = sharpInstance.jpeg({ 
       quality: sizeConfig.quality,
       progressive: true,
       mozjpeg: true
     });
-  } else if (config.format === 'webp') {
+  } else if (sizeConfig.format === 'webp') {
     sharpInstance = sharpInstance.webp({ 
-      quality: sizeConfig.quality 
+      quality: sizeConfig.quality,
+      effort: 6 // Higher effort for better compression
     });
   }
 
   // Generate filename
-  const filename = generateFilename(originalName, type, size);
+  const filename = generateFilename(originalName, type, size, sizeConfig.format);
   
   // Process image to buffer
   const processedBuffer = await sharpInstance.toBuffer();
