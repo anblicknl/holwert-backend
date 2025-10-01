@@ -79,28 +79,28 @@ const imageConfigs = {
   },
   news: {
     sizes: [
-      { name: 'original', width: null, height: null, quality: 90 },
-      { name: 'large', width: 1200, height: 800, quality: 85 },
-      { name: 'medium', width: 600, height: 400, quality: 80 },
-      { name: 'thumbnail', width: 300, height: 200, quality: 75 }
+      { name: 'original', width: null, height: null, quality: 95 },
+      { name: 'large', width: 1200, height: 800, quality: 92 },
+      { name: 'medium', width: 600, height: 400, quality: 90 },
+      { name: 'thumbnail', width: 300, height: 200, quality: 85 }
     ],
     format: 'jpeg'
   },
   event: {
     sizes: [
-      { name: 'original', width: null, height: null, quality: 90 },
-      { name: 'large', width: 1200, height: 800, quality: 85 },
-      { name: 'medium', width: 600, height: 400, quality: 80 },
-      { name: 'thumbnail', width: 300, height: 200, quality: 75 }
+      { name: 'original', width: null, height: null, quality: 95 },
+      { name: 'large', width: 1200, height: 800, quality: 92 },
+      { name: 'medium', width: 600, height: 400, quality: 90 },
+      { name: 'thumbnail', width: 300, height: 200, quality: 85 }
     ],
     format: 'jpeg'
   },
   organization: {
     sizes: [
-      { name: 'original', width: null, height: null, quality: 90 },
-      { name: 'large', width: 800, height: 600, quality: 85 },
-      { name: 'medium', width: 400, height: 300, quality: 80 },
-      { name: 'thumbnail', width: 200, height: 150, quality: 75 }
+      { name: 'original', width: null, height: null, quality: 95 },
+      { name: 'large', width: 800, height: 600, quality: 92 },
+      { name: 'medium', width: 400, height: 300, quality: 90 },
+      { name: 'thumbnail', width: 200, height: 150, quality: 85 }
     ],
     format: 'jpeg'
   }
