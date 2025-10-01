@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const { Pool } = require('pg');
+const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const FormData = require('form-data');
@@ -33,12 +33,21 @@ const upload = multer({
   }
 });
 
-// Database connection
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false
-  }
+// Database connection - MySQL
+const pool = mysql.createPool({
+  host: process.env.DB_HOST || 'localhost',
+  user: process.env.DB_USER || 'root',
+  password: process.env.DB_PASSWORD || '',
+  database: process.env.DB_NAME || 'holwert_db',
+  port: process.env.DB_PORT || 3306,
+  waitForConnections: true,
+  connectionLimit: 5,
+  queueLimit: 0,
+  acquireTimeout: 60000,
+  timeout: 60000,
+  reconnect: true,
+  ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
+  charset: 'utf8mb4'
 });
 
 // JWT Secret
@@ -47,9 +56,9 @@ const JWT_SECRET = process.env.JWT_SECRET || 'holwert-secret-key-2024';
 // Test database connection
 async function testDatabase() {
   try {
-    const client = await pool.connect();
+    const connection = await pool.getConnection();
     console.log('✅ Database connected successfully');
-    client.release();
+    connection.release();
   } catch (error) {
     console.error('❌ Database connection failed:', error.message);
   }
@@ -1248,29 +1257,38 @@ app.post('/api/admin/approve-organization/:id', authenticateToken, async (req, r
 // Get all published news (public)
 app.get('/api/news', async (req, res) => {
   try {
-    console.log('News API called - returning test data');
+    console.log('News API called - fetching from database');
     
-    // Return test data without database
-    const testNews = [
-      {
-        id: 1,
-        title: "Test Nieuwsbericht",
-        content: "Dit is een test nieuwsbericht om te controleren of de API werkt.",
-        image_url: null,
-        created_at: new Date().toISOString(),
-        first_name: "Test",
-        last_name: "User",
-        organization_name: "Test Organisatie"
-      }
-    ];
+    // MySQL query for published news articles
+    const [rows] = await pool.execute(`
+      SELECT 
+        na.id, 
+        na.title, 
+        na.content, 
+        na.excerpt,
+        na.image as image_url,
+        na.created_at,
+        u.first_name, 
+        u.last_name, 
+        o.name as organization_name,
+        o.logo as organization_logo
+      FROM news_articles na
+      JOIN users u ON na.author_id = u.id
+      LEFT JOIN organizations o ON na.organization_id = o.id
+      WHERE na.status = 'published'
+      ORDER BY na.created_at DESC
+      LIMIT 20
+    `);
+    
+    console.log('News query result:', rows.length, 'rows');
 
     res.json({
       success: true,
-      news: testNews,
+      news: rows,
       pagination: {
         page: 1,
-        limit: 10,
-        total: testNews.length,
+        limit: 20,
+        total: rows.length,
         pages: 1
       }
     });
