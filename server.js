@@ -125,13 +125,18 @@ app.post('/api/upload', authenticateToken, upload.single('image'), async (req, r
     form.append('folder', 'uploads/');
     
          // Upload to external server (HTTPS; ignore hostname mismatch on cert)
-         const uploadResponse = await axios.post('https://holwert.appenvloed.com/upload', form, {
-      headers: {
-        ...form.getHeaders(),
-      },
+         const uploadResponse = await axios.post('https://holwert.appenvloed.com/upload/', form, {
+           headers: {
+             ...form.getHeaders(),
+             'User-Agent': 'HolwertBackend/1.0',
+             'Origin': 'https://holwert.appenvloed.com',
+             'Referer': 'https://holwert.appenvloed.com/'
+           },
            timeout: 30000,
+           maxBodyLength: Infinity,
+           maxContentLength: Infinity,
            httpsAgent: new https.Agent({ rejectUnauthorized: false })
-    });
+         });
     
     if (uploadResponse.data.success) {
       const imageUrl = uploadResponse.data.url;
@@ -202,13 +207,18 @@ app.post('/api/upload/image', authenticateToken, async (req, res) => {
     form.append('folder', 'uploads/');
     
         // Upload to external server (HTTPS; ignore hostname mismatch on cert)
-        const uploadResponse = await axios.post('https://holwert.appenvloed.com/upload', form, {
-      headers: {
-        ...form.getHeaders(),
-      },
+        const uploadResponse = await axios.post('https://holwert.appenvloed.com/upload/', form, {
+          headers: {
+            ...form.getHeaders(),
+            'User-Agent': 'HolwertBackend/1.0',
+            'Origin': 'https://holwert.appenvloed.com',
+            'Referer': 'https://holwert.appenvloed.com/'
+          },
           timeout: 30000,
+          maxBodyLength: Infinity,
+          maxContentLength: Infinity,
           httpsAgent: new https.Agent({ rejectUnauthorized: false })
-    });
+        });
     
     if (uploadResponse.data.success) {
       const imageUrl = uploadResponse.data.url;
