@@ -72,11 +72,11 @@ app.get('/api/health', (req, res) => {
 
 // Simple test endpoint
 app.get('/api/test', (req, res) => {
-  res.json({ 
+    res.json({
     success: true,
     message: 'Test endpoint working - FIXED VERSION',
-    timestamp: new Date().toISOString()
-  });
+      timestamp: new Date().toISOString()
+    });
 });
 
 // Middleware to verify JWT token
@@ -174,7 +174,7 @@ app.post('/api/upload', authenticateToken, upload.single('image'), async (req, r
     
   } catch (error) {
     console.error('Image upload error:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Failed to upload image', 
       message: error.message,
       details: error.response?.data || error.toString()
@@ -236,13 +236,13 @@ app.post('/api/upload/image', authenticateToken, async (req, res) => {
     
     if (uploadResponse.data.success) {
       const imageUrl = uploadResponse.data.url;
-      
-      res.json({
+    
+    res.json({
         message: 'Image uploaded successfully to external server (for editing)',
-        imageUrl: imageUrl,
-        filename: uniqueFilename,
+      imageUrl: imageUrl,
+      filename: uniqueFilename,
         note: 'Uploaded to external server - high quality maintained'
-      });
+    });
     } else {
       throw new Error(uploadResponse.data.message || 'Upload failed');
     }
@@ -585,7 +585,7 @@ app.get('/api/admin/news', authenticateToken, async (req, res) => {
       countParams.push(status);
       countQuery += ` AND n.status = $${countParams.length}`;
     }
-
+    
     if (category) {
       countParams.push(category);
       countQuery += ` AND n.category = $${countParams.length}`;
@@ -607,6 +607,38 @@ app.get('/api/admin/news', authenticateToken, async (req, res) => {
     console.error('Get admin news error:', error);
     res.status(500).json({
       error: 'Failed to get news articles',
+      message: error.message
+    });
+  }
+});
+
+// Get single news article (admin)
+app.get('/api/admin/news/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query(`
+      SELECT n.*, u.first_name, u.last_name, o.name as organization_name, o.logo_url as organization_logo
+      FROM news n
+      LEFT JOIN users u ON n.author_id = u.id
+      LEFT JOIN organizations o ON n.organization_id = o.id
+      WHERE n.id = $1
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Article not found'
+      });
+    }
+
+    res.json({
+      article: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error('Get admin news article error:', error);
+    res.status(500).json({
+      error: 'Failed to get news article',
       message: error.message
     });
   }
