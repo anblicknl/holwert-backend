@@ -1248,61 +1248,31 @@ app.post('/api/admin/approve-organization/:id', authenticateToken, async (req, r
 // Get all published news (public)
 app.get('/api/news', async (req, res) => {
   try {
-    const { page = 1, limit = 20, category, organization, search, featured } = req.query;
-    const offset = (page - 1) * limit;
-
-    let query = `
-      SELECT n.id, n.title, n.content, n.image_url,
-             n.created_at, n.updated_at,
-             u.first_name, u.last_name, o.name as organization_name, o.logo_url as organization_logo
-      FROM news n
-      JOIN users u ON n.author_id = u.id
-      LEFT JOIN organizations o ON n.organization_id = o.id
-      WHERE n.is_published = true
-    `;
-    const params = [];
-
-    // Category filter temporarily disabled until database is updated
-    // if (category) {
-    //   params.push(category);
-    //   query += ` AND n.category = $${params.length}`;
-    // }
-
-    if (organization) {
-      params.push(`%${organization}%`);
-      query += ` AND o.name ILIKE $${params.length}`;
-    }
-
-    if (search) {
-      params.push(`%${search}%`);
-      query += ` AND (n.title ILIKE $${params.length} OR n.content ILIKE $${params.length})`;
-    }
-
-    // Featured filter temporarily disabled until database is updated
-    // if (featured === 'true') {
-    //   query += ` AND n.is_featured = true`;
-    // }
-
-    query += ' ORDER BY n.created_at DESC LIMIT $' + (params.length + 1) + ' OFFSET $' + (params.length + 2);
-    params.push(parseInt(limit), parseInt(offset));
-
-    const result = await pool.query(query, params);
-
-    // Simple count query
-    const countResult = await pool.query(`
-      SELECT COUNT(*) as total
-      FROM news n
-      WHERE n.is_published = true
+    console.log('News API called - testing basic connection');
+    
+    // Test basic database connection first
+    const testResult = await pool.query('SELECT 1 as test');
+    console.log('Database connection test:', testResult.rows[0]);
+    
+    // Simple news query - only basic columns
+    const result = await pool.query(`
+      SELECT id, title, content, image_url, created_at
+      FROM news 
+      WHERE is_published = true
+      ORDER BY created_at DESC
+      LIMIT 10
     `);
+    
+    console.log('News query result:', result.rows.length, 'rows');
 
     res.json({
       success: true,
       news: result.rows,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total: parseInt(countResult.rows[0].total),
-        pages: Math.ceil(countResult.rows[0].total / limit)
+        page: 1,
+        limit: 10,
+        total: result.rows.length,
+        pages: 1
       }
     });
 
@@ -1311,7 +1281,8 @@ app.get('/api/news', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to get news',
-      message: error.message
+      message: error.message,
+      stack: error.stack
     });
   }
 });
