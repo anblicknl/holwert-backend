@@ -122,7 +122,14 @@ app.post('/api/upload', authenticateToken, upload.single('image'), async (req, r
       filename: req.file.originalname,
       contentType: req.file.mimetype
     });
-    form.append('folder', 'uploads/');
+    
+    // Create WordPress-style year/month folder structure
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const folder = `uploads/${year}/${month}/`;
+    
+    form.append('folder', folder);
     
          // Upload to external server (HTTPS; ignore hostname mismatch on cert)
          const uploadResponse = await axios.post('https://holwert.appenvloed.com/upload/upload.php', form, {
@@ -204,7 +211,14 @@ app.post('/api/upload/image', authenticateToken, async (req, res) => {
       filename: uniqueFilename,
       contentType: 'image/jpeg'
     });
-    form.append('folder', 'uploads/');
+    
+    // Create WordPress-style year/month folder structure
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const folder = `uploads/${year}/${month}/`;
+    
+    form.append('folder', folder);
     
         // Upload to external server (HTTPS; ignore hostname mismatch on cert)
         const uploadResponse = await axios.post('https://holwert.appenvloed.com/upload/upload.php', form, {
@@ -381,6 +395,69 @@ app.post('/api/news', authenticateToken, async (req, res) => {
     console.error('Create news error:', error);
     res.status(500).json({
       error: 'Failed to create news article',
+      message: error.message
+    });
+  }
+});
+
+// Update news article
+app.put('/api/news/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, content, excerpt, category, custom_category, organization_id, image_url, image_data } = req.body;
+    const userId = req.user.userId;
+
+    // Check if article exists and user has permission
+    const existingArticle = await pool.query(
+      'SELECT id, author_id, is_published FROM news WHERE id = $1',
+      [id]
+    );
+
+    if (existingArticle.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Article not found'
+      });
+    }
+
+    const article = existingArticle.rows[0];
+    
+    // Check permissions (author or admin)
+    if (article.author_id !== userId && req.user.role !== 'admin') {
+      return res.status(403).json({
+        error: 'Not authorized to edit this article'
+      });
+    }
+
+    // Validation
+    if (!title || !content) {
+      return res.status(400).json({
+        error: 'Title and content are required'
+      });
+    }
+
+    // Handle category logic
+    let finalCategory = category || 'dorpsnieuws';
+    let finalCustomCategory = null;
+    
+    if (category === 'overig' && custom_category) {
+      finalCustomCategory = custom_category;
+    }
+
+    // Update article
+    const result = await pool.query(
+      'UPDATE news SET title = $1, content = $2, excerpt = $3, organization_id = $4, image_url = $5, image_data = $6, category = $7, custom_category = $8, updated_at = NOW() WHERE id = $9 RETURNING id, title, COALESCE(content, \'\') as content, excerpt, category, custom_category, image_url, image_data, is_published, created_at, updated_at',
+      [title, content, excerpt || null, organization_id || null, image_url || null, image_data || null, finalCategory, finalCustomCategory, id]
+    );
+
+    res.json({
+      message: 'Article updated successfully',
+      article: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error('Update news error:', error);
+    res.status(500).json({
+      error: 'Failed to update article',
       message: error.message
     });
   }
