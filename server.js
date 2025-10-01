@@ -149,6 +149,60 @@ app.post('/api/upload', authenticateToken, upload.single('image'), async (req, r
       // Convert HTTP URL to HTTPS
       const imageUrl = uploadResponse.data.url.replace('http://', 'https://');
       
+      // Test if the image actually exists
+      try {
+        const testResponse = await axios.head(imageUrl, { timeout: 5000 });
+        if (testResponse.status !== 200) {
+          console.warn('Uploaded image not accessible:', imageUrl);
+          // Use fallback image
+          const fallbackUrl = 'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=600&h=300&fit=crop';
+          return res.json({
+            message: 'Image uploaded but not accessible, using fallback',
+            url: fallbackUrl,
+            image_data: JSON.stringify({
+              original: { url: fallbackUrl },
+              full: { url: fallbackUrl },
+              large: { url: fallbackUrl },
+              medium_large: { url: fallbackUrl },
+              medium: { url: fallbackUrl },
+              thumbnail: { url: fallbackUrl }
+            }),
+            sizes: {
+              original: { url: fallbackUrl },
+              full: { url: fallbackUrl },
+              large: { url: fallbackUrl },
+              medium_large: { url: fallbackUrl },
+              medium: { url: fallbackUrl },
+              thumbnail: { url: fallbackUrl }
+            }
+          });
+        }
+      } catch (testError) {
+        console.warn('Could not verify uploaded image:', imageUrl, testError.message);
+        // Use fallback image
+        const fallbackUrl = 'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=600&h=300&fit=crop';
+        return res.json({
+          message: 'Image uploaded but not accessible, using fallback',
+          url: fallbackUrl,
+          image_data: JSON.stringify({
+            original: { url: fallbackUrl },
+            full: { url: fallbackUrl },
+            large: { url: fallbackUrl },
+            medium_large: { url: fallbackUrl },
+            medium: { url: fallbackUrl },
+            thumbnail: { url: fallbackUrl }
+          }),
+          sizes: {
+            original: { url: fallbackUrl },
+            full: { url: fallbackUrl },
+            large: { url: fallbackUrl },
+            medium_large: { url: fallbackUrl },
+            medium: { url: fallbackUrl },
+            thumbnail: { url: fallbackUrl }
+          }
+        });
+      }
+      
       res.json({
         message: 'Image uploaded successfully to external server',
         url: imageUrl,
