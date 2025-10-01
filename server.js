@@ -1257,10 +1257,35 @@ app.post('/api/admin/approve-organization/:id', authenticateToken, async (req, r
 // Get all published news (public)
 app.get('/api/news', async (req, res) => {
   try {
-    const { page = 1, limit = 20, category, organization, search, featured } = req.query;
-    const offset = (page - 1) * limit;
-
-    let query = `
+    console.log('News API called - attempting database connection');
+    
+    // Test database connection first
+    const client = await pool.connect();
+    console.log('Database connection successful');
+    
+    // Simple query to test
+    const testResult = await client.query('SELECT 1 as test');
+    console.log('Test query successful:', testResult.rows[0]);
+    
+    // Check if news table exists
+    const tableCheck = await client.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_name = 'news'
+      ) as table_exists
+    `);
+    console.log('News table exists:', tableCheck.rows[0].table_exists);
+    
+    if (!tableCheck.rows[0].table_exists) {
+      client.release();
+      return res.json({
+        news: [],
+        message: 'News table does not exist yet'
+      });
+    }
+    
+    // Get news articles
+    const result = await client.query(`
       SELECT n.id, n.title, n.content, n.image_url,
              n.created_at, n.updated_at,
              u.first_name, u.last_name, o.name as organization_name, o.logo_url as organization_logo
@@ -1268,71 +1293,20 @@ app.get('/api/news', async (req, res) => {
       JOIN users u ON n.author_id = u.id
       LEFT JOIN organizations o ON n.organization_id = o.id
       WHERE n.is_published = true
-    `;
-    const params = [];
-
-    if (category) {
-      params.push(category);
-      query += ` AND n.category = $${params.length}`;
-    }
-
-    if (organization) {
-      params.push(`%${organization}%`);
-      query += ` AND o.name ILIKE $${params.length}`;
-    }
-
-    if (search) {
-      params.push(`%${search}%`);
-      query += ` AND (n.title ILIKE $${params.length} OR n.content ILIKE $${params.length})`;
-    }
-
-    if (featured === 'true') {
-      query += ` AND n.is_featured = true`;
-    }
-
-    query += ' ORDER BY n.created_at DESC LIMIT $' + (params.length + 1) + ' OFFSET $' + (params.length + 2);
-    params.push(parseInt(limit), parseInt(offset));
-
-    const result = await pool.query(query, params);
-
-    // Get total count with same filters
-    let countQuery = `
-      SELECT COUNT(*) as total
-      FROM news n
-      JOIN users u ON n.author_id = u.id
-      LEFT JOIN organizations o ON n.organization_id = o.id
-      WHERE n.is_published = true
-    `;
-    const countParams = [];
+      ORDER BY n.created_at DESC
+      LIMIT 20
+    `);
     
-    if (category) {
-      countParams.push(category);
-      countQuery += ` AND n.category = $${countParams.length}`;
-    }
-
-    if (organization) {
-      countParams.push(`%${organization}%`);
-      countQuery += ` AND o.name ILIKE $${countParams.length}`;
-    }
-
-    if (search) {
-      countParams.push(`%${search}%`);
-      countQuery += ` AND (n.title ILIKE $${countParams.length} OR n.content ILIKE $${countParams.length})`;
-    }
-
-    if (featured === 'true') {
-      countQuery += ` AND n.is_featured = true`;
-    }
-
-    const countResult = await pool.query(countQuery, countParams);
+    client.release();
+    console.log('News query result:', result.rows.length, 'rows');
 
     res.json({
       news: result.rows,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total: parseInt(countResult.rows[0].total),
-        pages: Math.ceil(countResult.rows[0].total / limit)
+        page: 1,
+        limit: 20,
+        total: result.rows.length,
+        pages: 1
       }
     });
 
