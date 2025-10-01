@@ -637,9 +637,8 @@ app.get('/api/admin/users', authenticateToken, async (req, res) => {
     const offset = (page - 1) * limit;
 
     let query = `
-      SELECT u.*, o.name as organization_name
+      SELECT u.*
       FROM users u
-      LEFT JOIN organizations o ON u.organization_id = o.id
       WHERE 1=1
     `;
     const params = [];
