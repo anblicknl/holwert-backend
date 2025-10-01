@@ -7,6 +7,7 @@ const FormData = require('form-data');
 const path = require('path');
 const multer = require('multer');
 const axios = require('axios');
+const https = require('https');
 require('dotenv').config();
 
 const app = express();
@@ -123,12 +124,13 @@ app.post('/api/upload', authenticateToken, upload.single('image'), async (req, r
     });
     form.append('folder', 'uploads/');
     
-         // Upload to external server (use http due to SSL mismatch on host cert)
-         const uploadResponse = await axios.post('http://holwert.appenvloed.com/upload', form, {
+         // Upload to external server (HTTPS; ignore hostname mismatch on cert)
+         const uploadResponse = await axios.post('https://holwert.appenvloed.com/upload', form, {
       headers: {
         ...form.getHeaders(),
       },
-      timeout: 30000
+           timeout: 30000,
+           httpsAgent: new https.Agent({ rejectUnauthorized: false })
     });
     
     if (uploadResponse.data.success) {
@@ -199,12 +201,13 @@ app.post('/api/upload/image', authenticateToken, async (req, res) => {
     });
     form.append('folder', 'uploads/');
     
-        // Upload to external server (use http due to SSL mismatch on host cert)
-        const uploadResponse = await axios.post('http://holwert.appenvloed.com/upload', form, {
+        // Upload to external server (HTTPS; ignore hostname mismatch on cert)
+        const uploadResponse = await axios.post('https://holwert.appenvloed.com/upload', form, {
       headers: {
         ...form.getHeaders(),
       },
-      timeout: 30000
+          timeout: 30000,
+          httpsAgent: new https.Agent({ rejectUnauthorized: false })
     });
     
     if (uploadResponse.data.success) {
