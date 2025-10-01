@@ -2763,52 +2763,41 @@ app.get('/api/admin/stats', authenticateToken, async (req, res) => {
   }
 });
 
-// ===== IMAGE UPLOAD (UNIFORM) =====
-try {
-  const { processImageSizes } = require('./utils/imageUpload');
-  const authenticateToken = (req, res, next) => {
-    try {
-      const authHeader = req.headers['authorization'];
-      const token = authHeader && authHeader.split(' ')[1];
-      if (!token) return res.status(401).json({ error: 'Missing token' });
-      const payload = jwt.verify(token, JWT_SECRET);
-      req.user = { userId: payload.userId, email: payload.email, role: payload.role };
-      next();
-    } catch (err) {
-      return res.status(401).json({ error: 'Invalid token' });
+// ===== IMAGE UPLOAD (SIMPLE) =====
+app.post('/api/upload', authenticateToken, upload.single('image'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No image provided' });
     }
-  };
-
-  app.post('/api/upload', authenticateToken, upload.single('image'), async (req, res) => {
-    try {
-      if (!req.file) {
-        return res.status(400).json({ error: 'No image provided' });
+    
+    // Convert buffer to base64 data URL
+    const base64 = req.file.buffer.toString('base64');
+    const mimeType = req.file.mimetype;
+    const dataUrl = `data:${mimeType};base64,${base64}`;
+    
+    // For now, just return the base64 data URL
+    // This provides much better quality than the old compressed versions
+    res.json({
+      message: 'Image uploaded successfully',
+      url: dataUrl,
+      image_data: JSON.stringify({
+        original: { url: dataUrl },
+        large: { url: dataUrl },
+        medium: { url: dataUrl },
+        thumbnail: { url: dataUrl }
+      }),
+      sizes: {
+        original: { url: dataUrl },
+        large: { url: dataUrl },
+        medium: { url: dataUrl },
+        thumbnail: { url: dataUrl }
       }
-      const type = (req.body.type || 'event').toLowerCase();
-      const results = await processImageSizes(req.file.buffer, req.file.originalname || 'upload.jpg', type);
-      
-      // Prefer large/medium urls if available
-      const bestUrl = (results.large && (results.large.url || results.large.path))
-        || (results.medium && (results.medium.url || results.medium.path))
-        || (results.original && (results.original.url || results.original.path));
-      
-      // Store image_data as JSON for future use
-      const imageData = JSON.stringify(results);
-      
-      res.json({
-        message: 'Image uploaded successfully',
-        url: bestUrl,
-        image_data: imageData,
-        sizes: results
-      });
-    } catch (error) {
-      console.error('Image upload error:', error);
-      res.status(500).json({ error: 'Failed to upload image', message: error.message });
-    }
-  });
-} catch (e) {
-  console.warn('Image upload module not available or failed to init:', e.message);
-}
+    });
+  } catch (error) {
+    console.error('Image upload error:', error);
+    res.status(500).json({ error: 'Failed to upload image', message: error.message });
+  }
+});
 
 // Get pending content
 app.get('/api/admin/pending', authenticateToken, async (req, res) => {
