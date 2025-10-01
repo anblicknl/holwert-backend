@@ -2763,34 +2763,69 @@ app.get('/api/admin/stats', authenticateToken, async (req, res) => {
   }
 });
 
-// ===== IMAGE UPLOAD (SIMPLE) =====
+// ===== IMAGE UPLOAD (BALANCED QUALITY) =====
 app.post('/api/upload', authenticateToken, upload.single('image'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No image provided' });
     }
     
-    // Convert buffer to base64 data URL
-    const base64 = req.file.buffer.toString('base64');
-    const mimeType = req.file.mimetype;
-    const dataUrl = `data:${mimeType};base64,${base64}`;
+    const sharp = require('sharp');
     
-    // For now, just return the base64 data URL
-    // This provides much better quality than the old compressed versions
+    // Process image with balanced compression
+    const processedImage = await sharp(req.file.buffer)
+      .resize(1920, 1280, { 
+        fit: 'inside', 
+        withoutEnlargement: true 
+      })
+      .jpeg({ 
+        quality: 85,  // Good quality, reasonable file size
+        progressive: true 
+      })
+      .toBuffer();
+    
+    // Convert to base64 data URL
+    const base64 = processedImage.toString('base64');
+    const dataUrl = `data:image/jpeg;base64,${base64}`;
+    
+    // Create different sizes for different use cases
+    const thumbnail = await sharp(req.file.buffer)
+      .resize(300, 200, { fit: 'cover' })
+      .jpeg({ quality: 80 })
+      .toBuffer();
+    
+    const medium = await sharp(req.file.buffer)
+      .resize(600, 400, { fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 82 })
+      .toBuffer();
+    
+    const large = await sharp(req.file.buffer)
+      .resize(1024, 683, { fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 84 })
+      .toBuffer();
+    
+    const thumbnailUrl = `data:image/jpeg;base64,${thumbnail.toString('base64')}`;
+    const mediumUrl = `data:image/jpeg;base64,${medium.toString('base64')}`;
+    const largeUrl = `data:image/jpeg;base64,${large.toString('base64')}`;
+    
     res.json({
-      message: 'Image uploaded successfully',
-      url: dataUrl,
+      message: 'Image uploaded successfully (balanced quality)',
+      url: dataUrl, // Main image
       image_data: JSON.stringify({
         original: { url: dataUrl },
-        large: { url: dataUrl },
-        medium: { url: dataUrl },
-        thumbnail: { url: dataUrl }
+        full: { url: dataUrl },
+        large: { url: largeUrl },
+        medium_large: { url: largeUrl },
+        medium: { url: mediumUrl },
+        thumbnail: { url: thumbnailUrl }
       }),
       sizes: {
         original: { url: dataUrl },
-        large: { url: dataUrl },
-        medium: { url: dataUrl },
-        thumbnail: { url: dataUrl }
+        full: { url: dataUrl },
+        large: { url: largeUrl },
+        medium_large: { url: largeUrl },
+        medium: { url: mediumUrl },
+        thumbnail: { url: thumbnailUrl }
       }
     });
   } catch (error) {
