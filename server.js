@@ -1257,48 +1257,90 @@ app.post('/api/admin/approve-organization/:id', authenticateToken, async (req, r
 // Get all published news (public)
 app.get('/api/news', async (req, res) => {
   try {
-    console.log('News API called - fetching from PostgreSQL');
-    
-    // PostgreSQL query for published news articles
-    const result = await pool.query(`
-      SELECT 
-        n.id, 
-        n.title, 
-        n.content, 
-        n.image_url,
-        n.created_at,
-        u.first_name, 
-        u.last_name, 
-        o.name as organization_name,
-        o.logo_url as organization_logo
+    const { page = 1, limit = 20, category, organization, search, featured } = req.query;
+    const offset = (page - 1) * limit;
+
+    let query = `
+      SELECT n.id, n.title, n.content, n.image_url,
+             n.created_at, n.updated_at,
+             u.first_name, u.last_name, o.name as organization_name, o.logo_url as organization_logo
       FROM news n
       JOIN users u ON n.author_id = u.id
       LEFT JOIN organizations o ON n.organization_id = o.id
       WHERE n.is_published = true
-      ORDER BY n.created_at DESC
-      LIMIT 20
-    `);
+    `;
+    const params = [];
+
+    if (category) {
+      params.push(category);
+      query += ` AND n.category = $${params.length}`;
+    }
+
+    if (organization) {
+      params.push(`%${organization}%`);
+      query += ` AND o.name ILIKE $${params.length}`;
+    }
+
+    if (search) {
+      params.push(`%${search}%`);
+      query += ` AND (n.title ILIKE $${params.length} OR n.content ILIKE $${params.length})`;
+    }
+
+    if (featured === 'true') {
+      query += ` AND n.is_featured = true`;
+    }
+
+    query += ' ORDER BY n.created_at DESC LIMIT $' + (params.length + 1) + ' OFFSET $' + (params.length + 2);
+    params.push(parseInt(limit), parseInt(offset));
+
+    const result = await pool.query(query, params);
+
+    // Get total count with same filters
+    let countQuery = `
+      SELECT COUNT(*) as total
+      FROM news n
+      JOIN users u ON n.author_id = u.id
+      LEFT JOIN organizations o ON n.organization_id = o.id
+      WHERE n.is_published = true
+    `;
+    const countParams = [];
     
-    console.log('News query result:', result.rows.length, 'rows');
+    if (category) {
+      countParams.push(category);
+      countQuery += ` AND n.category = $${countParams.length}`;
+    }
+
+    if (organization) {
+      countParams.push(`%${organization}%`);
+      countQuery += ` AND o.name ILIKE $${countParams.length}`;
+    }
+
+    if (search) {
+      countParams.push(`%${search}%`);
+      countQuery += ` AND (n.title ILIKE $${countParams.length} OR n.content ILIKE $${countParams.length})`;
+    }
+
+    if (featured === 'true') {
+      countQuery += ` AND n.is_featured = true`;
+    }
+
+    const countResult = await pool.query(countQuery, countParams);
 
     res.json({
-      success: true,
       news: result.rows,
       pagination: {
-        page: 1,
-        limit: 20,
-        total: result.rows.length,
-        pages: 1
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: parseInt(countResult.rows[0].total),
+        pages: Math.ceil(countResult.rows[0].total / limit)
       }
     });
 
   } catch (error) {
     console.error('Get news error:', error);
     res.status(500).json({
-      success: false,
       error: 'Failed to get news',
-      message: error.message,
-      stack: error.stack
+      message: error.message
     });
   }
 });
