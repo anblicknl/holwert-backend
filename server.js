@@ -123,8 +123,8 @@ app.post('/api/upload', authenticateToken, upload.single('image'), async (req, r
     });
     form.append('folder', 'uploads/');
     
-    // Upload to external server
-    const uploadResponse = await axios.post('https://holwert.appenvloed.com/upload', form, {
+         // Upload to external server (use http due to SSL mismatch on host cert)
+         const uploadResponse = await axios.post('http://holwert.appenvloed.com/upload', form, {
       headers: {
         ...form.getHeaders(),
       },
@@ -199,8 +199,8 @@ app.post('/api/upload/image', authenticateToken, async (req, res) => {
     });
     form.append('folder', 'uploads/');
     
-    // Upload to external server
-    const uploadResponse = await axios.post('https://holwert.appenvloed.com/upload', form, {
+        // Upload to external server (use http due to SSL mismatch on host cert)
+        const uploadResponse = await axios.post('http://holwert.appenvloed.com/upload', form, {
       headers: {
         ...form.getHeaders(),
       },
