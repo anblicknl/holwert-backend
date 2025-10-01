@@ -1252,8 +1252,8 @@ app.get('/api/news', async (req, res) => {
     const offset = (page - 1) * limit;
 
     let query = `
-      SELECT n.id, n.title, n.content, n.excerpt, n.image_url, n.thumbnail_url, n.medium_url, n.large_url,
-             n.category, n.created_at, n.updated_at,
+      SELECT n.id, n.title, n.content, n.image_url,
+             n.created_at, n.updated_at,
              u.first_name, u.last_name, o.name as organization_name, o.logo_url as organization_logo
       FROM news n
       JOIN users u ON n.author_id = u.id
@@ -1262,10 +1262,11 @@ app.get('/api/news', async (req, res) => {
     `;
     const params = [];
 
-    if (category) {
-      params.push(category);
-      query += ` AND n.category = $${params.length}`;
-    }
+    // Category filter temporarily disabled until database is updated
+    // if (category) {
+    //   params.push(category);
+    //   query += ` AND n.category = $${params.length}`;
+    // }
 
     if (organization) {
       params.push(`%${organization}%`);
@@ -1274,12 +1275,13 @@ app.get('/api/news', async (req, res) => {
 
     if (search) {
       params.push(`%${search}%`);
-      query += ` AND (n.title ILIKE $${params.length} OR n.content ILIKE $${params.length} OR n.excerpt ILIKE $${params.length})`;
+      query += ` AND (n.title ILIKE $${params.length} OR n.content ILIKE $${params.length})`;
     }
 
-    if (featured === 'true') {
-      query += ` AND n.is_featured = true`;
-    }
+    // Featured filter temporarily disabled until database is updated
+    // if (featured === 'true') {
+    //   query += ` AND n.is_featured = true`;
+    // }
 
     query += ' ORDER BY n.created_at DESC LIMIT $' + (params.length + 1) + ' OFFSET $' + (params.length + 2);
     params.push(parseInt(limit), parseInt(offset));
