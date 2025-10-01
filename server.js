@@ -2772,15 +2772,16 @@ app.post('/api/upload', authenticateToken, upload.single('image'), async (req, r
     
     const sharp = require('sharp');
     
-    // Process image with balanced compression
+    // Process image with HIGH QUALITY compression
     const processedImage = await sharp(req.file.buffer)
-      .resize(1920, 1280, { 
+      .resize(2560, 1707, { 
         fit: 'inside', 
         withoutEnlargement: true 
       })
       .jpeg({ 
-        quality: 85,  // Good quality, reasonable file size
-        progressive: true 
+        quality: 95,  // Very high quality
+        progressive: true,
+        mozjpeg: true  // Better compression algorithm
       })
       .toBuffer();
     
@@ -2788,20 +2789,32 @@ app.post('/api/upload', authenticateToken, upload.single('image'), async (req, r
     const base64 = processedImage.toString('base64');
     const dataUrl = `data:image/jpeg;base64,${base64}`;
     
-    // Create different sizes for different use cases
+    // Create different sizes with HIGH QUALITY
     const thumbnail = await sharp(req.file.buffer)
-      .resize(300, 200, { fit: 'cover' })
-      .jpeg({ quality: 80 })
+      .resize(400, 300, { fit: 'cover' })
+      .jpeg({ 
+        quality: 90,
+        progressive: true,
+        mozjpeg: true
+      })
       .toBuffer();
     
     const medium = await sharp(req.file.buffer)
-      .resize(600, 400, { fit: 'inside', withoutEnlargement: true })
-      .jpeg({ quality: 82 })
+      .resize(800, 600, { fit: 'inside', withoutEnlargement: true })
+      .jpeg({ 
+        quality: 92,
+        progressive: true,
+        mozjpeg: true
+      })
       .toBuffer();
     
     const large = await sharp(req.file.buffer)
-      .resize(1024, 683, { fit: 'inside', withoutEnlargement: true })
-      .jpeg({ quality: 84 })
+      .resize(1280, 853, { fit: 'inside', withoutEnlargement: true })
+      .jpeg({ 
+        quality: 94,
+        progressive: true,
+        mozjpeg: true
+      })
       .toBuffer();
     
     const thumbnailUrl = `data:image/jpeg;base64,${thumbnail.toString('base64')}`;
