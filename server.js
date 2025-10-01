@@ -1257,10 +1257,36 @@ app.post('/api/admin/approve-organization/:id', authenticateToken, async (req, r
 // Get all published news (public)
 app.get('/api/news', async (req, res) => {
   try {
-    console.log('News API called - fetching from database');
+    console.log('News API called - testing database connection');
     
-    // MySQL query for published news articles
-    const [rows] = await pool.execute(`
+    // First test database connection
+    const connection = await pool.getConnection();
+    console.log('Database connection successful');
+    
+    // Test simple query
+    const [testRows] = await connection.execute('SELECT 1 as test');
+    console.log('Test query successful:', testRows[0]);
+    
+    // Check if news_articles table exists
+    const [tableCheck] = await connection.execute(`
+      SELECT COUNT(*) as count 
+      FROM information_schema.tables 
+      WHERE table_schema = DATABASE() 
+      AND table_name = 'news_articles'
+    `);
+    console.log('Table exists check:', tableCheck[0]);
+    
+    if (tableCheck[0].count === 0) {
+      connection.release();
+      return res.json({
+        success: true,
+        news: [],
+        message: 'News table does not exist yet'
+      });
+    }
+    
+    // Get news articles
+    const [rows] = await connection.execute(`
       SELECT 
         na.id, 
         na.title, 
@@ -1280,6 +1306,7 @@ app.get('/api/news', async (req, res) => {
       LIMIT 20
     `);
     
+    connection.release();
     console.log('News query result:', rows.length, 'rows');
 
     res.json({
