@@ -119,6 +119,7 @@ app.get('/api/database/update-schema', async (req, res) => {
     await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS youtube_url VARCHAR(255)`);
     await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS tiktok_url VARCHAR(255)`);
     await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS brand_color VARCHAR(7) DEFAULT '#667eea'`);
+    await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS image_data TEXT`);
 
     // Users
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_image_url TEXT`);
@@ -131,6 +132,7 @@ app.get('/api/database/update-schema', async (req, res) => {
     await pool.query(`ALTER TABLE news ADD COLUMN IF NOT EXISTS medium_url TEXT`);
     await pool.query(`ALTER TABLE news ADD COLUMN IF NOT EXISTS large_url TEXT`);
     await pool.query(`ALTER TABLE news ADD COLUMN IF NOT EXISTS is_featured BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE news ADD COLUMN IF NOT EXISTS image_data TEXT`);
     await pool.query(`ALTER TABLE news ALTER COLUMN image_url TYPE TEXT`);
 
     // Events
@@ -139,6 +141,7 @@ app.get('/api/database/update-schema', async (req, res) => {
     await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS medium_url TEXT`);
     await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS large_url TEXT`);
     await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS is_featured BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS image_data TEXT`);
     await pool.query(`ALTER TABLE events ALTER COLUMN image_url TYPE TEXT`);
     await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS event_end_date TIMESTAMP NULL`);
     // Backfill: zet event_end_date = event_date waar nog leeg
