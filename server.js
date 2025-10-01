@@ -1257,65 +1257,29 @@ app.post('/api/admin/approve-organization/:id', authenticateToken, async (req, r
 // Get all published news (public)
 app.get('/api/news', async (req, res) => {
   try {
-    console.log('News API called - testing database connection');
+    console.log('News API called - returning test data');
     
-    // First test database connection
-    const connection = await pool.getConnection();
-    console.log('Database connection successful');
-    
-    // Test simple query
-    const [testRows] = await connection.execute('SELECT 1 as test');
-    console.log('Test query successful:', testRows[0]);
-    
-    // Check if news_articles table exists
-    const [tableCheck] = await connection.execute(`
-      SELECT COUNT(*) as count 
-      FROM information_schema.tables 
-      WHERE table_schema = DATABASE() 
-      AND table_name = 'news_articles'
-    `);
-    console.log('Table exists check:', tableCheck[0]);
-    
-    if (tableCheck[0].count === 0) {
-      connection.release();
-      return res.json({
-        success: true,
-        news: [],
-        message: 'News table does not exist yet'
-      });
-    }
-    
-    // Get news articles
-    const [rows] = await connection.execute(`
-      SELECT 
-        na.id, 
-        na.title, 
-        na.content, 
-        na.excerpt,
-        na.image as image_url,
-        na.created_at,
-        u.first_name, 
-        u.last_name, 
-        o.name as organization_name,
-        o.logo as organization_logo
-      FROM news_articles na
-      JOIN users u ON na.author_id = u.id
-      LEFT JOIN organizations o ON na.organization_id = o.id
-      WHERE na.status = 'published'
-      ORDER BY na.created_at DESC
-      LIMIT 20
-    `);
-    
-    connection.release();
-    console.log('News query result:', rows.length, 'rows');
+    // Return test data without database
+    const testNews = [
+      {
+        id: 1,
+        title: "Test Nieuwsbericht",
+        content: "Dit is een test nieuwsbericht om te controleren of de API werkt.",
+        image_url: null,
+        created_at: new Date().toISOString(),
+        first_name: "Test",
+        last_name: "User",
+        organization_name: "Test Organisatie"
+      }
+    ];
 
     res.json({
       success: true,
-      news: rows,
+      news: testNews,
       pagination: {
         page: 1,
-        limit: 20,
-        total: rows.length,
+        limit: 10,
+        total: testNews.length,
         pages: 1
       }
     });
