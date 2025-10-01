@@ -1255,31 +1255,28 @@ app.post('/api/admin/approve-organization/:id', authenticateToken, async (req, r
 // ===== CONTENT MANAGEMENT ROUTES =====
 
 // Get all published news (public)
-app.get('/api/news', async (req, res) => {
+app.get('/api/news', (req, res) => {
   try {
-    console.log('News API called - returning test data');
+    console.log('News API called - simple response');
     
-    // Return test data without database
-    const testNews = [
-      {
-        id: 1,
-        title: "Test Nieuwsbericht",
-        content: "Dit is een test nieuwsbericht om te controleren of de API werkt.",
-        image_url: null,
-        created_at: new Date().toISOString(),
-        first_name: "Test",
-        last_name: "User",
-        organization_name: "Test Organisatie"
-      }
-    ];
-
     res.json({
       success: true,
-      news: testNews,
+      news: [
+        {
+          id: 1,
+          title: "Test Nieuwsbericht",
+          content: "Dit is een test nieuwsbericht.",
+          image_url: null,
+          created_at: new Date().toISOString(),
+          first_name: "Test",
+          last_name: "User",
+          organization_name: "Test Organisatie"
+        }
+      ],
       pagination: {
         page: 1,
         limit: 10,
-        total: testNews.length,
+        total: 1,
         pages: 1
       }
     });
@@ -1289,8 +1286,7 @@ app.get('/api/news', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to get news',
-      message: error.message,
-      stack: error.stack
+      message: error.message
     });
   }
 });
