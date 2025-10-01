@@ -882,8 +882,8 @@ app.post('/api/news', authenticateToken, async (req, res) => {
 
     // Insert into news table
     const result = await pool.query(
-      'INSERT INTO news (title, content, excerpt, author_id, organization_id, image_url, category, custom_category, is_published) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id',
-      [title, content, excerpt || null, authorId, organization_id || null, image_url || null, finalCategory, finalCustomCategory, isPublished]
+      'INSERT INTO news (title, content, excerpt, author_id, organization_id, image_url, image_data, category, custom_category, is_published) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id, title, COALESCE(content, \'\') as content, excerpt, category, custom_category, image_url, is_published, created_at',
+      [title, content, excerpt || null, authorId, organization_id || null, image_url || null, req.body.image_data || null, finalCategory, finalCustomCategory, isPublished]
     );
 
     const message = isPublished 
@@ -893,6 +893,7 @@ app.post('/api/news', authenticateToken, async (req, res) => {
     res.status(201).json({
       message: message,
       articleId: result.rows[0].id,
+      article: result.rows[0],
       isPublished: isPublished,
       requiresModeration: !isPublished
     });
@@ -1289,7 +1290,7 @@ app.get('/api/news', async (req, res) => {
     
     // Get news articles with image variants
     const result = await client.query(`
-      SELECT n.id, n.title, n.content, n.image_url, n.image_data,
+      SELECT n.id, n.title, COALESCE(n.content, '') as content, n.image_url, n.image_data,
              n.created_at, n.updated_at,
              u.first_name, u.last_name, o.name as organization_name, o.logo_url as organization_logo
       FROM news n
@@ -1406,7 +1407,7 @@ app.get('/api/news/:id', async (req, res) => {
     const { id } = req.params;
 
     const result = await pool.query(`
-      SELECT n.id, n.title, n.content, n.image_url, n.created_at,
+      SELECT n.id, n.title, COALESCE(n.content, '') as content, n.image_url, n.created_at,
              u.first_name, u.last_name, o.name as organization_name
       FROM news n
       JOIN users u ON n.author_id = u.id
@@ -2123,7 +2124,7 @@ app.get('/api/admin/news', authenticateToken, async (req, res) => {
     const offset = (page - 1) * limit;
 
     let query = `
-      SELECT n.id, n.title, n.excerpt, n.category, n.custom_category, n.is_published, n.created_at, n.updated_at,
+      SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt, n.category, n.custom_category, n.is_published, n.created_at, n.updated_at,
              u.first_name, u.last_name, u.email,
              o.name as organization_name, o.logo_url as organization_logo, o.brand_color as organization_color
       FROM news n
@@ -2236,14 +2237,15 @@ app.put('/api/admin/news/:id', authenticateToken, async (req, res) => {
         category = $4, 
         custom_category = $5, 
         image_url = $6,
-        thumbnail_url = COALESCE($7, thumbnail_url),
-        medium_url = COALESCE($8, medium_url),
-        large_url = COALESCE($9, large_url),
-        is_published = $10, 
+        image_data = COALESCE($7, image_data),
+        thumbnail_url = COALESCE($8, thumbnail_url),
+        medium_url = COALESCE($9, medium_url),
+        large_url = COALESCE($10, large_url),
+        is_published = $11, 
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $11
-      RETURNING id, title, content, excerpt, category, custom_category, image_url, is_published, created_at, updated_at`,
-      [title, content, excerpt || null, finalCategory, finalCustomCategory, image_url || null, thumbnail_url || null, medium_url || null, large_url || null, is_published !== false, id]
+      WHERE id = $12
+      RETURNING id, title, COALESCE(content, '') as content, excerpt, category, custom_category, image_url, is_published, created_at, updated_at`,
+      [title, content, excerpt || null, finalCategory, finalCustomCategory, image_url || null, req.body.image_data || null, thumbnail_url || null, medium_url || null, large_url || null, is_published !== false, id]
     );
 
     if (result.rows.length === 0) {
@@ -2784,13 +2786,19 @@ try {
       }
       const type = (req.body.type || 'event').toLowerCase();
       const results = await processImageSizes(req.file.buffer, req.file.originalname || 'upload.jpg', type);
+      
       // Prefer large/medium urls if available
       const bestUrl = (results.large && (results.large.url || results.large.path))
         || (results.medium && (results.medium.url || results.medium.path))
         || (results.original && (results.original.url || results.original.path));
+      
+      // Store image_data as JSON for future use
+      const imageData = JSON.stringify(results);
+      
       res.json({
         message: 'Image uploaded successfully',
         url: bestUrl,
+        image_data: imageData,
         sizes: results
       });
     } catch (error) {
