@@ -5,6 +5,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const FormData = require('form-data');
 const path = require('path');
+const multer = require('multer');
 require('dotenv').config();
 
 const app = express();
@@ -15,6 +16,22 @@ app.use(cors());
 app.use(express.json());
 // Serve uploaded images (local storage)
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads'), { maxAge: '7d' }));
+
+// Multer configuration for image uploads
+const storage = multer.memoryStorage();
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed'), false);
+    }
+  }
+});
 
 // Database connection
 const pool = new Pool({
@@ -2682,7 +2699,7 @@ app.get('/api/admin/stats', authenticateToken, async (req, res) => {
 
 // ===== IMAGE UPLOAD (UNIFORM) =====
 try {
-  const { upload, processImageSizes } = require('./utils/imageUpload');
+  const { processImageSizes } = require('./utils/imageUpload');
   const authenticateToken = (req, res, next) => {
     try {
       const authHeader = req.headers['authorization'];
