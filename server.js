@@ -1288,38 +1288,15 @@ app.get('/api/news', async (req, res) => {
 
     const result = await pool.query(query, params);
 
-    // Get total count with same filters
-    let countQuery = `
+    // Simple count query
+    const countResult = await pool.query(`
       SELECT COUNT(*) as total
       FROM news n
-      JOIN users u ON n.author_id = u.id
-      LEFT JOIN organizations o ON n.organization_id = o.id
       WHERE n.is_published = true
-    `;
-    const countParams = [];
-    
-    if (category) {
-      countParams.push(category);
-      countQuery += ` AND n.category = $${countParams.length}`;
-    }
-
-    if (organization) {
-      countParams.push(`%${organization}%`);
-      countQuery += ` AND o.name ILIKE $${countParams.length}`;
-    }
-
-    if (search) {
-      countParams.push(`%${search}%`);
-      countQuery += ` AND (n.title ILIKE $${countParams.length} OR n.content ILIKE $${countParams.length} OR n.excerpt ILIKE $${countParams.length})`;
-    }
-
-    if (featured === 'true') {
-      countQuery += ` AND n.is_featured = true`;
-    }
-
-    const countResult = await pool.query(countQuery, countParams);
+    `);
 
     res.json({
+      success: true,
       news: result.rows,
       pagination: {
         page: parseInt(page),
@@ -1332,6 +1309,7 @@ app.get('/api/news', async (req, res) => {
   } catch (error) {
     console.error('Get news error:', error);
     res.status(500).json({
+      success: false,
       error: 'Failed to get news',
       message: error.message
     });
