@@ -464,8 +464,8 @@ app.get('/api/admin/news', authenticateToken, async (req, res) => {
     const offset = (page - 1) * limit;
 
     let query = `
-      SELECT n.*, u.first_name, u.last_name, o.name as organization_name
-      FROM news_articles n
+      SELECT n.*, u.first_name, u.last_name, o.name as organization_name, o.logo_url as organization_logo
+      FROM news n
       LEFT JOIN users u ON n.author_id = u.id
       LEFT JOIN organizations o ON n.organization_id = o.id
       WHERE 1=1
@@ -488,7 +488,7 @@ app.get('/api/admin/news', authenticateToken, async (req, res) => {
     const result = await pool.query(query, params);
 
     // Get total count
-    let countQuery = 'SELECT COUNT(*) as total FROM news_articles n WHERE 1=1';
+    let countQuery = 'SELECT COUNT(*) as total FROM news n WHERE 1=1';
     const countParams = [];
     
     if (status) {
@@ -529,9 +529,8 @@ app.get('/api/admin/organizations', authenticateToken, async (req, res) => {
     const offset = (page - 1) * limit;
 
     let query = `
-      SELECT o.*, u.first_name, u.last_name
+      SELECT o.*
       FROM organizations o
-      LEFT JOIN users u ON o.created_by = u.id
       WHERE 1=1
     `;
     const params = [];
