@@ -175,7 +175,7 @@ app.post('/api/upload', authenticateToken, upload.single('image'), async (req, r
     } else {
       throw new Error(uploadResponse.data.message || 'Upload failed');
     }
-    
+
   } catch (error) {
     console.error('Image upload error:', error);
     res.status(500).json({
@@ -617,13 +617,15 @@ app.get('/api/admin/news', authenticateToken, async (req, res) => {
   }
 });
 
-// Get single news article (admin)
+// Get single news article (admin) - same as public endpoint but with auth
 app.get('/api/admin/news/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
 
     const result = await pool.query(`
-      SELECT n.*, u.first_name, u.last_name, o.name as organization_name, o.logo_url as organization_logo
+      SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt, n.image_url, n.image_data,
+             n.created_at, n.updated_at, n.category, n.custom_category, n.is_published,
+             u.first_name, u.last_name, o.name as organization_name, o.logo_url as organization_logo
       FROM news n
       LEFT JOIN users u ON n.author_id = u.id
       LEFT JOIN organizations o ON n.organization_id = o.id
@@ -636,8 +638,49 @@ app.get('/api/admin/news/:id', authenticateToken, async (req, res) => {
       });
     }
 
+    const article = result.rows[0];
+
+    // Process image data to provide multiple variants (same as public endpoint)
+    let imageVariants = {};
+    
+    if (article.image_data) {
+      try {
+        const imageData = JSON.parse(article.image_data);
+        imageVariants = {
+          original: imageData.original?.url || article.image_url,
+          full: imageData.full?.url || imageData.large?.url || article.image_url,
+          large: imageData.large?.url || imageData.medium_large?.url || article.image_url,
+          medium: imageData.medium?.url || imageData.thumbnail?.url || article.image_url,
+          thumbnail: imageData.thumbnail?.url || article.image_url,
+          webp_large: imageData.webp_large?.url || imageData.large?.url || article.image_url,
+          webp_medium: imageData.webp_medium?.url || imageData.medium?.url || article.image_url
+        };
+      } catch (error) {
+        console.error('Error parsing image_data:', error);
+        imageVariants = {
+          original: article.image_url,
+          full: article.image_url,
+          large: article.image_url,
+          medium: article.image_url,
+          thumbnail: article.image_url
+        };
+      }
+    } else {
+      imageVariants = {
+        original: article.image_url,
+        full: article.image_url,
+        large: article.image_url,
+        medium: article.image_url,
+        thumbnail: article.image_url
+      };
+    }
+
     res.json({
-      article: result.rows[0]
+      article: {
+        ...article,
+        image_url: imageVariants.large,
+        image_variants: imageVariants
+      }
     });
 
   } catch (error) {
