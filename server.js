@@ -125,7 +125,7 @@ app.post('/api/upload', authenticateToken, upload.single('image'), async (req, r
     form.append('folder', 'uploads/');
     
          // Upload to external server (HTTPS; ignore hostname mismatch on cert)
-         const uploadResponse = await axios.post('https://holwert.appenvloed.com/upload/', form, {
+         const uploadResponse = await axios.post('https://holwert.appenvloed.com/upload.php', form, {
            headers: {
              ...form.getHeaders(),
              'User-Agent': 'HolwertBackend/1.0',
@@ -207,7 +207,7 @@ app.post('/api/upload/image', authenticateToken, async (req, res) => {
     form.append('folder', 'uploads/');
     
         // Upload to external server (HTTPS; ignore hostname mismatch on cert)
-        const uploadResponse = await axios.post('https://holwert.appenvloed.com/upload/', form, {
+        const uploadResponse = await axios.post('https://holwert.appenvloed.com/upload.php', form, {
           headers: {
             ...form.getHeaders(),
             'User-Agent': 'HolwertBackend/1.0',
