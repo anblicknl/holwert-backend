@@ -1248,54 +1248,29 @@ app.post('/api/admin/approve-organization/:id', authenticateToken, async (req, r
 // Get all published news (public)
 app.get('/api/news', async (req, res) => {
   try {
-    console.log('News API called - starting');
+    console.log('News API called - returning test data');
     
-    // First test if pool exists
-    if (!pool) {
-      throw new Error('Database pool not initialized');
-    }
-    
-    console.log('Pool exists, testing connection');
-    
-    // Test basic database connection first
-    const testResult = await pool.query('SELECT 1 as test');
-    console.log('Database connection test successful:', testResult.rows[0]);
-    
-    // Check if news table exists
-    const tableCheck = await pool.query(`
-      SELECT EXISTS (
-        SELECT FROM information_schema.tables 
-        WHERE table_name = 'news'
-      ) as table_exists
-    `);
-    console.log('News table exists:', tableCheck.rows[0].table_exists);
-    
-    if (!tableCheck.rows[0].table_exists) {
-      return res.json({
-        success: true,
-        news: [],
-        message: 'News table does not exist yet'
-      });
-    }
-    
-    // Simple news query - only basic columns
-    const result = await pool.query(`
-      SELECT id, title, content, image_url, created_at
-      FROM news 
-      WHERE is_published = true
-      ORDER BY created_at DESC
-      LIMIT 10
-    `);
-    
-    console.log('News query result:', result.rows.length, 'rows');
+    // Return test data without database
+    const testNews = [
+      {
+        id: 1,
+        title: "Test Nieuwsbericht",
+        content: "Dit is een test nieuwsbericht om te controleren of de API werkt.",
+        image_url: null,
+        created_at: new Date().toISOString(),
+        first_name: "Test",
+        last_name: "User",
+        organization_name: "Test Organisatie"
+      }
+    ];
 
     res.json({
       success: true,
-      news: result.rows,
+      news: testNews,
       pagination: {
         page: 1,
         limit: 10,
-        total: result.rows.length,
+        total: testNews.length,
         pages: 1
       }
     });
