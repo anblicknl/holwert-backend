@@ -146,7 +146,8 @@ app.post('/api/upload', authenticateToken, upload.single('image'), async (req, r
          });
     
     if (uploadResponse.data.success) {
-      const imageUrl = uploadResponse.data.url;
+      // Convert HTTP URL to HTTPS
+      const imageUrl = uploadResponse.data.url.replace('http://', 'https://');
       
       res.json({
         message: 'Image uploaded successfully to external server',
@@ -234,11 +235,12 @@ app.post('/api/upload/image', authenticateToken, async (req, res) => {
           httpsAgent: new https.Agent({ rejectUnauthorized: false })
         });
     
-    if (uploadResponse.data.success) {
-      const imageUrl = uploadResponse.data.url;
+        if (uploadResponse.data.success) {
+          // Convert HTTP URL to HTTPS
+          const imageUrl = uploadResponse.data.url.replace('http://', 'https://');
     
     res.json({
-        message: 'Image uploaded successfully to external server (for editing)',
+            message: 'Image uploaded successfully to external server (for editing)',
       imageUrl: imageUrl,
       filename: uniqueFilename,
         note: 'Uploaded to external server - high quality maintained'
