@@ -713,6 +713,21 @@ app.get('/api/admin/news/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// Delete news article (admin)
+app.delete('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query('DELETE FROM news WHERE id = $1', [id]);
+    if (!result.rowCount) {
+      return res.status(404).json({ error: 'Article not found' });
+    }
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Delete news error:', error);
+    res.status(500).json({ error: 'Failed to delete article', message: error.message });
+  }
+});
+
 // Get all organizations (admin)
 app.get('/api/admin/organizations', authenticateToken, async (req, res) => {
   try {
