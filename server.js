@@ -478,6 +478,78 @@ app.delete('/api/app/bookmarks/:news_id', authenticateToken, async (req, res) =>
   }
 });
 
+// ===== APP FOLLOWS (organizations) =====
+async function ensureFollowsTable() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS follows (
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (user_id, organization_id)
+      );
+    `);
+  } catch (e) {
+    console.error('ensureFollowsTable error:', e);
+  }
+}
+
+// List following orgs
+app.get('/api/app/following', authenticateToken, async (req, res) => {
+  try {
+    await ensureFollowsTable();
+    const userId = req.user.userId;
+    const result = await pool.query(`SELECT organization_id, created_at FROM follows WHERE user_id = $1 ORDER BY created_at DESC`, [userId]);
+    res.json({ following: result.rows });
+  } catch (error) {
+    console.error('Get following error:', error);
+    res.status(500).json({ error: 'Failed to get following', message: error.message });
+  }
+});
+
+// Check following for specific org
+app.get('/api/app/following/:organization_id', authenticateToken, async (req, res) => {
+  try {
+    await ensureFollowsTable();
+    const userId = req.user.userId;
+    const orgId = parseInt(req.params.organization_id);
+    const result = await pool.query(`SELECT 1 FROM follows WHERE user_id = $1 AND organization_id = $2`, [userId, orgId]);
+    res.json({ following: result.rows.length > 0 });
+  } catch (error) {
+    console.error('Check following error:', error);
+    res.status(500).json({ error: 'Failed to check following', message: error.message });
+  }
+});
+
+// Follow org
+app.post('/api/app/follow', authenticateToken, async (req, res) => {
+  try {
+    await ensureFollowsTable();
+    const userId = req.user.userId;
+    const { organization_id } = req.body;
+    if (!organization_id) return res.status(400).json({ error: 'organization_id is required' });
+    await pool.query(`INSERT INTO follows (user_id, organization_id) VALUES ($1, $2) ON CONFLICT (user_id, organization_id) DO NOTHING`, [userId, organization_id]);
+    res.status(201).json({ success: true });
+  } catch (error) {
+    console.error('Follow error:', error);
+    res.status(500).json({ error: 'Failed to follow', message: error.message });
+  }
+});
+
+// Unfollow org
+app.delete('/api/app/follow/:organization_id', authenticateToken, async (req, res) => {
+  try {
+    await ensureFollowsTable();
+    const userId = req.user.userId;
+    const orgId = parseInt(req.params.organization_id);
+    const result = await pool.query(`DELETE FROM follows WHERE user_id = $1 AND organization_id = $2`, [userId, orgId]);
+    res.json({ success: true, removed: result.rowCount > 0 });
+  } catch (error) {
+    console.error('Unfollow error:', error);
+    res.status(500).json({ error: 'Failed to unfollow', message: error.message });
+  }
+});
+
 // Get single published news (public)
 app.get('/api/news/:id', async (req, res) => {
   try {
