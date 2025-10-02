@@ -189,7 +189,7 @@ app.post('/api/upload', authenticateToken, upload.single('image'), async (req, r
 
   } catch (error) {
     console.error('Image upload error:', error);
-    res.status(500).json({
+    res.status(500).json({ 
       error: 'Failed to upload image', 
       message: error.message,
       details: error.response?.data || error.toString()
@@ -279,7 +279,8 @@ app.get('/api/news', async (req, res) => {
     const result = await pool.query(`
       SELECT n.id, n.title, COALESCE(n.content, '') as content, n.image_url, n.image_data,
              n.created_at, n.updated_at,
-             u.first_name, u.last_name, o.name as organization_name, o.logo_url as organization_logo
+             u.first_name, u.last_name,
+             o.name as organization_name, o.logo_url as organization_logo, o.brand_color as organization_brand_color
       FROM news n
       JOIN users u ON n.author_id = u.id
       LEFT JOIN organizations o ON n.organization_id = o.id
@@ -363,9 +364,11 @@ app.get('/api/news/related', async (req, res) => {
     let query = `
       SELECT n.id, n.title, COALESCE(n.content, '') as content, n.image_url, n.image_data,
              n.created_at,
-             u.first_name, u.last_name
+             u.first_name, u.last_name,
+             o.name as organization_name, o.logo_url as organization_logo, o.brand_color as organization_brand_color
       FROM news n
       JOIN users u ON n.author_id = u.id
+      LEFT JOIN organizations o ON n.organization_id = o.id
       WHERE n.is_published = true AND n.organization_id = $1`;
     if (exclude) {
       params.push(parseInt(exclude));
@@ -550,6 +553,20 @@ app.delete('/api/app/follow/:organization_id', authenticateToken, async (req, re
   }
 });
 
+// Followers count for a given organization (public)
+app.get('/api/organizations/:id/followers/count', async (req, res) => {
+  try {
+    await ensureFollowsTable();
+    const orgId = parseInt(req.params.id);
+    const result = await pool.query(`SELECT COUNT(*)::int AS count FROM follows WHERE organization_id = $1`, [orgId]);
+    const count = (result.rows[0] && result.rows[0].count) || 0;
+    res.json({ count });
+  } catch (error) {
+    console.error('Get followers count error:', error);
+    res.status(500).json({ error: 'Failed to get followers count', message: error.message });
+  }
+});
+
 // Get single published news (public)
 app.get('/api/news/:id', async (req, res) => {
   try {
@@ -558,7 +575,7 @@ app.get('/api/news/:id', async (req, res) => {
       SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt, n.image_url, n.image_data,
              n.created_at, n.updated_at, n.category, n.custom_category, n.is_published,
              u.first_name, u.last_name,
-             o.id as organization_id, o.name as organization_name, o.logo_url as organization_logo
+             o.id as organization_id, o.name as organization_name, o.logo_url as organization_logo, o.brand_color as organization_brand_color
       FROM news n
       JOIN users u ON n.author_id = u.id
       LEFT JOIN organizations o ON n.organization_id = o.id
@@ -602,7 +619,7 @@ app.get('/api/news/:id', async (req, res) => {
         thumbnail: article.image_url
       };
     }
-
+    
     res.json({
       article: {
         ...article,
