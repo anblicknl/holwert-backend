@@ -252,7 +252,7 @@ app.post('/api/upload/image', authenticateToken, async (req, res) => {
         if (uploadResponse.data.success) {
           // Convert HTTP URL to HTTPS
           const imageUrl = uploadResponse.data.url.replace('http://', 'https://');
-    
+
     res.json({
             message: 'Image uploaded successfully to external server (for editing)',
       imageUrl: imageUrl,
@@ -349,6 +349,198 @@ app.get('/api/news', async (req, res) => {
       error: 'Failed to get news',
       message: error.message
     });
+  }
+});
+
+// Related news by organization (public)
+app.get('/api/news/related', async (req, res) => {
+  try {
+    const { organization_id, exclude, limit = 5 } = req.query;
+    if (!organization_id) {
+      return res.status(400).json({ error: 'organization_id is required' });
+    }
+    const params = [organization_id];
+    let query = `
+      SELECT n.id, n.title, COALESCE(n.content, '') as content, n.image_url, n.image_data,
+             n.created_at,
+             u.first_name, u.last_name
+      FROM news n
+      JOIN users u ON n.author_id = u.id
+      WHERE n.is_published = true AND n.organization_id = $1`;
+    if (exclude) {
+      params.push(parseInt(exclude));
+      query += ` AND n.id <> $${params.length}`;
+    }
+    params.push(parseInt(limit));
+    query += ` ORDER BY n.created_at DESC LIMIT $${params.length}`;
+
+    const result = await pool.query(query, params);
+
+    const items = result.rows.map(article => ({
+      ...article,
+      image_url: article.image_url
+    }));
+    res.json({ news: items });
+  } catch (error) {
+    console.error('Get related news error:', error);
+    res.status(500).json({ error: 'Failed to get related news', message: error.message });
+  }
+});
+
+// ===== APP BOOKMARKS (server-side, per gebruiker) =====
+async function ensureBookmarksTable() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS bookmarks (
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        news_id INTEGER NOT NULL REFERENCES news(id) ON DELETE CASCADE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (user_id, news_id)
+      );
+    `);
+  } catch (e) {
+    console.error('ensureBookmarksTable error:', e);
+  }
+}
+
+// List bookmarks for current user (optionally with joined news)
+app.get('/api/app/bookmarks', authenticateToken, async (req, res) => {
+  try {
+    await ensureBookmarksTable();
+    const userId = req.user.userId;
+    const { with_news } = req.query;
+
+    if (with_news === '1' || with_news === 'true') {
+      const result = await pool.query(`
+        SELECT n.id, n.title, n.excerpt, n.image_url, n.created_at, b.created_at as bookmarked_at
+        FROM bookmarks b
+        JOIN news n ON n.id = b.news_id
+        WHERE b.user_id = $1
+        ORDER BY b.created_at DESC
+        LIMIT 100
+      `, [userId]);
+      return res.json({ bookmarks: result.rows });
+    } else {
+      const result = await pool.query(`
+        SELECT news_id, created_at FROM bookmarks WHERE user_id = $1 ORDER BY created_at DESC LIMIT 500
+      `, [userId]);
+      return res.json({ bookmarks: result.rows });
+    }
+  } catch (error) {
+    console.error('Get bookmarks error:', error);
+    res.status(500).json({ error: 'Failed to get bookmarks', message: error.message });
+  }
+});
+
+// Check if specific news is bookmarked
+app.get('/api/app/bookmarks/:news_id', authenticateToken, async (req, res) => {
+  try {
+    await ensureBookmarksTable();
+    const userId = req.user.userId;
+    const newsId = parseInt(req.params.news_id);
+    const result = await pool.query(`SELECT 1 FROM bookmarks WHERE user_id = $1 AND news_id = $2`, [userId, newsId]);
+    res.json({ bookmarked: result.rows.length > 0 });
+  } catch (error) {
+    console.error('Check bookmark error:', error);
+    res.status(500).json({ error: 'Failed to check bookmark', message: error.message });
+  }
+});
+
+// Add bookmark
+app.post('/api/app/bookmarks', authenticateToken, async (req, res) => {
+  try {
+    await ensureBookmarksTable();
+    const userId = req.user.userId;
+    const { news_id } = req.body;
+    if (!news_id) return res.status(400).json({ error: 'news_id is required' });
+    await pool.query(`
+      INSERT INTO bookmarks (user_id, news_id) VALUES ($1, $2)
+      ON CONFLICT (user_id, news_id) DO NOTHING
+    `, [userId, news_id]);
+    res.status(201).json({ success: true });
+  } catch (error) {
+    console.error('Add bookmark error:', error);
+    res.status(500).json({ error: 'Failed to add bookmark', message: error.message });
+  }
+});
+
+// Remove bookmark
+app.delete('/api/app/bookmarks/:news_id', authenticateToken, async (req, res) => {
+  try {
+    await ensureBookmarksTable();
+    const userId = req.user.userId;
+    const newsId = parseInt(req.params.news_id);
+    const result = await pool.query(`DELETE FROM bookmarks WHERE user_id = $1 AND news_id = $2`, [userId, newsId]);
+    res.json({ success: true, removed: result.rowCount > 0 });
+  } catch (error) {
+    console.error('Remove bookmark error:', error);
+    res.status(500).json({ error: 'Failed to remove bookmark', message: error.message });
+  }
+});
+
+// Get single published news (public)
+app.get('/api/news/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(`
+      SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt, n.image_url, n.image_data,
+             n.created_at, n.updated_at, n.category, n.custom_category, n.is_published,
+             u.first_name, u.last_name,
+             o.id as organization_id, o.name as organization_name, o.logo_url as organization_logo
+      FROM news n
+      JOIN users u ON n.author_id = u.id
+      LEFT JOIN organizations o ON n.organization_id = o.id
+      WHERE n.id = $1 AND n.is_published = true
+      LIMIT 1
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Article not found' });
+    }
+
+    const article = result.rows[0];
+
+    // Process image variants similar to list
+    let imageVariants = {};
+    if (article.image_data) {
+      try {
+        const imageData = JSON.parse(article.image_data);
+        imageVariants = {
+          original: imageData.original?.url || article.image_url,
+          full: imageData.full?.url || imageData.large?.url || article.image_url,
+          large: imageData.large?.url || imageData.medium_large?.url || article.image_url,
+          medium: imageData.medium?.url || imageData.thumbnail?.url || article.image_url,
+          thumbnail: imageData.thumbnail?.url || article.image_url
+        };
+      } catch {
+        imageVariants = {
+          original: article.image_url,
+          full: article.image_url,
+          large: article.image_url,
+          medium: article.image_url,
+          thumbnail: article.image_url
+        };
+      }
+    } else {
+      imageVariants = {
+        original: article.image_url,
+        full: article.image_url,
+        large: article.image_url,
+        medium: article.image_url,
+        thumbnail: article.image_url
+      };
+    }
+
+    res.json({
+      article: {
+        ...article,
+        image_url: imageVariants.large,
+        image_variants: imageVariants
+      }
+    });
+  } catch (error) {
+    console.error('Get news item error:', error);
+    res.status(500).json({ error: 'Failed to get news item', message: error.message });
   }
 });
 
@@ -485,7 +677,7 @@ app.put('/api/news/:id', authenticateToken, async (req, res) => {
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-
+    
     if (!email || !password) {
       return res.status(400).json({
         error: 'Email and password are required',
@@ -563,7 +755,7 @@ app.post('/api/auth/login', async (req, res) => {
 
 // Verify token and return current user info (for debugging roles)
 app.get('/api/auth/verify', authenticateToken, (req, res) => {
-  res.json({
+    res.json({
     valid: true,
     user: req.user,
     role: req.user && req.user.role ? req.user.role : null,
@@ -644,7 +836,7 @@ app.get('/api/admin/news/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
 
     const result = await pool.query(`
-      SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt, n.image_url, n.image_data,
+      SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt, n.image_url, n.image_data, n.organization_id,
              n.created_at, n.updated_at, n.category, n.custom_category, n.is_published,
              u.first_name, u.last_name, o.name as organization_name, o.logo_url as organization_logo
       FROM news n
