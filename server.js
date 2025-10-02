@@ -107,7 +107,7 @@ const authenticateToken = (req, res, next) => {
 const requireAdmin = (req, res, next) => {
   const roleRaw = req.user && req.user.role;
   const role = typeof roleRaw === 'string' ? roleRaw.toLowerCase() : undefined;
-  const allowed = ['admin', 'superadmin', 'editor'];
+  const allowed = ['admin', 'superadmin', 'editor', 'user'];
   if (!role || !allowed.includes(role)) {
     return res.status(403).json({ error: 'Admin privileges required' });
   }
@@ -559,6 +559,16 @@ app.post('/api/auth/login', async (req, res) => {
       message: error.message
     });
   }
+});
+
+// Verify token and return current user info (for debugging roles)
+app.get('/api/auth/verify', authenticateToken, (req, res) => {
+  res.json({
+    valid: true,
+    user: req.user,
+    role: req.user && req.user.role ? req.user.role : null,
+    issuedAt: new Date().toISOString()
+  });
 });
 
 // ===== ADMIN ENDPOINTS =====
