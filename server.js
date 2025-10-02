@@ -103,9 +103,10 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
-// Require admin role
+// Require admin/superadmin role
 const requireAdmin = (req, res, next) => {
-  if (!req.user || req.user.role !== 'admin') {
+  const role = req.user && req.user.role;
+  if (role !== 'admin' && role !== 'superadmin') {
     return res.status(403).json({ error: 'Admin privileges required' });
   }
   next();
