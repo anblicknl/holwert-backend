@@ -1,46 +1,32 @@
 const express = require('express');
 const cors = require('cors');
+const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const multer = require('multer');
+const FormData = require('form-data');
 const path = require('path');
-const fs = require('fs');
-const { Pool } = require('pg');
+const multer = require('multer');
+const axios = require('axios');
+const https = require('https');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Database connection with error handling
-let pool;
-try {
-  pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false },
-    max: 1, // Limit connections for serverless
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 2000,
-  });
-  
-  console.log('✅ Database pool created');
-} catch (error) {
-  console.error('❌ Database pool creation failed:', error);
-}
-
 // Middleware
-app.use(cors({
-  origin: ['http://localhost:3000', 'https://holwert-backend.vercel.app', 'https://holwert-web.vercel.app'],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
-app.use(express.json({ limit: '10mb' }));
-app.use(express.static('public'));
+app.use(cors());
+app.use(express.json());
 
-// Multer configuration for file uploads (memory storage for serverless)
+// Routes temporarily disabled due to MySQL/PostgreSQL conflict
+// TODO: Fix database configuration in routes
+
+// Multer configuration for image uploads
+const storage = multer.memoryStorage();
 const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  storage: storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+  },
   fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith('image/')) {
       cb(null, true);
@@ -49,6 +35,17 @@ const upload = multer({
     }
   }
 });
+
+// Database connection - PostgreSQL (Neon)
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false
+  }
+});
+
+// Export pool for use in routes
+module.exports.pool = pool;
 
 // JWT Secret
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
@@ -79,63 +76,22 @@ const requireAdmin = (req, res, next) => {
   next();
 };
 
-// Validation helper
-const validateEvent = (event) => {
-  const errors = [];
-  
-  if (!event.title || event.title.trim().length < 5) {
-    errors.push('Titel moet minimaal 5 karakters bevatten');
-  }
-  
-  if (!event.description || event.description.trim().length < 10) {
-    errors.push('Beschrijving moet minimaal 10 karakters bevatten');
-  }
-  
-  if (!event.event_date) {
-    errors.push('Startdatum is verplicht');
-  }
-  
-  if (!event.location || event.location.trim().length === 0) {
-    errors.push('Locatie is verplicht');
-  }
-  
-  if (!event.category) {
-    errors.push('Categorie is verplicht');
-  }
-  
-  if (!event.organization_id) {
-    errors.push('Organisatie is verplicht');
-  }
-  
-  // Validate end_date if provided
-  if (event.end_date && event.event_date) {
-    const startDate = new Date(event.event_date);
-    const endDate = new Date(event.end_date);
-    if (endDate <= startDate) {
-      errors.push('Einddatum moet na startdatum liggen');
-    }
-  }
-  
-  return errors;
-};
-
-// Routes
-
-// Health check
+// Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
-// File upload endpoint (simplified for serverless)
+// File upload endpoint
 app.post('/api/upload', authenticateToken, requireAdmin, upload.single('image'), (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
     }
-    
-    // For serverless, we'll return a placeholder URL
-    // In production, you'd upload to a cloud storage service
+
+    // For now, return a placeholder URL
+    // In production, you would upload to a cloud storage service
     const fileUrl = `https://via.placeholder.com/300x200?text=Uploaded+Image`;
+    
     res.json({ 
       success: true, 
       url: fileUrl,
@@ -144,316 +100,6 @@ app.post('/api/upload', authenticateToken, requireAdmin, upload.single('image'),
   } catch (error) {
     console.error('Upload error:', error);
     res.status(500).json({ error: 'Upload failed', message: error.message });
-  }
-});
-
-// Get all events (public)
-app.get('/api/events', async (req, res) => {
-  try {
-    if (!pool) {
-      throw new Error('Database not connected');
-    }
-    
-    console.log('Fetching events...');
-    const result = await pool.query(`
-      SELECT e.*, o.name as organization_name, u.name as organizer_name
-      FROM events e
-      LEFT JOIN organizations o ON e.organization_id = o.id
-      LEFT JOIN users u ON e.organizer_id = u.id
-      WHERE e.status IN ('scheduled', 'published', 'approved')
-      ORDER BY e.event_date ASC
-    `);
-    
-    console.log(`Found ${result.rows.length} events`);
-    res.json({ events: result.rows });
-  } catch (error) {
-    console.error('Get events error:', error);
-    console.error('Error details:', error.message, error.stack);
-    res.status(500).json({ error: 'Failed to fetch events', message: error.message });
-  }
-});
-
-// Get single event (public)
-app.get('/api/events/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const result = await pool.query(`
-      SELECT e.*, o.name as organization_name, u.name as organizer_name
-      FROM events e
-      LEFT JOIN organizations o ON e.organization_id = o.id
-      LEFT JOIN users u ON e.organizer_id = u.id
-      WHERE e.id = $1
-    `, [id]);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Event not found' });
-    }
-    
-    res.json({ event: result.rows[0] });
-  } catch (error) {
-    console.error('Get event error:', error);
-    res.status(500).json({ error: 'Failed to fetch event', message: error.message });
-  }
-});
-
-// Create event (admin only)
-app.post('/api/events', authenticateToken, requireAdmin, async (req, res) => {
-  try {
-    const {
-      title,
-      description,
-      event_date,
-      end_date,
-      location,
-      category,
-      organization_id,
-      image_url,
-      max_attendees,
-      price
-    } = req.body;
-
-    const event = {
-      title,
-      description,
-      event_date,
-      end_date,
-      location,
-      category,
-      organization_id,
-      image_url,
-      max_attendees,
-      price
-    };
-
-    // Validate event data
-    const errors = validateEvent(event);
-    if (errors.length > 0) {
-      return res.status(400).json({
-        error: 'Validation failed', 
-        details: errors 
-      });
-    }
-
-    // Insert event
-    const result = await pool.query(`
-      INSERT INTO events (
-        title, description, event_date, end_date, location, 
-        category, organization_id, image_url, max_attendees, 
-        price, organizer_id, status, created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
-      RETURNING *
-    `, [
-      title.trim(),
-      description.trim(),
-      event_date,
-      end_date || null,
-      location.trim(),
-      category,
-      organization_id,
-      image_url || null,
-      max_attendees || null,
-      price || 0,
-      req.user.id,
-      'scheduled'
-    ]);
-
-    res.status(201).json({
-      success: true, 
-      event: result.rows[0],
-      message: 'Event created successfully'
-    });
-
-  } catch (error) {
-    console.error('Create event error:', error);
-    res.status(500).json({
-      error: 'Failed to create event', 
-      message: error.message
-    });
-  }
-});
-
-// Update event (admin only)
-app.put('/api/events/:id', authenticateToken, requireAdmin, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const {
-      title,
-      description,
-      event_date,
-      end_date,
-      location,
-      category,
-      organization_id,
-      image_url,
-      max_attendees,
-      price,
-      status
-    } = req.body;
-
-    // Check if event exists
-    const checkResult = await pool.query('SELECT organizer_id FROM events WHERE id = $1', [id]);
-    if (checkResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Event not found' });
-    }
-
-    // Check permissions (admin can edit own events, superadmin can edit all)
-    if (req.user.role === 'admin' && checkResult.rows[0].organizer_id !== req.user.id) {
-      return res.status(403).json({ error: 'You can only edit your own events' });
-    }
-
-    // Build update query dynamically
-    const updates = [];
-    const values = [];
-    let paramCount = 1;
-
-    if (title !== undefined) {
-      updates.push(`title = $${paramCount++}`);
-      values.push(title.trim());
-    }
-    if (description !== undefined) {
-      updates.push(`description = $${paramCount++}`);
-      values.push(description.trim());
-    }
-    if (event_date !== undefined) {
-      updates.push(`event_date = $${paramCount++}`);
-      values.push(event_date);
-    }
-    if (end_date !== undefined) {
-      updates.push(`end_date = $${paramCount++}`);
-      values.push(end_date);
-    }
-    if (location !== undefined) {
-      updates.push(`location = $${paramCount++}`);
-      values.push(location.trim());
-    }
-    if (category !== undefined) {
-      updates.push(`category = $${paramCount++}`);
-      values.push(category);
-    }
-    if (organization_id !== undefined) {
-      updates.push(`organization_id = $${paramCount++}`);
-      values.push(organization_id);
-    }
-    if (image_url !== undefined) {
-      updates.push(`image_url = $${paramCount++}`);
-      values.push(image_url);
-    }
-    if (max_attendees !== undefined) {
-      updates.push(`max_attendees = $${paramCount++}`);
-      values.push(max_attendees);
-    }
-    if (price !== undefined) {
-      updates.push(`price = $${paramCount++}`);
-      values.push(price);
-    }
-    if (status !== undefined) {
-      updates.push(`status = $${paramCount++}`);
-      values.push(status);
-    }
-
-    if (updates.length === 0) {
-      return res.status(400).json({ error: 'No fields to update' });
-    }
-
-    // Add updated_at and id
-    updates.push(`updated_at = NOW()`);
-    values.push(id);
-
-    const query = `
-      UPDATE events 
-      SET ${updates.join(', ')} 
-      WHERE id = $${paramCount}
-      RETURNING *
-    `;
-
-    const result = await pool.query(query, values);
-
-    res.json({
-      success: true, 
-      event: result.rows[0],
-      message: 'Event updated successfully'
-    });
-
-  } catch (error) {
-    console.error('Update event error:', error);
-    res.status(500).json({
-      error: 'Failed to update event', 
-      message: error.message
-    });
-  }
-});
-
-// Delete event (admin only)
-app.delete('/api/events/:id', authenticateToken, requireAdmin, async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    // Check if event exists and get organizer
-    const checkResult = await pool.query('SELECT organizer_id FROM events WHERE id = $1', [id]);
-    if (checkResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Event not found' });
-    }
-
-    // Check permissions
-    if (req.user.role === 'admin' && checkResult.rows[0].organizer_id !== req.user.id) {
-      return res.status(403).json({ error: 'You can only delete your own events' });
-    }
-
-    await pool.query('DELETE FROM events WHERE id = $1', [id]);
-
-    res.json({
-      success: true, 
-      message: 'Event deleted successfully' 
-    });
-
-  } catch (error) {
-    console.error('Delete event error:', error);
-    res.status(500).json({
-      error: 'Failed to delete event', 
-      message: error.message
-    });
-  }
-});
-
-// Get organizations (for dropdown)
-app.get('/api/organizations', authenticateToken, requireAdmin, async (req, res) => {
-  try {
-    const result = await pool.query('SELECT id, name FROM organizations ORDER BY name');
-    res.json({ organizations: result.rows });
-  } catch (error) {
-    console.error('Get organizations error:', error);
-    res.status(500).json({ error: 'Failed to fetch organizations', message: error.message });
-  }
-});
-
-// Temporary admin endpoints for dashboard compatibility
-app.get('/api/admin/users', authenticateToken, requireAdmin, async (req, res) => {
-  try {
-    const result = await pool.query('SELECT COUNT(*) as count FROM users');
-    res.json({ pagination: { total: parseInt(result.rows[0].count) } });
-  } catch (error) {
-    console.error('Get users count error:', error);
-    res.status(500).json({ error: 'Failed to fetch users count', message: error.message });
-  }
-});
-
-app.get('/api/admin/organizations', authenticateToken, requireAdmin, async (req, res) => {
-  try {
-    const result = await pool.query('SELECT COUNT(*) as count FROM organizations');
-    res.json({ pagination: { total: parseInt(result.rows[0].count) } });
-  } catch (error) {
-    console.error('Get organizations count error:', error);
-    res.status(500).json({ error: 'Failed to fetch organizations count', message: error.message });
-  }
-});
-
-app.get('/api/admin/news', authenticateToken, requireAdmin, async (req, res) => {
-  try {
-    // Return 0 for now since we don't have a news table yet
-    res.json({ pagination: { total: 0 } });
-  } catch (error) {
-    console.error('Get news count error:', error);
-    res.status(500).json({ error: 'Failed to fetch news count', message: error.message });
   }
 });
 
@@ -505,13 +151,24 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
+// Get organizations endpoint
+app.get('/api/organizations', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT id, name FROM organizations ORDER BY name');
+    res.json({ organizations: result.rows });
+  } catch (error) {
+    console.error('Get organizations error:', error);
+    res.status(500).json({ error: 'Failed to fetch organizations', message: error.message });
+  }
+});
+
 // Error handling middleware
 app.use((error, req, res, next) => {
   console.error('Unhandled error:', error);
-    res.status(500).json({
+  res.status(500).json({ 
     error: 'Internal server error', 
-      message: error.message
-    });
+    message: error.message 
+  });
 });
 
 // 404 handler
@@ -519,12 +176,10 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Endpoint not found' });
 });
 
-// Start server (only if not in serverless environment)
-if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
-  app.listen(PORT, () => {
-    console.log(`🚀 Holwert Backend running on port ${PORT}`);
-    console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
-  });
-}
+// Start server
+app.listen(PORT, () => {
+  console.log(`🚀 Holwert Backend running on port ${PORT}`);
+  console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
+});
 
 module.exports = app;
