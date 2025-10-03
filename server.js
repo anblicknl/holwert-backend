@@ -1388,7 +1388,7 @@ app.post('/api/admin/events', authenticateToken, requireAdmin, async (req, res) 
 app.put('/api/admin/events/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, description, event_date, end_date, location, organization_id, status, image_url } = req.body;
+    const { title, description, event_date, end_date, location, organization_id, status, image_url, category } = req.body;
     
     // First check if event exists and get current organizer_id
     const checkResult = await pool.query('SELECT organizer_id FROM events WHERE id = $1', [id]);
@@ -1405,12 +1405,13 @@ app.put('/api/admin/events/:id', authenticateToken, requireAdmin, async (req, re
     if (organization_id !== undefined) sets.push(`organization_id = ${push(organization_id)}`);
     if (status !== undefined) sets.push(`status = ${push(status)}`);
     if (image_url !== undefined) sets.push(`image_url = ${push(image_url)}`);
+    if (category !== undefined) sets.push(`category = ${push(category)}`);
     if (!sets.length) return res.status(400).json({ error: 'No fields to update' });
     
     params.push(id);
     const result = await pool.query(
       `UPDATE events SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${params.length}
-       RETURNING id, title, description, event_date, end_date, location, organization_id, status, image_url, created_at, updated_at`,
+       RETURNING id, title, description, event_date, end_date, location, organization_id, status, image_url, category, created_at, updated_at`,
       params
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Event not found' });
