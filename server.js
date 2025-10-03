@@ -49,7 +49,8 @@ app.get('/', (req, res) => {
     message: 'Holwert Backend is running!',
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
-    database: 'Connected to PostgreSQL (Neon)'
+    database: 'Connected to PostgreSQL (Neon)',
+    version: '1.1.0'
   });
 });
 
@@ -423,14 +424,13 @@ app.post('/api/events', async (req, res) => {
     // Try to insert, but on DB error return a mocked success so the UI can proceed for demo
     try {
       const result = await pool.query(
-        `INSERT INTO events (title, description, event_date, end_date, location, organization_id, category, image_url, status, created_at, updated_at, organizer_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'scheduled', NOW(), NOW(), COALESCE($9, 1))
+        `INSERT INTO events (title, description, event_date, location, organization_id, category, image_url, status, created_at, updated_at, organizer_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'scheduled', NOW(), NOW(), COALESCE($8, 1))
          RETURNING *`,
         [
           title,
           description || '',
           event_date,
-          end_date,
           location,
           body.organization_id || null,
           body.category || 'evenement',
