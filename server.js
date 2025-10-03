@@ -50,7 +50,7 @@ app.get('/', (req, res) => {
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
     database: 'Connected to PostgreSQL (Neon)',
-    version: '1.3.0'
+    version: '1.3.1'
   });
 });
 
@@ -372,7 +372,7 @@ app.post('/api/news', authenticateToken, async (req, res) => {
 app.get('/api/events', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT id, title, description, event_date, location, category, image_url, status, created_at
+      SELECT id, title, description, event_date, location, category, image_url
       FROM events
       ORDER BY event_date ASC
     `);
@@ -382,6 +382,27 @@ app.get('/api/events', async (req, res) => {
     console.error('Get events error:', error);
     // Return safe fallback to keep dashboard working
     res.status(200).json({ events: [] });
+  }
+});
+
+// Get single event (public)
+app.get('/api/events/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(`
+      SELECT id, title, description, event_date, location, category, image_url
+      FROM events
+      WHERE id = $1
+    `, [id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Event not found' });
+    }
+    
+    res.json({ event: result.rows[0] });
+  } catch (error) {
+    console.error('Get event error:', error);
+    res.status(500).json({ error: 'Failed to get event' });
   }
 });
 
@@ -422,8 +443,8 @@ app.post('/api/events', async (req, res) => {
     // Try to insert, but on DB error return a mocked success so the UI can proceed for demo
     try {
       const result = await pool.query(
-        `INSERT INTO events (title, description, event_date, location, category, image_url, status)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)
+        `INSERT INTO events (title, description, event_date, location, category, image_url)
+         VALUES ($1,$2,$3,$4,$5,$6)
          RETURNING *`,
         [
           title,
@@ -431,8 +452,7 @@ app.post('/api/events', async (req, res) => {
           event_date,
           location,
           body.category || 'evenement',
-          body.image_url || null,
-          'scheduled'
+          body.image_url || null
         ]
       );
       return res.status(201).json({ success: true, event: result.rows[0] });
