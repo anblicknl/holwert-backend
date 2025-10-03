@@ -427,6 +427,37 @@ app.get('/api/organizations', authenticateToken, requireAdmin, async (req, res) 
   }
 });
 
+// Temporary admin endpoints for dashboard compatibility
+app.get('/api/admin/users', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT COUNT(*) as count FROM users');
+    res.json({ pagination: { total: parseInt(result.rows[0].count) } });
+  } catch (error) {
+    console.error('Get users count error:', error);
+    res.status(500).json({ error: 'Failed to fetch users count', message: error.message });
+  }
+});
+
+app.get('/api/admin/organizations', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT COUNT(*) as count FROM organizations');
+    res.json({ pagination: { total: parseInt(result.rows[0].count) } });
+  } catch (error) {
+    console.error('Get organizations count error:', error);
+    res.status(500).json({ error: 'Failed to fetch organizations count', message: error.message });
+  }
+});
+
+app.get('/api/admin/news', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    // Return 0 for now since we don't have a news table yet
+    res.json({ pagination: { total: 0 } });
+  } catch (error) {
+    console.error('Get news count error:', error);
+    res.status(500).json({ error: 'Failed to fetch news count', message: error.message });
+  }
+});
+
 // Login endpoint
 app.post('/api/login', async (req, res) => {
   try {
