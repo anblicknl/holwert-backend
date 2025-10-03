@@ -90,25 +90,25 @@ const initDatabase = async () => {
     `);
 
     // Events table
-    await connection.execute(`
+    await client.query(`
       CREATE TABLE IF NOT EXISTS events (
-        id INT PRIMARY KEY AUTO_INCREMENT,
+        id SERIAL PRIMARY KEY,
         title VARCHAR(255) NOT NULL,
-        description TEXT NOT NULL,
-        event_date DATE NOT NULL,
-        event_time TIME NOT NULL,
-        location VARCHAR(255) NOT NULL,
-        location_details TEXT NULL,
-        organizer_id INT NOT NULL,
-        organization_id INT NULL,
-        category ENUM('vergadering', 'evenement', 'sport', 'cultuur', 'markt', 'overig') NOT NULL,
+        description TEXT,
+        event_date TIMESTAMP NOT NULL,
+        end_date TIMESTAMP NULL,
+        location VARCHAR(255),
+        location_details TEXT,
+        organizer_id INTEGER NOT NULL,
+        organization_id INTEGER NULL,
+        category VARCHAR(50) DEFAULT 'evenement',
         price DECIMAL(10,2) DEFAULT 0.00,
-        max_attendees INT NULL,
-        image VARCHAR(255) NULL,
-        status ENUM('draft', 'pending', 'published', 'cancelled') DEFAULT 'pending',
+        max_attendees INTEGER NULL,
+        image_url VARCHAR(255) NULL,
+        status VARCHAR(20) DEFAULT 'scheduled',
         published_at TIMESTAMP NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (organizer_id) REFERENCES users(id) ON DELETE CASCADE,
         FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL
       )
