@@ -1138,6 +1138,47 @@ app.delete('/api/admin/organizations/:id', authenticateToken, requireAdmin, asyn
   }
 });
 
+// Get all events (public)
+app.get('/events', async (req, res) => {
+  try {
+    const { page = 1, limit = 20 } = req.query;
+    const offset = (page - 1) * limit;
+
+    const query = `
+      SELECT e.*, o.name as organization_name, o.brand_color as organization_brand_color, o.logo_url as organization_logo
+      FROM events e
+      LEFT JOIN organizations o ON e.organization_id = o.id
+      WHERE e.status = 'scheduled' AND e.event_date >= NOW()
+      ORDER BY e.event_date ASC
+      LIMIT $1 OFFSET $2
+    `;
+
+    const result = await pool.query(query, [parseInt(limit), parseInt(offset)]);
+
+    // Get total count
+    const countResult = await pool.query(
+      'SELECT COUNT(*) as total FROM events e WHERE e.status = \'scheduled\' AND e.event_date >= NOW()'
+    );
+
+    res.json({
+      events: result.rows,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: parseInt(countResult.rows[0].total),
+        pages: Math.ceil(countResult.rows[0].total / limit)
+      }
+    });
+
+  } catch (error) {
+    console.error('Get events error:', error);
+    res.status(500).json({
+      error: 'Failed to get events',
+      message: error.message
+    });
+  }
+});
+
 // Get all events (admin)
 app.get('/api/admin/events', authenticateToken, async (req, res) => {
   try {
@@ -1561,7 +1602,7 @@ app.post('/api/migrate-organizations', async (req, res) => {
     client.release();
     console.log('Migration completed successfully!');
     res.json({ message: 'Migration completed successfully', addedColumns: columnsToAdd.filter(col => !existingColumns.includes(col.name)) });
-    
+
   } catch (error) {
     console.error('Migration failed:', error);
     res.status(500).json({ error: 'Migration failed', message: error.message });
