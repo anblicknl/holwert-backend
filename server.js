@@ -1087,24 +1087,33 @@ app.post('/api/admin/organizations', authenticateToken, requireAdmin, async (req
 app.put('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, category, description, is_approved, website, contact_email, contact_phone, brand_color, logo_url } = req.body;
+    const { name, category, description, bio, is_approved, website, email, phone, whatsapp, address, 
+            facebook, instagram, twitter, linkedin, brand_color, logo_url } = req.body;
     const sets = [];
     const params = [];
     const push = (v) => { params.push(v); return `$${params.length}`; };
     if (name !== undefined) sets.push(`name = ${push(name)}`);
     if (category !== undefined) sets.push(`category = ${push(category)}`);
     if (description !== undefined) sets.push(`description = ${push(description)}`);
+    if (bio !== undefined) sets.push(`bio = ${push(bio)}`);
     if (is_approved !== undefined) sets.push(`is_approved = ${push(is_approved)}`);
     if (website !== undefined) sets.push(`website = ${push(website)}`);
-    if (contact_email !== undefined) sets.push(`contact_email = ${push(contact_email)}`);
-    if (contact_phone !== undefined) sets.push(`contact_phone = ${push(contact_phone)}`);
+    if (email !== undefined) sets.push(`email = ${push(email)}`);
+    if (phone !== undefined) sets.push(`phone = ${push(phone)}`);
+    if (whatsapp !== undefined) sets.push(`whatsapp = ${push(whatsapp)}`);
+    if (address !== undefined) sets.push(`address = ${push(address)}`);
+    if (facebook !== undefined) sets.push(`facebook = ${push(facebook)}`);
+    if (instagram !== undefined) sets.push(`instagram = ${push(instagram)}`);
+    if (twitter !== undefined) sets.push(`twitter = ${push(twitter)}`);
+    if (linkedin !== undefined) sets.push(`linkedin = ${push(linkedin)}`);
     if (brand_color !== undefined) sets.push(`brand_color = ${push(brand_color)}`);
     if (logo_url !== undefined) sets.push(`logo_url = ${push(logo_url)}`);
     if (!sets.length) return res.status(400).json({ error: 'No fields to update' });
     params.push(id);
     const result = await pool.query(
       `UPDATE organizations SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${params.length}
-       RETURNING id, name, category, description, is_approved, website, contact_email, contact_phone, brand_color, logo_url, created_at, updated_at`,
+       RETURNING id, name, category, description, bio, is_approved, website, email, phone, whatsapp, address, 
+                 facebook, instagram, twitter, linkedin, brand_color, logo_url, created_at, updated_at`,
       params
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Organization not found' });
