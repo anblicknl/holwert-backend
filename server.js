@@ -65,11 +65,11 @@ app.get('/api/health', (req, res) => {
 
 // Simple test endpoint
 app.get('/api/test', (req, res) => {
-  res.json({ 
+    res.json({
     success: true,
     message: 'Test endpoint working - FIXED VERSION',
-    timestamp: new Date().toISOString()
-  });
+      timestamp: new Date().toISOString()
+    });
 });
 
 // Middleware to verify JWT token
@@ -119,11 +119,11 @@ app.post('/api/upload', authenticateToken, upload.single('image'), async (req, r
     
     // Upload to external server
     const uploadResponse = await axios.post('https://holwert.appenvloed.com/upload', form, {
-      headers: {
-        ...form.getHeaders(),
-      },
+           headers: {
+             ...form.getHeaders(),
+           },
       timeout: 30000
-    });
+         });
     
     if (uploadResponse.data.success) {
       const imageUrl = uploadResponse.data.url;
@@ -151,7 +151,7 @@ app.post('/api/upload', authenticateToken, upload.single('image'), async (req, r
     } else {
       throw new Error(uploadResponse.data.message || 'Upload failed');
     }
-    
+
   } catch (error) {
     console.error('Image upload error:', error);
     res.status(500).json({ 
@@ -195,21 +195,21 @@ app.post('/api/upload/image', authenticateToken, async (req, res) => {
     
     // Upload to external server
     const uploadResponse = await axios.post('https://holwert.appenvloed.com/upload', form, {
-      headers: {
-        ...form.getHeaders(),
-      },
+          headers: {
+            ...form.getHeaders(),
+          },
       timeout: 30000
-    });
+        });
     
-    if (uploadResponse.data.success) {
+        if (uploadResponse.data.success) {
       const imageUrl = uploadResponse.data.url;
-      
-      res.json({
-        message: 'Image uploaded successfully to external server (for editing)',
-        imageUrl: imageUrl,
-        filename: uniqueFilename,
+
+    res.json({
+            message: 'Image uploaded successfully to external server (for editing)',
+      imageUrl: imageUrl,
+      filename: uniqueFilename,
         note: 'Uploaded to external server - high quality maintained'
-      });
+    });
     } else {
       throw new Error(uploadResponse.data.message || 'Upload failed');
     }
@@ -364,6 +364,61 @@ app.post('/api/news', authenticateToken, async (req, res) => {
       error: 'Failed to create news article',
       message: error.message
     });
+  }
+});
+
+// ===== EVENTS ENDPOINTS =====
+
+// Get all events (public)
+app.get('/api/events', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT e.*, o.name as organization_name, u.name as organizer_name
+      FROM events e
+      LEFT JOIN organizations o ON e.organization_id = o.id
+      LEFT JOIN users u ON e.organizer_id = u.id
+      WHERE e.status IN ('scheduled', 'published', 'approved')
+      ORDER BY e.event_date ASC
+    `);
+    
+    res.json({ events: result.rows });
+  } catch (error) {
+    console.error('Get events error:', error);
+    res.status(500).json({ error: 'Failed to fetch events', message: error.message });
+  }
+});
+
+// Get single event (public)
+app.get('/api/events/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(`
+      SELECT e.*, o.name as organization_name, u.name as organizer_name
+      FROM events e
+      LEFT JOIN organizations o ON e.organization_id = o.id
+      LEFT JOIN users u ON e.organizer_id = u.id
+      WHERE e.id = $1
+    `, [id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Event not found' });
+    }
+    
+    res.json({ event: result.rows[0] });
+  } catch (error) {
+    console.error('Get event error:', error);
+    res.status(500).json({ error: 'Failed to fetch event', message: error.message });
+  }
+});
+
+// Get organizations (for dropdown)
+app.get('/api/organizations', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT id, name FROM organizations ORDER BY name');
+    res.json({ organizations: result.rows });
+  } catch (error) {
+    console.error('Get organizations error:', error);
+    res.status(500).json({ error: 'Failed to fetch organizations', message: error.message });
   }
 });
 
