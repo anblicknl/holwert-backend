@@ -7,7 +7,6 @@ const FormData = require('form-data');
 const path = require('path');
 const multer = require('multer');
 const axios = require('axios');
-const https = require('https');
 require('dotenv').config();
 
 const app = express();
@@ -16,9 +15,6 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 app.use(cors());
 app.use(express.json());
-
-// Routes temporarily disabled due to MySQL/PostgreSQL conflict
-// TODO: Fix database configuration in routes
 
 // Multer configuration for image uploads
 const storage = multer.memoryStorage();
@@ -44,142 +40,342 @@ const pool = new Pool({
   }
 });
 
-// Export pool for use in routes
-module.exports.pool = pool;
-
 // JWT Secret
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+const JWT_SECRET = process.env.JWT_SECRET || 'holwert-secret-key-2024';
 
-// Authentication middleware
+// Test route
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'Holwert Backend is running!',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development',
+    database: 'Connected to PostgreSQL (Neon)'
+  });
+});
+
+// Health check
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development',
+    database: 'Connected to PostgreSQL (Neon)'
+  });
+});
+
+// Simple test endpoint
+app.get('/api/test', (req, res) => {
+  res.json({ 
+    success: true,
+    message: 'Test endpoint working - FIXED VERSION',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Middleware to verify JWT token
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
   if (!token) {
-    return res.status(401).json({ error: 'Access token required' });
+    return res.status(401).json({
+      error: 'Access denied',
+      message: 'No token provided'
+    });
   }
 
   jwt.verify(token, JWT_SECRET, (err, user) => {
     if (err) {
-      return res.status(403).json({ error: 'Invalid or expired token' });
+      return res.status(403).json({
+        error: 'Invalid token',
+        message: 'Token is invalid or expired'
+      });
     }
     req.user = user;
     next();
   });
 };
 
-// Admin middleware
-const requireAdmin = (req, res, next) => {
-  if (!req.user || (req.user.role !== 'admin' && req.user.role !== 'superadmin')) {
-    return res.status(403).json({ error: 'Admin access required' });
-  }
-  next();
-};
-
-// Health check endpoint
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date().toISOString() });
-});
-
-// File upload endpoint
-app.post('/api/upload', authenticateToken, requireAdmin, upload.single('image'), (req, res) => {
+// ===== FIXED IMAGE UPLOAD TO EXTERNAL SERVER =====
+app.post('/api/upload', authenticateToken, upload.single('image'), async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded' });
+      return res.status(400).json({ error: 'No image provided' });
     }
-
-    // For now, return a placeholder URL
-    // In production, you would upload to a cloud storage service
-    const fileUrl = `https://via.placeholder.com/300x200?text=Uploaded+Image`;
     
-    res.json({ 
-      success: true, 
-      url: fileUrl,
-      filename: req.file.originalname 
+    console.log('Uploading to external server:', {
+      filename: req.file.originalname,
+      size: req.file.size,
+      mimetype: req.file.mimetype
     });
+    
+    // Create form data for external upload
+    const form = new FormData();
+    form.append('file', req.file.buffer, {
+      filename: req.file.originalname,
+      contentType: req.file.mimetype
+    });
+    form.append('folder', 'uploads/');
+    
+    // Upload to external server
+    const uploadResponse = await axios.post('https://holwert.appenvloed.com/upload', form, {
+      headers: {
+        ...form.getHeaders(),
+      },
+      timeout: 30000
+    });
+    
+    if (uploadResponse.data.success) {
+      const imageUrl = uploadResponse.data.url;
+      
+      res.json({
+        message: 'Image uploaded successfully to external server',
+        url: imageUrl,
+        image_data: JSON.stringify({
+          original: { url: imageUrl },
+          full: { url: imageUrl },
+          large: { url: imageUrl },
+          medium_large: { url: imageUrl },
+          medium: { url: imageUrl },
+          thumbnail: { url: imageUrl }
+        }),
+        sizes: {
+          original: { url: imageUrl },
+          full: { url: imageUrl },
+          large: { url: imageUrl },
+          medium_large: { url: imageUrl },
+          medium: { url: imageUrl },
+          thumbnail: { url: imageUrl }
+        }
+      });
+    } else {
+      throw new Error(uploadResponse.data.message || 'Upload failed');
+    }
+    
   } catch (error) {
-    console.error('Upload error:', error);
-    res.status(500).json({ error: 'Upload failed', message: error.message });
+    console.error('Image upload error:', error);
+    res.status(500).json({ 
+      error: 'Failed to upload image', 
+      message: error.message,
+      details: error.response?.data || error.toString()
+    });
   }
 });
 
-// Login endpoint
-app.post('/api/login', async (req, res) => {
+// ===== FIXED IMAGE UPLOAD FOR EDITING =====
+app.post('/api/upload/image', authenticateToken, async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { imageData, filename } = req.body;
 
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password required' });
+    if (!imageData) {
+      return res.status(400).json({
+        error: 'No image data provided',
+        message: 'Please provide imageData (base64 encoded image)'
+      });
     }
 
-    const result = await pool.query(
-      'SELECT id, email, password, role, name FROM users WHERE email = $1',
-      [email]
-    );
+    console.log('Uploading edit image to external server:', {
+      filename: filename || 'unknown',
+      dataLength: imageData.length
+    });
 
-    if (result.rows.length === 0) {
-      return res.status(401).json({ error: 'Invalid credentials' });
+    // Convert base64 to buffer
+    const base64Data = imageData.replace(/^data:image\/[a-z]+;base64,/, '');
+    const buffer = Buffer.from(base64Data, 'base64');
+    
+    // Create form data for external upload
+    const form = new FormData();
+    const uniqueFilename = filename || `image-${Date.now()}-${Math.round(Math.random() * 1E9)}.jpg`;
+    
+    form.append('file', buffer, {
+      filename: uniqueFilename,
+      contentType: 'image/jpeg'
+    });
+    form.append('folder', 'uploads/');
+    
+    // Upload to external server
+    const uploadResponse = await axios.post('https://holwert.appenvloed.com/upload', form, {
+      headers: {
+        ...form.getHeaders(),
+      },
+      timeout: 30000
+    });
+    
+    if (uploadResponse.data.success) {
+      const imageUrl = uploadResponse.data.url;
+      
+      res.json({
+        message: 'Image uploaded successfully to external server (for editing)',
+        imageUrl: imageUrl,
+        filename: uniqueFilename,
+        note: 'Uploaded to external server - high quality maintained'
+      });
+    } else {
+      throw new Error(uploadResponse.data.message || 'Upload failed');
     }
 
-    const user = result.rows[0];
-    const validPassword = await bcrypt.compare(password, user.password);
+  } catch (error) {
+    console.error('Upload error:', error);
+    res.status(500).json({
+      error: 'Failed to process image',
+      message: error.message,
+      details: error.response?.data || error.toString()
+    });
+  }
+});
 
-    if (!validPassword) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
+// Get all published news (public)
+app.get('/api/news', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT n.id, n.title, COALESCE(n.content, '') as content, n.image_url, n.image_data,
+             n.created_at, n.updated_at,
+             u.first_name, u.last_name, o.name as organization_name, o.logo_url as organization_logo
+      FROM news n
+      JOIN users u ON n.author_id = u.id
+      LEFT JOIN organizations o ON n.organization_id = o.id
+      WHERE n.is_published = true
+      ORDER BY n.created_at DESC
+      LIMIT 20
+    `);
 
-    const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role },
-      JWT_SECRET,
-      { expiresIn: '24h' }
-    );
+    // Process image data to provide multiple variants
+    const processedNews = result.rows.map(article => {
+      let imageVariants = {};
+      
+      // Parse image_data if it exists
+      if (article.image_data) {
+        try {
+          const imageData = JSON.parse(article.image_data);
+          imageVariants = {
+            original: imageData.original?.url || article.image_url,
+            full: imageData.full?.url || imageData.large?.url || article.image_url,
+            large: imageData.large?.url || imageData.medium_large?.url || article.image_url,
+            medium: imageData.medium?.url || imageData.thumbnail?.url || article.image_url,
+            thumbnail: imageData.thumbnail?.url || article.image_url,
+            webp_large: imageData.webp_large?.url || imageData.large?.url || article.image_url,
+            webp_medium: imageData.webp_medium?.url || imageData.medium?.url || article.image_url
+          };
+        } catch (error) {
+          console.error('Error parsing image_data:', error);
+          imageVariants = {
+            original: article.image_url,
+            full: article.image_url,
+            large: article.image_url,
+            medium: article.image_url,
+            thumbnail: article.image_url
+          };
+        }
+      } else {
+        // Fallback to single image_url
+        imageVariants = {
+          original: article.image_url,
+          full: article.image_url,
+          large: article.image_url,
+          medium: article.image_url,
+          thumbnail: article.image_url
+        };
+      }
+
+      return {
+        ...article,
+        image_url: imageVariants.large, // Use large variant for mobile
+        image_variants: imageVariants
+      };
+    });
 
     res.json({
-      success: true,
-      token,
-      user: {
-        id: user.id,
-        email: user.email,
-        role: user.role,
-        name: user.name
+      news: processedNews,
+      pagination: {
+        page: 1,
+        limit: 20,
+        total: result.rows.length,
+        pages: 1
       }
     });
 
   } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({ error: 'Login failed', message: error.message });
+    console.error('Get news error:', error);
+    res.status(500).json({
+      error: 'Failed to get news',
+      message: error.message
+    });
   }
 });
 
-// Get organizations endpoint
-app.get('/api/organizations', authenticateToken, requireAdmin, async (req, res) => {
+// Create news article with workflow logic
+app.post('/api/news', authenticateToken, async (req, res) => {
   try {
-    const result = await pool.query('SELECT id, name FROM organizations ORDER BY name');
-    res.json({ organizations: result.rows });
-  } catch (error) {
-    console.error('Get organizations error:', error);
-    res.status(500).json({ error: 'Failed to fetch organizations', message: error.message });
-  }
-});
+    const { title, content, excerpt, category, custom_category, organization_id, image_url } = req.body;
+    const authorId = req.user.userId;
 
-// Error handling middleware
-app.use((error, req, res, next) => {
-  console.error('Unhandled error:', error);
-  res.status(500).json({ 
-    error: 'Internal server error', 
-    message: error.message 
-  });
+    // Validation
+    if (!title || !content) {
+      return res.status(400).json({
+        error: 'Title and content are required'
+      });
+    }
+
+    // Determine publication status based on user type
+    let isPublished = false;
+
+    // Check if user is associated with an approved organization
+    if (organization_id) {
+      const orgResult = await pool.query(
+        'SELECT is_approved FROM organizations WHERE id = $1',
+        [organization_id]
+      );
+      
+      if (orgResult.rows.length > 0 && orgResult.rows[0].is_approved) {
+        // Organization content: publish immediately
+        isPublished = true;
+      }
+    }
+
+    // Handle category logic
+    let finalCategory = category || 'dorpsnieuws';
+    let finalCustomCategory = null;
+    
+    if (category === 'overig' && custom_category) {
+      finalCustomCategory = custom_category;
+    }
+
+    // Insert into news table
+    const result = await pool.query(
+      'INSERT INTO news (title, content, excerpt, author_id, organization_id, image_url, image_data, category, custom_category, is_published) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id, title, COALESCE(content, \'\') as content, excerpt, category, custom_category, image_url, is_published, created_at',
+      [title, content, excerpt || null, authorId, organization_id || null, image_url || null, req.body.image_data || null, finalCategory, finalCustomCategory, isPublished]
+    );
+
+    const message = isPublished 
+      ? 'News article published successfully' 
+      : 'News article created and submitted for moderation';
+
+    res.status(201).json({
+      message: message,
+      articleId: result.rows[0].id,
+      article: result.rows[0],
+      isPublished: isPublished,
+      requiresModeration: !isPublished
+    });
+
+  } catch (error) {
+    console.error('Create news error:', error);
+    res.status(500).json({
+      error: 'Failed to create news article',
+      message: error.message
+    });
+  }
 });
 
 // 404 handler
-app.use((req, res) => {
-  res.status(404).json({ error: 'Endpoint not found' });
+app.use('*', (req, res) => {
+  res.status(404).json({ error: 'Route not found' });
 });
 
 // Start server
-app.listen(PORT, () => {
-  console.log(`🚀 Holwert Backend running on port ${PORT}`);
-  console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
+app.listen(PORT, async () => {
+  console.log(`Server running on port ${PORT}`);
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
 module.exports = app;
