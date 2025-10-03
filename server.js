@@ -1565,6 +1565,47 @@ app.post('/api/migrate-organizations', async (req, res) => {
   }
 });
 
+// Convenience: allow triggering migration via GET (for browser)
+app.get('/api/migrate-organizations', async (req, res) => {
+  try {
+    console.log('Starting organizations table migration (GET)...');
+
+    const client = await pool.connect();
+
+    const checkColumns = await client.query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name = 'organizations' 
+      AND column_name IN ('bio', 'whatsapp', 'facebook', 'instagram', 'twitter', 'linkedin', 'brand_color')
+    `);
+
+    const existingColumns = checkColumns.rows.map(row => row.column_name);
+    const columnsToAdd = [
+      { name: 'bio', type: 'TEXT' },
+      { name: 'whatsapp', type: 'VARCHAR(20)' },
+      { name: 'facebook', type: 'VARCHAR(255)' },
+      { name: 'instagram', type: 'VARCHAR(255)' },
+      { name: 'twitter', type: 'VARCHAR(255)' },
+      { name: 'linkedin', type: 'VARCHAR(255)' },
+      { name: 'brand_color', type: 'VARCHAR(7)' }
+    ];
+
+    const added = [];
+    for (const column of columnsToAdd) {
+      if (!existingColumns.includes(column.name)) {
+        await client.query(`ALTER TABLE organizations ADD COLUMN ${column.name} ${column.type}`);
+        added.push(column.name);
+      }
+    }
+
+    client.release();
+    res.json({ message: 'Migration (GET) completed', addedColumns: added, existingColumns });
+  } catch (error) {
+    console.error('Migration (GET) failed:', error);
+    res.status(500).json({ error: 'Migration failed', message: error.message });
+  }
+});
+
 // 404 handler
 app.use('*', (req, res) => {
   res.status(404).json({ error: 'Route not found' });
