@@ -1529,7 +1529,7 @@ app.post('/api/migrate-organizations', async (req, res) => {
       SELECT column_name 
       FROM information_schema.columns 
       WHERE table_name = 'organizations' 
-      AND column_name IN ('bio', 'email', 'phone', 'whatsapp', 'facebook', 'instagram', 'twitter', 'linkedin', 'brand_color')
+      AND column_name IN ('bio', 'email', 'phone', 'whatsapp', 'address', 'facebook', 'instagram', 'twitter', 'linkedin', 'brand_color')
     `);
     
     const existingColumns = checkColumns.rows.map(row => row.column_name);
@@ -1541,6 +1541,7 @@ app.post('/api/migrate-organizations', async (req, res) => {
       { name: 'email', type: 'VARCHAR(255)' },
       { name: 'phone', type: 'VARCHAR(20)' },
       { name: 'whatsapp', type: 'VARCHAR(20)' },
+      { name: 'address', type: 'TEXT' },
       { name: 'facebook', type: 'VARCHAR(255)' },
       { name: 'instagram', type: 'VARCHAR(255)' },
       { name: 'twitter', type: 'VARCHAR(255)' },
@@ -1578,7 +1579,7 @@ app.get('/api/migrate-organizations', async (req, res) => {
       SELECT column_name 
       FROM information_schema.columns 
       WHERE table_name = 'organizations' 
-      AND column_name IN ('bio', 'email', 'phone', 'whatsapp', 'facebook', 'instagram', 'twitter', 'linkedin', 'brand_color')
+      AND column_name IN ('bio', 'email', 'phone', 'whatsapp', 'address', 'facebook', 'instagram', 'twitter', 'linkedin', 'brand_color')
     `);
 
     const existingColumns = checkColumns.rows.map(row => row.column_name);
@@ -1587,6 +1588,7 @@ app.get('/api/migrate-organizations', async (req, res) => {
       { name: 'email', type: 'VARCHAR(255)' },
       { name: 'phone', type: 'VARCHAR(20)' },
       { name: 'whatsapp', type: 'VARCHAR(20)' },
+      { name: 'address', type: 'TEXT' },
       { name: 'facebook', type: 'VARCHAR(255)' },
       { name: 'instagram', type: 'VARCHAR(255)' },
       { name: 'twitter', type: 'VARCHAR(255)' },
