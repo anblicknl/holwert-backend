@@ -424,18 +424,15 @@ app.post('/api/events', async (req, res) => {
     // Try to insert, but on DB error return a mocked success so the UI can proceed for demo
     try {
       const result = await pool.query(
-        `INSERT INTO events (title, description, event_date, location, organization_id, category, image_url, status, created_at, updated_at, organizer_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,'scheduled', NOW(), NOW(), COALESCE($8, 1))
+        `INSERT INTO events (title, description, event_date, location, category)
+         VALUES ($1,$2,$3,$4,$5)
          RETURNING *`,
         [
           title,
           description || '',
           event_date,
           location,
-          body.organization_id || null,
-          body.category || 'evenement',
-          body.image_url || null,
-          body.organizer_id || 1
+          body.category || 'evenement'
         ]
       );
       return res.status(201).json({ success: true, event: result.rows[0] });
