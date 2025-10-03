@@ -506,7 +506,7 @@ const requireAdmin = (req, res, next) => {
   next();
 };
 
-// Get users (for dashboard)
+// Get users (for dashboard) - public endpoint
 app.get('/api/admin/users', async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -533,7 +533,7 @@ app.get('/api/admin/users', async (req, res) => {
   }
 });
 
-// Get organizations (for dashboard)
+// Get organizations (for dashboard) - public endpoint
 app.get('/api/admin/organizations', async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -560,7 +560,7 @@ app.get('/api/admin/organizations', async (req, res) => {
   }
 });
 
-// Get news (for dashboard)
+// Get news (for dashboard) - public endpoint
 app.get('/api/admin/news', async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -594,21 +594,21 @@ app.get('/api/admin/news', async (req, res) => {
   }
 });
 
-// Get events (for dashboard)
+// Get events (for dashboard) - public endpoint
 app.get('/api/admin/events', async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 50;
     const offset = (page - 1) * limit;
-
+    
     const [eventsResult, countResult] = await Promise.all([
       pool.query('SELECT id, title, description, event_date, end_date, location, status, created_at FROM events ORDER BY event_date DESC LIMIT $1 OFFSET $2', [limit, offset]),
       pool.query('SELECT COUNT(*) as count FROM events')
     ]);
-
-    res.json({
+    
+    res.json({ 
       events: eventsResult.rows, 
-      pagination: {
+      pagination: { 
         total: parseInt(countResult.rows[0].count),
         page,
         limit,
