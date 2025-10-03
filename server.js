@@ -1389,6 +1389,11 @@ app.put('/api/admin/events/:id', authenticateToken, requireAdmin, async (req, re
   try {
     const { id } = req.params;
     const { title, description, event_date, end_date, location, organization_id, status } = req.body;
+    
+    // First check if event exists and get current organizer_id
+    const checkResult = await pool.query('SELECT organizer_id FROM events WHERE id = $1', [id]);
+    if (!checkResult.rows.length) return res.status(404).json({ error: 'Event not found' });
+    
     const sets = [];
     const params = [];
     const push = (v) => { params.push(v); return `$${params.length}`; };
@@ -1400,6 +1405,7 @@ app.put('/api/admin/events/:id', authenticateToken, requireAdmin, async (req, re
     if (organization_id !== undefined) sets.push(`organization_id = ${push(organization_id)}`);
     if (status !== undefined) sets.push(`status = ${push(status)}`);
     if (!sets.length) return res.status(400).json({ error: 'No fields to update' });
+    
     params.push(id);
     const result = await pool.query(
       `UPDATE events SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${params.length}
