@@ -150,6 +150,7 @@ app.use('/uploads', express.static('uploads'));
 // Get all events (public)
 app.get('/api/events', async (req, res) => {
   try {
+    console.log('Fetching events...');
     const result = await pool.query(`
       SELECT e.*, o.name as organization_name, u.name as organizer_name
       FROM events e
@@ -159,9 +160,11 @@ app.get('/api/events', async (req, res) => {
       ORDER BY e.event_date ASC
     `);
     
+    console.log(`Found ${result.rows.length} events`);
     res.json({ events: result.rows });
   } catch (error) {
     console.error('Get events error:', error);
+    console.error('Error details:', error.message, error.stack);
     res.status(500).json({ error: 'Failed to fetch events', message: error.message });
   }
 });
