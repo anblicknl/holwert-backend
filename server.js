@@ -1418,7 +1418,9 @@ app.put('/api/admin/events/:id', authenticateToken, requireAdmin, async (req, re
     res.json({ event: result.rows[0] });
   } catch (error) {
     console.error('Update event error:', error);
-    res.status(500).json({ error: 'Failed to update event', message: error.message });
+    console.error('Request body:', req.body);
+    console.error('Request params:', req.params);
+    res.status(500).json({ error: 'Failed to update event', message: error.message, details: error.stack });
   }
 });
 
