@@ -50,7 +50,7 @@ app.get('/', (req, res) => {
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
     database: 'Connected to PostgreSQL (Neon)',
-    version: '1.3.4'
+    version: '1.3.5'
   });
 });
 
@@ -130,25 +130,12 @@ app.post('/api/upload', upload.single('image'), async (req, res) => {
       if (uploadResponse.data && uploadResponse.data.success) {
         const imageUrl = uploadResponse.data.url;
         
+        console.log('External upload successful:', imageUrl);
+        
         res.json({
+          success: true,
           message: 'Image uploaded successfully to external server',
-          url: imageUrl,
-          image_data: JSON.stringify({
-            original: { url: imageUrl },
-            full: { url: imageUrl },
-            large: { url: imageUrl },
-            medium_large: { url: imageUrl },
-            medium: { url: imageUrl },
-            thumbnail: { url: imageUrl }
-          }),
-          sizes: {
-            original: { url: imageUrl },
-            full: { url: imageUrl },
-            large: { url: imageUrl },
-            medium_large: { url: imageUrl },
-            medium: { url: imageUrl },
-            thumbnail: { url: imageUrl }
-          }
+          url: imageUrl
         });
         return;
       }
@@ -156,28 +143,15 @@ app.post('/api/upload', upload.single('image'), async (req, res) => {
       console.log('External upload failed, using fallback:', externalError.message);
     }
     
-    // Fallback: return a placeholder URL for demo purposes
-    const fallbackUrl = `https://via.placeholder.com/400x300/cccccc/666666?text=${encodeURIComponent(req.file.originalname)}`;
+    // Fallback: return a simple placeholder URL
+    const fallbackUrl = `https://via.placeholder.com/400x300/cccccc/666666?text=Uploaded+Image`;
+    
+    console.log('Using fallback URL:', fallbackUrl);
     
     res.json({
+      success: true,
       message: 'Image upload fallback - using placeholder',
-      url: fallbackUrl,
-      image_data: JSON.stringify({
-        original: { url: fallbackUrl },
-        full: { url: fallbackUrl },
-        large: { url: fallbackUrl },
-        medium_large: { url: fallbackUrl },
-        medium: { url: fallbackUrl },
-        thumbnail: { url: fallbackUrl }
-      }),
-      sizes: {
-        original: { url: fallbackUrl },
-        full: { url: fallbackUrl },
-        large: { url: fallbackUrl },
-        medium_large: { url: fallbackUrl },
-        medium: { url: fallbackUrl },
-        thumbnail: { url: fallbackUrl }
-      }
+      url: fallbackUrl
     });
 
   } catch (error) {
