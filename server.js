@@ -50,7 +50,7 @@ app.get('/', (req, res) => {
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
     database: 'Connected to PostgreSQL (Neon)',
-    version: '1.3.1'
+    version: '1.3.2'
   });
 });
 
@@ -98,7 +98,7 @@ const authenticateToken = (req, res, next) => {
 };
 
 // ===== FIXED IMAGE UPLOAD TO EXTERNAL SERVER =====
-app.post('/api/upload', authenticateToken, upload.single('image'), async (req, res) => {
+app.post('/api/upload', upload.single('image'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No image provided' });
