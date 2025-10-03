@@ -50,7 +50,7 @@ app.get('/', (req, res) => {
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
     database: 'Connected to PostgreSQL (Neon)',
-    version: '1.3.3'
+    version: '1.3.4'
   });
 });
 
@@ -179,7 +179,6 @@ app.post('/api/upload', upload.single('image'), async (req, res) => {
         thumbnail: { url: fallbackUrl }
       }
     });
-    }
 
   } catch (error) {
     console.error('Image upload error:', error);
