@@ -1291,6 +1291,25 @@ app.get('/events', async (req, res) => {
   }
 });
 
+// Get single event (public)
+app.get('/events/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const q = `
+      SELECT e.*, o.name as organization_name, o.brand_color as organization_brand_color, o.logo_url as organization_logo
+      FROM events e
+      LEFT JOIN organizations o ON e.organization_id = o.id
+      WHERE e.id = $1
+    `;
+    const result = await pool.query(q, [id]);
+    if (!result.rows.length) return res.status(404).json({ error: 'Event not found' });
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Get event error:', error);
+    res.status(500).json({ error: 'Failed to get event', message: error.message });
+  }
+});
+
 // Get all events (admin)
 app.get('/api/admin/events', authenticateToken, async (req, res) => {
   try {
