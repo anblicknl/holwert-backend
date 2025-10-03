@@ -440,19 +440,10 @@ app.post('/api/events', async (req, res) => {
       );
       return res.status(201).json({ success: true, event: result.rows[0] });
     } catch (dbErr) {
-      console.error('Create event DB error (falling back):', dbErr.message);
-      return res.status(201).json({
-        success: true,
-        event: {
-          id: 0,
-          title,
-          description,
-          event_date,
-          end_date,
-          location,
-          status: 'scheduled'
-        },
-        note: 'Created without DB (demo mode)'
+      console.error('Create event DB error:', dbErr.message);
+      return res.status(500).json({ 
+        error: 'Failed to create event', 
+        message: dbErr.message 
       });
     }
   } catch (error) {
