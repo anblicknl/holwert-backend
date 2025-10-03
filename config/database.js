@@ -1,32 +1,17 @@
-const mysql = require('mysql2/promise');
+const { Pool } = require('pg');
 require('dotenv').config();
 
-const dbConfig = {
-  host: process.env.DB_HOST || 'localhost',
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'holwert_db',
-  port: process.env.DB_PORT || 3306,
-  waitForConnections: true,
-  connectionLimit: 5, // Reduced for shared hosting
-  queueLimit: 0,
-  acquireTimeout: 60000,
-  timeout: 60000,
-  reconnect: true,
-  // Shared hosting specific settings
-  ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
-  charset: 'utf8mb4'
-};
-
-// Create connection pool
-const pool = mysql.createPool(dbConfig);
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+});
 
 // Test database connection
 const testConnection = async () => {
   try {
-    const connection = await pool.getConnection();
+    const client = await pool.connect();
     console.log('✅ Database connected successfully');
-    connection.release();
+    client.release();
   } catch (error) {
     console.error('❌ Database connection failed:', error.message);
     process.exit(1);
@@ -36,23 +21,30 @@ const testConnection = async () => {
 // Initialize database tables
 const initDatabase = async () => {
   try {
-    const connection = await pool.getConnection();
+    const client = await pool.connect();
     
     // Organizations table (must be created first)
-    await connection.execute(`
+    await client.query(`
       CREATE TABLE IF NOT EXISTS organizations (
-        id INT PRIMARY KEY AUTO_INCREMENT,
+        id SERIAL PRIMARY KEY,
         name VARCHAR(255) NOT NULL,
-        description TEXT NULL,
-        category ENUM('gemeente', 'natuur', 'cultuur', 'sport', 'onderwijs', 'zorg', 'overig') NOT NULL,
-        logo VARCHAR(255) NULL,
-        website VARCHAR(255) NULL,
-        email VARCHAR(255) NULL,
-        phone VARCHAR(20) NULL,
-        address TEXT NULL,
+        description TEXT,
+        bio TEXT,
+        category VARCHAR(50) NOT NULL CHECK (category IN ('gemeente', 'natuur', 'cultuur', 'sport', 'onderwijs', 'zorg', 'overig')),
+        logo VARCHAR(255),
+        website VARCHAR(255),
+        email VARCHAR(255),
+        phone VARCHAR(20),
+        whatsapp VARCHAR(20),
+        address TEXT,
+        facebook VARCHAR(255),
+        instagram VARCHAR(255),
+        twitter VARCHAR(255),
+        linkedin VARCHAR(255),
+        brand_color VARCHAR(7),
         is_active BOOLEAN DEFAULT true,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
@@ -184,7 +176,7 @@ const initDatabase = async () => {
       )
     `);
 
-    connection.release();
+    client.release();
     console.log('✅ Database tables initialized successfully');
   } catch (error) {
     console.error('❌ Database initialization failed:', error.message);
