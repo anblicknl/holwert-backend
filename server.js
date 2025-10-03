@@ -375,7 +375,6 @@ app.get('/api/events', async (req, res) => {
       FROM events e
       LEFT JOIN organizations o ON e.organization_id = o.id
       LEFT JOIN users u ON e.organizer_id = u.id
-      WHERE e.status IN ('scheduled', 'published', 'approved')
       ORDER BY e.event_date ASC
     `);
     
