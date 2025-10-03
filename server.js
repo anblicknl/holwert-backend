@@ -372,11 +372,9 @@ app.post('/api/news', authenticateToken, async (req, res) => {
 app.get('/api/events', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT e.*, o.name as organization_name, u.name as organizer_name
-      FROM events e
-      LEFT JOIN organizations o ON e.organization_id = o.id
-      LEFT JOIN users u ON e.organizer_id = u.id
-      ORDER BY e.event_date ASC
+      SELECT title, description, event_date, location, category
+      FROM events
+      ORDER BY event_date ASC
     `);
     
     res.json({ events: result.rows });
