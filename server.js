@@ -473,13 +473,13 @@ app.get('/api/events/:id', async (req, res) => {
       LEFT JOIN users u ON e.organizer_id = u.id
       WHERE e.id = $1
     `, [id]);
-    
+
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Event not found' });
     }
     
     res.json({ event: result.rows[0] });
-  } catch (error) {
+      } catch (error) {
     console.error('Get event error:', error);
     res.status(500).json({ error: 'Failed to fetch event', message: error.message });
   }
@@ -506,36 +506,118 @@ const requireAdmin = (req, res, next) => {
   next();
 };
 
-// Get users count (for dashboard)
+// Get users (for dashboard)
 app.get('/api/admin/users', async (req, res) => {
   try {
-    const result = await pool.query('SELECT COUNT(*) as count FROM users');
-    res.json({ pagination: { total: parseInt(result.rows[0].count) } });
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 50;
+    const offset = (page - 1) * limit;
+
+    const [usersResult, countResult] = await Promise.all([
+      pool.query('SELECT id, first_name, last_name, email, role, is_active, created_at FROM users ORDER BY created_at DESC LIMIT $1 OFFSET $2', [limit, offset]),
+      pool.query('SELECT COUNT(*) as count FROM users')
+    ]);
+
+    res.json({
+      users: usersResult.rows, 
+      pagination: {
+        total: parseInt(countResult.rows[0].count),
+        page,
+        limit,
+        pages: Math.ceil(parseInt(countResult.rows[0].count) / limit)
+      } 
+    });
   } catch (error) {
-    console.error('Get users count error:', error);
-    res.status(500).json({ error: 'Failed to fetch users count', message: error.message });
+    console.error('Get users error:', error);
+    res.json({ users: [], pagination: { total: 0 } });
   }
 });
 
-// Get organizations count (for dashboard)
+// Get organizations (for dashboard)
 app.get('/api/admin/organizations', async (req, res) => {
   try {
-    const result = await pool.query('SELECT COUNT(*) as count FROM organizations');
-    res.json({ pagination: { total: parseInt(result.rows[0].count) } });
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 50;
+    const offset = (page - 1) * limit;
+    
+    const [orgsResult, countResult] = await Promise.all([
+      pool.query('SELECT id, name, category, brand_color, logo_url, is_approved, created_at FROM organizations ORDER BY created_at DESC LIMIT $1 OFFSET $2', [limit, offset]),
+      pool.query('SELECT COUNT(*) as count FROM organizations')
+    ]);
+    
+    res.json({ 
+      organizations: orgsResult.rows, 
+      pagination: { 
+        total: parseInt(countResult.rows[0].count),
+        page,
+        limit,
+        pages: Math.ceil(parseInt(countResult.rows[0].count) / limit)
+      } 
+    });
   } catch (error) {
-    console.error('Get organizations count error:', error);
-    res.status(500).json({ error: 'Failed to fetch organizations count', message: error.message });
+    console.error('Get organizations error:', error);
+    res.json({ organizations: [], pagination: { total: 0 } });
   }
 });
 
-// Get news count (for dashboard)
+// Get news (for dashboard)
 app.get('/api/admin/news', async (req, res) => {
   try {
-    const result = await pool.query('SELECT COUNT(*) as count FROM news');
-    res.json({ pagination: { total: parseInt(result.rows[0].count) } });
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 50;
+    const offset = (page - 1) * limit;
+
+    const [newsResult, countResult] = await Promise.all([
+      pool.query(`
+        SELECT n.id, n.title, n.content, n.excerpt, n.category, n.image_url, n.is_published, n.created_at,
+               u.first_name, u.last_name
+        FROM news n 
+        LEFT JOIN users u ON n.author_id = u.id 
+        ORDER BY n.created_at DESC 
+      LIMIT $1 OFFSET $2
+      `, [limit, offset]),
+      pool.query('SELECT COUNT(*) as count FROM news')
+    ]);
+
+    res.json({
+      news: newsResult.rows, 
+      pagination: {
+        total: parseInt(countResult.rows[0].count),
+        page,
+        limit,
+        pages: Math.ceil(parseInt(countResult.rows[0].count) / limit)
+      } 
+    });
   } catch (error) {
-    console.error('Get news count error:', error);
-    res.status(500).json({ error: 'Failed to fetch news count', message: error.message });
+    console.error('Get news error:', error);
+    res.json({ news: [], pagination: { total: 0 } });
+  }
+});
+
+// Get events (for dashboard)
+app.get('/api/admin/events', async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 50;
+    const offset = (page - 1) * limit;
+
+    const [eventsResult, countResult] = await Promise.all([
+      pool.query('SELECT id, title, description, event_date, end_date, location, status, created_at FROM events ORDER BY event_date DESC LIMIT $1 OFFSET $2', [limit, offset]),
+      pool.query('SELECT COUNT(*) as count FROM events')
+    ]);
+
+    res.json({
+      events: eventsResult.rows, 
+      pagination: {
+        total: parseInt(countResult.rows[0].count),
+        page,
+        limit,
+        pages: Math.ceil(parseInt(countResult.rows[0].count) / limit)
+      } 
+    });
+  } catch (error) {
+    console.error('Get events error:', error);
+    res.json({ events: [], pagination: { total: 0 } });
   }
 });
 
