@@ -50,7 +50,7 @@ app.get('/', (req, res) => {
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
     database: 'Connected to PostgreSQL (Neon)',
-    version: '1.1.0'
+    version: '1.3.0'
   });
 });
 
@@ -372,7 +372,7 @@ app.post('/api/news', authenticateToken, async (req, res) => {
 app.get('/api/events', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT title, description, event_date, location, category
+      SELECT id, title, description, event_date, location, category, image_url, status, created_at
       FROM events
       ORDER BY event_date ASC
     `);
@@ -422,15 +422,17 @@ app.post('/api/events', async (req, res) => {
     // Try to insert, but on DB error return a mocked success so the UI can proceed for demo
     try {
       const result = await pool.query(
-        `INSERT INTO events (title, description, event_date, location, category)
-         VALUES ($1,$2,$3,$4,$5)
+        `INSERT INTO events (title, description, event_date, location, category, image_url, status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)
          RETURNING *`,
         [
           title,
           description || '',
           event_date,
           location,
-          body.category || 'evenement'
+          body.category || 'evenement',
+          body.image_url || null,
+          'scheduled'
         ]
       );
       return res.status(201).json({ success: true, event: result.rows[0] });
@@ -444,6 +446,79 @@ app.post('/api/events', async (req, res) => {
   } catch (error) {
     console.error('Create event error:', error);
     res.status(500).json({ error: 'Failed to create event', message: error.message });
+  }
+});
+
+// Update event
+app.put('/api/events/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const body = req.body || {};
+    
+    const title = (body.title || '').toString().trim();
+    const description = (body.description || '').toString();
+    const location = (body.location || '').toString().trim();
+    const category = (body.category || 'evenement').toString();
+    const imageUrl = (body.image_url || '').toString().trim();
+
+    // Accept several date field names: event_date | eventDate | startDate | start
+    const rawStart = body.event_date || body.eventDate || body.startDate || body.start;
+    const rawEnd = body.end_date || body.endDate || body.finishDate || null;
+
+    if (!title || !rawStart || !location) {
+      return res.status(400).json({ error: 'title, event_date and location are required' });
+    }
+
+    const toIso = (val) => {
+      if (!val) return null;
+      // Support datetime-local (YYYY-MM-DDTHH:mm)
+      if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(val)) {
+        return new Date(val).toISOString();
+      }
+      // Support ISO already
+      const d = new Date(val);
+      return isNaN(d.getTime()) ? null : d.toISOString();
+    };
+
+    const event_date = toIso(rawStart);
+    const end_date = toIso(rawEnd);
+    if (!event_date) return res.status(400).json({ error: 'Invalid event_date' });
+    if (end_date && new Date(end_date) < new Date(event_date)) {
+      return res.status(400).json({ error: 'end_date must be after event_date' });
+    }
+
+    try {
+      const result = await pool.query(
+        `UPDATE events 
+         SET title = $1, description = $2, event_date = $3, location = $4, category = $5, image_url = $6, updated_at = NOW()
+         WHERE id = $7
+         RETURNING *`,
+        [
+          title,
+          description || '',
+          event_date,
+          location,
+          category,
+          imageUrl || null,
+          id
+        ]
+      );
+      
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Event not found' });
+      }
+      
+      return res.json({ success: true, event: result.rows[0] });
+    } catch (dbErr) {
+      console.error('Update event DB error:', dbErr.message);
+      return res.status(500).json({ 
+        error: 'Failed to update event', 
+        message: dbErr.message 
+      });
+    }
+  } catch (error) {
+    console.error('Update event error:', error);
+    res.status(500).json({ error: 'Failed to update event', message: error.message });
   }
 });
 
@@ -585,15 +660,15 @@ app.get('/api/admin/events', async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 50;
     const offset = (page - 1) * limit;
-    
+
     const [eventsResult, countResult] = await Promise.all([
       pool.query('SELECT id, title, description, event_date, end_date, location, status, created_at FROM events ORDER BY event_date DESC LIMIT $1 OFFSET $2', [limit, offset]),
       pool.query('SELECT COUNT(*) as count FROM events')
     ]);
-    
-    res.json({ 
+
+    res.json({
       events: eventsResult.rows, 
-      pagination: { 
+      pagination: {
         total: parseInt(countResult.rows[0].count),
         page,
         limit,
