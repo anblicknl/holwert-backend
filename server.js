@@ -1444,7 +1444,24 @@ app.get('/api/organizations', async (req, res) => {
     const offset = (page - 1) * limit;
 
     let query = `
-      SELECT id, name, description, contact_email, contact_phone, website, logo_url, brand_color, category, created_at
+      SELECT 
+        id,
+        name,
+        description,
+        bio,
+        COALESCE(email, contact_email)        AS email,
+        COALESCE(phone, contact_phone)        AS phone,
+        whatsapp,
+        address,
+        facebook,
+        instagram,
+        twitter,
+        linkedin,
+        website,
+        logo_url,
+        brand_color,
+        category,
+        created_at
       FROM organizations
       WHERE is_approved = true
     `;
