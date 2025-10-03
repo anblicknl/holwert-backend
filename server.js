@@ -422,6 +422,97 @@ app.get('/api/organizations', authenticateToken, async (req, res) => {
   }
 });
 
+// ===== ADMIN ENDPOINTS FOR DASHBOARD =====
+
+// Admin middleware
+const requireAdmin = (req, res, next) => {
+  if (!req.user || (req.user.role !== 'admin' && req.user.role !== 'superadmin')) {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+  next();
+};
+
+// Get users count (for dashboard)
+app.get('/api/admin/users', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT COUNT(*) as count FROM users');
+    res.json({ pagination: { total: parseInt(result.rows[0].count) } });
+  } catch (error) {
+    console.error('Get users count error:', error);
+    res.status(500).json({ error: 'Failed to fetch users count', message: error.message });
+  }
+});
+
+// Get organizations count (for dashboard)
+app.get('/api/admin/organizations', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT COUNT(*) as count FROM organizations');
+    res.json({ pagination: { total: parseInt(result.rows[0].count) } });
+  } catch (error) {
+    console.error('Get organizations count error:', error);
+    res.status(500).json({ error: 'Failed to fetch organizations count', message: error.message });
+  }
+});
+
+// Get news count (for dashboard)
+app.get('/api/admin/news', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT COUNT(*) as count FROM news');
+    res.json({ pagination: { total: parseInt(result.rows[0].count) } });
+  } catch (error) {
+    console.error('Get news count error:', error);
+    res.status(500).json({ error: 'Failed to fetch news count', message: error.message });
+  }
+});
+
+// Login endpoint
+app.post('/api/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password required' });
+    }
+
+    const result = await pool.query(
+      'SELECT id, email, password, role, name FROM users WHERE email = $1',
+      [email]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const user = result.rows[0];
+    const validPassword = await bcrypt.compare(password, user.password);
+
+    if (!validPassword) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const token = jwt.sign(
+      { id: user.id, email: user.email, role: user.role },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    res.json({
+      success: true,
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        name: user.name
+      }
+    });
+
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'Login failed', message: error.message });
+  }
+});
+
 // 404 handler
 app.use('*', (req, res) => {
   res.status(404).json({ error: 'Route not found' });
