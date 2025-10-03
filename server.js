@@ -1500,6 +1500,54 @@ app.get('/api/organizations', async (req, res) => {
   }
 });
 
+// Migration endpoint (temporary - remove after use)
+app.post('/api/migrate-organizations', async (req, res) => {
+  try {
+    console.log('Starting organizations table migration...');
+    
+    const client = await pool.connect();
+    
+    // Check if columns already exist
+    const checkColumns = await client.query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name = 'organizations' 
+      AND column_name IN ('bio', 'whatsapp', 'facebook', 'instagram', 'twitter', 'linkedin', 'brand_color')
+    `);
+    
+    const existingColumns = checkColumns.rows.map(row => row.column_name);
+    console.log('Existing columns:', existingColumns);
+    
+    // Add missing columns
+    const columnsToAdd = [
+      { name: 'bio', type: 'TEXT' },
+      { name: 'whatsapp', type: 'VARCHAR(20)' },
+      { name: 'facebook', type: 'VARCHAR(255)' },
+      { name: 'instagram', type: 'VARCHAR(255)' },
+      { name: 'twitter', type: 'VARCHAR(255)' },
+      { name: 'linkedin', type: 'VARCHAR(255)' },
+      { name: 'brand_color', type: 'VARCHAR(7)' }
+    ];
+    
+    for (const column of columnsToAdd) {
+      if (!existingColumns.includes(column.name)) {
+        console.log(`Adding column: ${column.name}`);
+        await client.query(`ALTER TABLE organizations ADD COLUMN ${column.name} ${column.type}`);
+      } else {
+        console.log(`Column ${column.name} already exists`);
+      }
+    }
+    
+    client.release();
+    console.log('Migration completed successfully!');
+    res.json({ message: 'Migration completed successfully', addedColumns: columnsToAdd.filter(col => !existingColumns.includes(col.name)) });
+    
+  } catch (error) {
+    console.error('Migration failed:', error);
+    res.status(500).json({ error: 'Migration failed', message: error.message });
+  }
+});
+
 // 404 handler
 app.use('*', (req, res) => {
   res.status(404).json({ error: 'Route not found' });
