@@ -1138,6 +1138,58 @@ app.delete('/api/admin/organizations/:id', authenticateToken, requireAdmin, asyn
   }
 });
 
+// Migration endpoint for events table
+app.post('/api/migrate-events', async (req, res) => {
+  try {
+    const client = await pool.connect();
+    
+    // Check if events table exists
+    const tableCheck = await client.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = 'events'
+      );
+    `);
+    
+    if (!tableCheck.rows[0].exists) {
+      // Create events table
+      await client.query(`
+        CREATE TABLE events (
+          id SERIAL PRIMARY KEY,
+          title VARCHAR(255) NOT NULL,
+          description TEXT,
+          event_date TIMESTAMP NOT NULL,
+          end_date TIMESTAMP NULL,
+          location VARCHAR(255),
+          location_details TEXT,
+          organizer_id INTEGER NOT NULL,
+          organization_id INTEGER NULL,
+          category VARCHAR(50) DEFAULT 'evenement',
+          price DECIMAL(10,2) DEFAULT 0.00,
+          max_attendees INTEGER NULL,
+          image_url VARCHAR(255) NULL,
+          status VARCHAR(20) DEFAULT 'scheduled',
+          published_at TIMESTAMP NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (organizer_id) REFERENCES users(id) ON DELETE CASCADE,
+          FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL
+        )
+      `);
+      
+      client.release();
+      res.json({ message: 'Events table created successfully' });
+    } else {
+      client.release();
+      res.json({ message: 'Events table already exists' });
+    }
+  } catch (error) {
+    console.error('Migration error:', error);
+    res.status(500).json({ error: 'Migration failed', message: error.message });
+  }
+});
+
 // Get all events (public)
 app.get('/events', async (req, res) => {
   try {
