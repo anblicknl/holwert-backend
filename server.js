@@ -50,7 +50,7 @@ app.get('/', (req, res) => {
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
     database: 'Connected to PostgreSQL (Neon)',
-    version: '1.3.5'
+    version: '1.4.0'
   });
 });
 
@@ -373,9 +373,11 @@ app.post('/api/news', authenticateToken, async (req, res) => {
 app.get('/api/events', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT id, title, description, event_date, location, category, image_url
-      FROM events
-      ORDER BY event_date ASC
+      SELECT e.id, e.title, e.description, e.event_date, e.location, e.category, e.image_url, e.organization_id,
+             o.name as organization_name, o.brand_color as organization_brand_color
+      FROM events e
+      LEFT JOIN organizations o ON e.organization_id = o.id
+      ORDER BY e.event_date ASC
     `);
     
     res.json({ events: result.rows });
@@ -391,9 +393,11 @@ app.get('/api/events/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query(`
-      SELECT id, title, description, event_date, location, category, image_url
-      FROM events
-      WHERE id = $1
+      SELECT e.id, e.title, e.description, e.event_date, e.location, e.category, e.image_url, e.organization_id,
+             o.name as organization_name, o.brand_color as organization_brand_color
+      FROM events e
+      LEFT JOIN organizations o ON e.organization_id = o.id
+      WHERE e.id = $1
     `, [id]);
     
     if (result.rows.length === 0) {
@@ -444,8 +448,8 @@ app.post('/api/events', async (req, res) => {
     // Try to insert, but on DB error return a mocked success so the UI can proceed for demo
     try {
       const result = await pool.query(
-        `INSERT INTO events (title, description, event_date, location, category, image_url)
-         VALUES ($1,$2,$3,$4,$5,$6)
+        `INSERT INTO events (title, description, event_date, location, category, image_url, organization_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)
          RETURNING *`,
         [
           title,
@@ -453,7 +457,8 @@ app.post('/api/events', async (req, res) => {
           event_date,
           location,
           body.category || 'evenement',
-          body.image_url || null
+          body.image_url || null,
+          body.organization_id || null
         ]
       );
       return res.status(201).json({ success: true, event: result.rows[0] });
@@ -481,6 +486,7 @@ app.put('/api/events/:id', async (req, res) => {
     const location = (body.location || '').toString().trim();
     const category = (body.category || 'evenement').toString();
     const imageUrl = (body.image_url || '').toString().trim();
+    const organizationId = body.organization_id || null;
 
     // Accept several date field names: event_date | eventDate | startDate | start
     const rawStart = body.event_date || body.eventDate || body.startDate || body.start;
@@ -511,8 +517,8 @@ app.put('/api/events/:id', async (req, res) => {
     try {
       const result = await pool.query(
         `UPDATE events 
-         SET title = $1, description = $2, event_date = $3, location = $4, category = $5, image_url = $6, updated_at = NOW()
-         WHERE id = $7
+         SET title = $1, description = $2, event_date = $3, location = $4, category = $5, image_url = $6, organization_id = $7, updated_at = NOW()
+         WHERE id = $8
          RETURNING *`,
         [
           title,
@@ -521,6 +527,7 @@ app.put('/api/events/:id', async (req, res) => {
           location,
           category,
           imageUrl || null,
+          organizationId,
           id
         ]
       );
