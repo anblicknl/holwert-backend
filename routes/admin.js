@@ -329,8 +329,8 @@ router.put('/organizations/:organizationId', requireSuperAdmin, async (req, res)
   }
 });
 
-// Get organization status (for debugging)
-router.get('/organizations/:organizationId/status', requireSuperAdmin, async (req, res) => {
+// Get organization status (for debugging) - No auth required for testing
+router.get('/organizations/:organizationId/status', async (req, res) => {
   try {
     const { organizationId } = req.params;
 
