@@ -264,7 +264,7 @@ router.get('/organizations', async (req, res) => {
 // Create organization (Superadmin only)
 router.post('/organizations', requireSuperAdmin, async (req, res) => {
   try {
-    const { name, description, category, website, email, phone, address } = req.body;
+    const { name, description, category, website, email, phone, address, logo_url, brand_color } = req.body;
 
     // Validation
     if (!name || !category) {
@@ -281,8 +281,8 @@ router.post('/organizations', requireSuperAdmin, async (req, res) => {
     }
 
     const [result] = await pool.execute(
-      'INSERT INTO organizations (name, description, category, website, email, phone, address) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [name, description || null, category, website || null, email || null, phone || null, address || null]
+      'INSERT INTO organizations (name, description, category, website, email, phone, address, logo, brand_color, is_approved) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [name, description || null, category, website || null, email || null, phone || null, address || null, logo_url || null, brand_color || null, true]
     );
 
     res.status(201).json({
