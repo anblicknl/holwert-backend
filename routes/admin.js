@@ -366,6 +366,30 @@ router.post('/organizations/:organizationId/approve-simple', async (req, res) =>
   }
 });
 
+// Direct database test route - No auth required for testing
+router.get('/organizations/:organizationId/db-test', async (req, res) => {
+  try {
+    const { organizationId } = req.params;
+
+    // Direct database query to check current status
+    const [orgs] = await pool.execute('SELECT id, name, is_active, is_approved FROM organizations WHERE id = ?', [organizationId]);
+    
+    if (orgs.length === 0) {
+      return res.status(404).json({ error: 'Organization not found' });
+    }
+
+    res.json({ 
+      message: 'Direct database query result',
+      organization: orgs[0],
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('Direct database test error:', error);
+    res.status(500).json({ error: 'Failed to query database' });
+  }
+});
+
 // Approve organization (Superadmin only)
 router.post('/organizations/:organizationId/approve', requireSuperAdmin, async (req, res) => {
   try {
