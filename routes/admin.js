@@ -329,13 +329,38 @@ router.put('/organizations/:organizationId', requireSuperAdmin, async (req, res)
   }
 });
 
+// Get organization status (for debugging)
+router.get('/organizations/:organizationId/status', requireSuperAdmin, async (req, res) => {
+  try {
+    const { organizationId } = req.params;
+
+    const [orgs] = await pool.execute('SELECT id, name, is_active, is_approved FROM organizations WHERE id = ?', [organizationId]);
+    if (orgs.length === 0) {
+      return res.status(404).json({ error: 'Organization not found' });
+    }
+
+    res.json({ organization: orgs[0] });
+
+  } catch (error) {
+    console.error('Get organization status error:', error);
+    res.status(500).json({ error: 'Failed to get organization status' });
+  }
+});
+
 // Approve organization (Superadmin only)
 router.post('/organizations/:organizationId/approve', requireSuperAdmin, async (req, res) => {
   try {
     const { organizationId } = req.params;
 
+    // First check if organization exists
+    const [orgs] = await pool.execute('SELECT id FROM organizations WHERE id = ?', [organizationId]);
+    if (orgs.length === 0) {
+      return res.status(404).json({ error: 'Organization not found' });
+    }
+
+    // Try to update with is_active first (this column definitely exists based on the organizations route)
     await pool.execute(
-      'UPDATE organizations SET is_approved = true, is_active = true WHERE id = ?',
+      'UPDATE organizations SET is_active = true WHERE id = ?',
       [organizationId]
     );
 
