@@ -390,6 +390,36 @@ router.get('/organizations/:organizationId/db-test', async (req, res) => {
   }
 });
 
+// Direct database update route - No auth required for testing
+router.post('/organizations/:organizationId/db-update', async (req, res) => {
+  try {
+    const { organizationId } = req.params;
+
+    // Direct database update to set is_active = true
+    await pool.execute(
+      'UPDATE organizations SET is_active = true WHERE id = ?',
+      [organizationId]
+    );
+
+    // Verify the update
+    const [orgs] = await pool.execute('SELECT id, name, is_active, is_approved FROM organizations WHERE id = ?', [organizationId]);
+    
+    if (orgs.length === 0) {
+      return res.status(404).json({ error: 'Organization not found after update' });
+    }
+
+    res.json({ 
+      message: 'Direct database update successful',
+      organization: orgs[0],
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('Direct database update error:', error);
+    res.status(500).json({ error: 'Failed to update database' });
+  }
+});
+
 // Approve organization (Superadmin only)
 router.post('/organizations/:organizationId/approve', requireSuperAdmin, async (req, res) => {
   try {
