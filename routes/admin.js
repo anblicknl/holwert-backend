@@ -281,8 +281,8 @@ router.post('/organizations', requireSuperAdmin, async (req, res) => {
     }
 
     const [result] = await pool.execute(
-      'INSERT INTO organizations (name, description, category, website, email, phone, address, logo, brand_color, is_approved) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [name, description || null, category, website || null, email || null, phone || null, address || null, logo_url || null, brand_color || null, true]
+      'INSERT INTO organizations (name, description, category, website, email, phone, address, logo, brand_color, is_approved, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [name, description || null, category, website || null, email || null, phone || null, address || null, logo_url || null, brand_color || null, true, true]
     );
 
     res.status(201).json({
