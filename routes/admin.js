@@ -281,8 +281,8 @@ router.post('/organizations', requireSuperAdmin, async (req, res) => {
     }
 
     const [result] = await pool.execute(
-      'INSERT INTO organizations (name, description, category, website, email, phone, address, logo, brand_color, is_approved, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [name, description || null, category, website || null, email || null, phone || null, address || null, logo_url || null, brand_color || null, true, true]
+      'INSERT INTO organizations (name, description, category, website, email, phone, address, logo, brand_color) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [name, description || null, category, website || null, email || null, phone || null, address || null, logo_url || null, brand_color || null]
     );
 
     res.status(201).json({
@@ -326,6 +326,24 @@ router.put('/organizations/:organizationId', requireSuperAdmin, async (req, res)
   } catch (error) {
     console.error('Update organization error:', error);
     res.status(500).json({ error: 'Failed to update organization' });
+  }
+});
+
+// Approve organization (Superadmin only)
+router.post('/organizations/:organizationId/approve', requireSuperAdmin, async (req, res) => {
+  try {
+    const { organizationId } = req.params;
+
+    await pool.execute(
+      'UPDATE organizations SET is_approved = true, is_active = true WHERE id = ?',
+      [organizationId]
+    );
+
+    res.json({ message: 'Organization approved successfully' });
+
+  } catch (error) {
+    console.error('Approve organization error:', error);
+    res.status(500).json({ error: 'Failed to approve organization' });
   }
 });
 
