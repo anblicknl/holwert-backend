@@ -296,6 +296,9 @@ const styles = StyleSheet.create({
   heroSection: {
     height: screenHeight * 0.4,
     position: 'relative',
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    overflow: 'hidden',
   },
   heroImage: {
     width: '100%',
@@ -376,6 +379,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 12,
+    height: 40, // Fixed height to match date block
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
