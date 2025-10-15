@@ -168,7 +168,7 @@ export default function NewsDetailScreen({ route, navigation, onSelectOrganizati
               }]
             }]}
           >
-            {hero ? <Image source={{ uri: hero }} style={styles.hero} /> : null}
+            {hero ? <Image source={{ uri: hero }} style={[styles.hero, { height: heroHeight }]} /> : null}
             {/* Bookmark FAB half over hero / content */}
             <TouchableOpacity onPress={toggleBookmark} style={[styles.iconBtnFabOverlay, bookmarked && { backgroundColor: organizationColor + '20', borderColor: organizationColor }]}>
               <Ionicons name={bookmarked ? 'bookmark' : 'bookmark-outline'} size={20} color={bookmarked ? organizationColor : '#334'} />
@@ -313,8 +313,8 @@ const styles = StyleSheet.create({
     marginLeft: 12,
   },
   center: { flex:1, alignItems:'center', justifyContent:'center' },
-  hero: { width: '100%', height: 360 },
-  heroWrap: { position:'relative' },
+  hero: { width: '100%', resizeMode: 'cover' },
+  heroWrap: { position:'relative', width:'100%', borderBottomLeftRadius:24, borderBottomRightRadius:24, overflow:'hidden' },
   iconBtnFabOverlay: { position:'absolute', right: 16, bottom: -22, width:48, height:48, borderRadius:24, alignItems:'center', justifyContent:'center', backgroundColor:'#fff', borderWidth:1, borderColor:'#dbe1f0', shadowColor:'#000', shadowOpacity:0.08, shadowRadius:14 },
   iconBtnFabOverlayActive: { backgroundColor:'#eef4ff', borderColor:'#2f6cf6' },
   card: { margin: 16, padding: 16, borderRadius: 16, backgroundColor: '#fff', shadowColor:'#000', shadowOpacity:0.06, shadowRadius:12 },
