@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Image,
-  RefreshControl, ActivityIndicator, Alert, Linking, Platform, StatusBar, Dimensions, Share
+  RefreshControl, ActivityIndicator, Alert, Linking, Platform, StatusBar, Dimensions, Share, Animated
 } from 'react-native';
 import * as Calendar from 'expo-calendar';
 import { Ionicons } from '@expo/vector-icons';
@@ -44,6 +44,10 @@ export default function EventDetailScreen({ event: initialEvent, onClose, onSele
   const [event, setEvent] = useState<Event>(initialEvent);
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  
+  // Parallax scroll animation
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const heroHeight = screenHeight * 0.4;
 
   const { isFollowing, toggleFollow, getFollowersCount } = useFollow();
 
@@ -206,6 +210,11 @@ export default function EventDetailScreen({ event: initialEvent, onClose, onSele
             style={styles.scrollView}
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
+            onScroll={Animated.event(
+              [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+              { useNativeDriver: true }
+            )}
+            scrollEventThrottle={16}
             refreshControl={
               <RefreshControl
                 refreshing={isRefreshing}
@@ -215,8 +224,23 @@ export default function EventDetailScreen({ event: initialEvent, onClose, onSele
               />
             }
           >
-            {/* Hero Section - Now scrollable */}
-            <View style={styles.heroSection}>
+            {/* Hero Section with Parallax */}
+            <Animated.View 
+              style={[
+                styles.heroSection,
+                {
+                  transform: [
+                    {
+                      translateY: scrollY.interpolate({
+                        inputRange: [-heroHeight, 0, heroHeight],
+                        outputRange: [heroHeight * 0.5, 0, -heroHeight * 0.5],
+                        extrapolate: 'clamp',
+                      }),
+                    },
+                  ],
+                },
+              ]}
+            >
               {event?.image_url ? (
                 <Image source={{ uri: event.image_url }} style={styles.heroImage} />
               ) : (
@@ -224,7 +248,7 @@ export default function EventDetailScreen({ event: initialEvent, onClose, onSele
                   <Ionicons name="calendar-outline" size={80} color="#FFFFFF" />
                 </View>
               )}
-            </View>
+            </Animated.View>
 
             {/* Event Title and Meta Info in Tile */}
             <View style={[styles.contentTile, styles.firstTile]}>
@@ -443,9 +467,10 @@ const styles = StyleSheet.create({
         shadowRadius: 4,
         elevation: 5,
       },
-  // Hero Section - Now scrollable
+  // Hero Section - Full width with parallax
   heroSection: {
     height: screenHeight * 0.4,
+    width: '100%',
     borderBottomLeftRadius: 24,
     borderBottomRightRadius: 24,
     overflow: 'hidden',
@@ -545,8 +570,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background.primary,
   },
   scrollContent: {
-    paddingTop: 20,
-    paddingHorizontal: 20,
+    paddingTop: 0,
     paddingBottom: 40,
   },
   // Content Tiles
@@ -554,6 +578,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
     padding: 20,
+    marginHorizontal: 20,
     marginBottom: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
