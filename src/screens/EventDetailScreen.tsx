@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Image,
-  RefreshControl, ActivityIndicator, Alert, Linking, Platform, StatusBar, Dimensions
+  RefreshControl, ActivityIndicator, Alert, Linking, Platform, StatusBar, Dimensions, Share
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/Colors';
@@ -101,6 +101,52 @@ export default function EventDetailScreen({ event: initialEvent, onClose, onSele
     }
   };
 
+  const addToCalendar = () => {
+    try {
+      const startDate = new Date(event?.event_date || '');
+      const endDate = event?.end_date ? new Date(event.end_date) : new Date(startDate.getTime() + 2 * 60 * 60 * 1000); // Default 2 hours
+      
+      // Format dates for calendar
+      const formatDateForCalendar = (date: Date) => {
+        return date.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+      };
+      
+      const startDateStr = formatDateForCalendar(startDate);
+      const endDateStr = formatDateForCalendar(endDate);
+      
+      // Create calendar event details
+      const title = encodeURIComponent(event?.title || 'Evenement');
+      const description = encodeURIComponent(event?.description || '');
+      const location = encodeURIComponent(event?.location || '');
+      
+      // Create calendar URL
+      const calendarUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${startDateStr}/${endDateStr}&details=${description}&location=${location}`;
+      
+      // Open calendar
+      Linking.openURL(calendarUrl);
+      
+      Alert.alert('Toegevoegd', 'Evenement is toegevoegd aan je kalender');
+    } catch (error) {
+      console.error('Error adding to calendar:', error);
+      Alert.alert('Fout', 'Kon evenement niet toevoegen aan kalender');
+    }
+  };
+
+  const shareEvent = async () => {
+    try {
+      const shareContent = {
+        title: event?.title || 'Evenement',
+        message: `${event?.title || 'Evenement'}\n\n${event?.description || ''}\n\nDatum: ${event?.event_date ? new Date(event.event_date).toLocaleDateString('nl-NL') : ''}\nLocatie: ${event?.location || ''}`,
+        url: '', // You could add a deep link here
+      };
+
+      await Share.share(shareContent);
+    } catch (error) {
+      console.error('Error sharing event:', error);
+      Alert.alert('Fout', 'Kon evenement niet delen');
+    }
+  };
+
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
@@ -133,15 +179,18 @@ export default function EventDetailScreen({ event: initialEvent, onClose, onSele
         <View style={styles.container}>
           <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
           
-          {/* Fixed Back Button with Page Name */}
-          <View style={styles.fixedHeader}>
-            <TouchableOpacity style={styles.backButton} onPress={onClose}>
-              <Ionicons name="chevron-back" size={24} color="#000" />
-            </TouchableOpacity>
-            <View style={styles.pageNamePill}>
-              <Text style={styles.pageNameText}>{fromPage}</Text>
-            </View>
-          </View>
+              {/* Fixed Back Button with Page Name and Share */}
+              <View style={styles.fixedHeader}>
+                <TouchableOpacity style={styles.backButton} onPress={onClose}>
+                  <Ionicons name="chevron-back" size={24} color="#000" />
+                </TouchableOpacity>
+                <View style={styles.pageNamePill}>
+                  <Text style={styles.pageNameText}>{fromPage}</Text>
+                </View>
+                <TouchableOpacity style={styles.shareButton} onPress={shareEvent}>
+                  <Ionicons name="share-outline" size={20} color="#000" />
+                </TouchableOpacity>
+              </View>
 
           <ScrollView
             style={styles.scrollView}
@@ -233,6 +282,12 @@ export default function EventDetailScreen({ event: initialEvent, onClose, onSele
                 <Text style={styles.tileText}>{event.description}</Text>
               </View>
             )}
+
+            {/* Add to Calendar Button */}
+            <TouchableOpacity style={[styles.addToCalendarButton, { backgroundColor: organizationColor }]} onPress={addToCalendar}>
+              <Ionicons name="calendar-outline" size={20} color="#FFFFFF" />
+              <Text style={styles.addToCalendarText}>Voeg toe aan je agenda</Text>
+            </TouchableOpacity>
 
             {/* Organization Tile */}
             {event?.organization_id && (
@@ -357,11 +412,25 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  pageNameText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#000',
-  },
+      pageNameText: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#000',
+      },
+      shareButton: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: 'rgba(255, 255, 255, 0.9)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 4,
+        elevation: 5,
+        marginLeft: 12,
+      },
   // Hero Section - Now scrollable
   heroSection: {
     height: screenHeight * 0.4,
@@ -542,11 +611,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 8,
   },
-  detailText: {
-    fontSize: 16,
-    color: Colors.text.secondary,
-    marginLeft: 10,
-  },
+      detailText: {
+        fontSize: 16,
+        color: Colors.text.secondary,
+        marginLeft: 10,
+      },
+      // Add to Calendar Button
+      addToCalendarButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 16,
+        paddingHorizontal: 24,
+        marginHorizontal: 20,
+        marginBottom: 16,
+        borderRadius: 16,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.15,
+        shadowRadius: 4,
+        elevation: 3,
+      },
+      addToCalendarText: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#FFFFFF',
+        marginLeft: 8,
+      },
   // Action Button
   actionButton: {
     flexDirection: 'row',
