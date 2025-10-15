@@ -36,9 +36,10 @@ interface EventDetailScreenProps {
   event: Event;
   onClose: () => void;
   onSelectOrganization: (organizationId: number) => void;
+  fromPage?: string; // Page name to show in back button
 }
 
-export default function EventDetailScreen({ event: initialEvent, onClose, onSelectOrganization }: EventDetailScreenProps) {
+export default function EventDetailScreen({ event: initialEvent, onClose, onSelectOrganization, fromPage = "Agenda" }: EventDetailScreenProps) {
   const [event, setEvent] = useState<Event>(initialEvent);
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -125,53 +126,13 @@ export default function EventDetailScreen({ event: initialEvent, onClose, onSele
         <View style={styles.container}>
           <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
           
-          {/* Hero Section with Back Button */}
-          <View style={styles.heroSection}>
-            {event?.image_url ? (
-              <Image source={{ uri: event.image_url }} style={styles.heroImage} />
-            ) : (
-              <View style={[styles.heroPlaceholder, { backgroundColor: organizationColor }]}>
-                <Ionicons name="calendar-outline" size={80} color="#FFFFFF" />
-              </View>
-            )}
-            
-            {/* Back Button - Fixed position */}
+          {/* Fixed Back Button with Page Name */}
+          <View style={styles.fixedHeader}>
             <TouchableOpacity style={styles.backButton} onPress={onClose}>
               <Ionicons name="chevron-back" size={24} color="#000" />
             </TouchableOpacity>
-          </View>
-
-          {/* Event Title and Meta Info below Hero */}
-          <View style={styles.eventHeader}>
-            <Text style={styles.eventTitle}>{event?.title || 'Evenement'}</Text>
-            <View style={styles.metaContainer}>
-              {/* Date Block - Larger */}
-              <View style={[styles.dateBlock, { backgroundColor: organizationColor }]}>
-                <Text style={styles.dateText}>
-                  {event?.event_date ? new Date(event.event_date).toLocaleDateString('nl-NL', { 
-                    day: 'numeric' 
-                  }) : ''}
-                </Text>
-                <Text style={styles.monthText}>
-                  {event?.event_date ? new Date(event.event_date).toLocaleDateString('nl-NL', { 
-                    month: 'short' 
-                  }) : ''}
-                </Text>
-              </View>
-              
-              {/* Time and Location Blocks */}
-              <View style={styles.metaBlocks}>
-                <View style={[styles.metaBlock, { backgroundColor: organizationColor }]}>
-                  <Ionicons name="time-outline" size={16} color="#FFFFFF" />
-                  <Text style={styles.metaBlockText}>
-                    {event?.event_date ? formatTime(event.event_date) : ''}
-                  </Text>
-                </View>
-                <View style={[styles.metaBlock, { backgroundColor: organizationColor }]}>
-                  <Ionicons name="location-outline" size={16} color="#FFFFFF" />
-                  <Text style={styles.metaBlockText}>{event?.location || ''}</Text>
-                </View>
-              </View>
+            <View style={styles.pageNamePill}>
+              <Text style={styles.pageNameText}>{fromPage}</Text>
             </View>
           </View>
 
@@ -188,6 +149,50 @@ export default function EventDetailScreen({ event: initialEvent, onClose, onSele
               />
             }
           >
+            {/* Hero Section - Now scrollable */}
+            <View style={styles.heroSection}>
+              {event?.image_url ? (
+                <Image source={{ uri: event.image_url }} style={styles.heroImage} />
+              ) : (
+                <View style={[styles.heroPlaceholder, { backgroundColor: organizationColor }]}>
+                  <Ionicons name="calendar-outline" size={80} color="#FFFFFF" />
+                </View>
+              )}
+            </View>
+
+            {/* Event Title and Meta Info below Hero */}
+            <View style={styles.eventHeader}>
+              <Text style={styles.eventTitle}>{event?.title || 'Evenement'}</Text>
+              <View style={styles.metaContainer}>
+                {/* Date Block - Larger */}
+                <View style={[styles.dateBlock, { backgroundColor: organizationColor }]}>
+                  <Text style={styles.dateText}>
+                    {event?.event_date ? new Date(event.event_date).toLocaleDateString('nl-NL', { 
+                      day: 'numeric' 
+                    }) : ''}
+                  </Text>
+                  <Text style={styles.monthText}>
+                    {event?.event_date ? new Date(event.event_date).toLocaleDateString('nl-NL', { 
+                      month: 'short' 
+                    }) : ''}
+                  </Text>
+                </View>
+                
+                {/* Time and Location Blocks */}
+                <View style={styles.metaBlocks}>
+                  <View style={[styles.metaBlock, { backgroundColor: organizationColor }]}>
+                    <Ionicons name="time-outline" size={16} color="#FFFFFF" />
+                    <Text style={styles.metaBlockText}>
+                      {event?.event_date ? formatTime(event.event_date) : ''}
+                    </Text>
+                  </View>
+                  <TouchableOpacity style={[styles.metaBlock, { backgroundColor: organizationColor }]} onPress={openMaps}>
+                    <Ionicons name="location-outline" size={16} color="#FFFFFF" />
+                    <Text style={styles.metaBlockText}>{event?.location || ''}</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
             {/* About Event Tile */}
             {event?.description && (
               <View style={styles.contentTile}>
@@ -262,16 +267,6 @@ export default function EventDetailScreen({ event: initialEvent, onClose, onSele
               </View>
             )}
 
-            {/* Action Button */}
-            {event?.location && (
-              <TouchableOpacity 
-                style={[styles.actionButton, { backgroundColor: organizationColor }]} 
-                onPress={openMaps}
-              >
-                <Ionicons name="map-outline" size={20} color="#FFFFFF" />
-                <Text style={styles.actionButtonText}>Bekijk locatie</Text>
-              </TouchableOpacity>
-            )}
           </ScrollView>
         </View>
       );
@@ -292,10 +287,49 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: Colors.text.secondary,
   },
-  // Hero Section
+  // Fixed Header
+  fixedHeader: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 50 : 30,
+    left: 20,
+    right: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  pageNamePill: {
+    marginLeft: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  pageNameText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#000',
+  },
+  // Hero Section - Now scrollable
   heroSection: {
     height: screenHeight * 0.4,
-    position: 'relative',
     borderBottomLeftRadius: 24,
     borderBottomRightRadius: 24,
     overflow: 'hidden',
@@ -310,23 +344,6 @@ const styles = StyleSheet.create({
     height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  backButton: {
-    position: 'absolute',
-    top: Platform.OS === 'ios' ? 50 : 30,
-    left: 20,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5,
-    zIndex: 10,
   },
   // Event Header below Hero
   eventHeader: {
