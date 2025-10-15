@@ -224,7 +224,7 @@ export default function EventDetailScreen({ event: initialEvent, onClose, onSele
               />
             }
           >
-            {/* Hero Section with Parallax */}
+            {/* Hero Section with Parallax (hero moves slower than content) */}
             <Animated.View 
               style={[
                 styles.heroSection,
@@ -232,9 +232,11 @@ export default function EventDetailScreen({ event: initialEvent, onClose, onSele
                   transform: [
                     {
                       translateY: scrollY.interpolate({
-                        inputRange: [-heroHeight, 0, heroHeight],
-                        outputRange: [heroHeight * 0.5, 0, -heroHeight * 0.5],
-                        extrapolate: 'clamp',
+                        inputRange: [-heroHeight, 0, heroHeight * 2],
+                        // Overscroll stretch up a bit, rest: move down half speed
+                        outputRange: [-heroHeight * 0.3, 0, heroHeight],
+                        extrapolateLeft: 'clamp',
+                        extrapolateRight: 'clamp',
                       }),
                     },
                   ],
