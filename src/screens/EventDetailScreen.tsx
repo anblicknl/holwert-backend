@@ -111,6 +111,13 @@ export default function EventDetailScreen({ event: initialEvent, onClose, onSele
     return date.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
   };
 
+  const isMultiDayEvent = () => {
+    if (!event?.event_date || !event?.end_date) return false;
+    const startDate = new Date(event.event_date);
+    const endDate = new Date(event.end_date);
+    return startDate.toDateString() !== endDate.toDateString();
+  };
+
   if (isLoading || !event) {
       return (
         <View style={styles.container}>
@@ -164,18 +171,44 @@ export default function EventDetailScreen({ event: initialEvent, onClose, onSele
             <View style={styles.eventHeader}>
               <Text style={styles.eventTitle}>{event?.title || 'Evenement'}</Text>
               <View style={styles.metaContainer}>
-                {/* Date Block - Larger */}
-                <View style={[styles.dateBlock, { backgroundColor: organizationColor }]}>
-                  <Text style={styles.dateText}>
-                    {event?.event_date ? new Date(event.event_date).toLocaleDateString('nl-NL', { 
-                      day: 'numeric' 
-                    }) : ''}
-                  </Text>
-                  <Text style={styles.monthText}>
-                    {event?.event_date ? new Date(event.event_date).toLocaleDateString('nl-NL', { 
-                      month: 'short' 
-                    }) : ''}
-                  </Text>
+                {/* Date Block - Dynamic size for multi-day events */}
+                <View style={[
+                  isMultiDayEvent() ? styles.dateBlockWide : styles.dateBlock, 
+                  { backgroundColor: organizationColor }
+                ]}>
+                  {isMultiDayEvent() ? (
+                    <>
+                      <Text style={styles.dateText}>
+                        {event?.event_date ? new Date(event.event_date).toLocaleDateString('nl-NL', { 
+                          day: 'numeric' 
+                        }) : ''}
+                      </Text>
+                      <Text style={styles.dateRangeText}>-</Text>
+                      <Text style={styles.dateText}>
+                        {event?.end_date ? new Date(event.end_date).toLocaleDateString('nl-NL', { 
+                          day: 'numeric' 
+                        }) : ''}
+                      </Text>
+                      <Text style={styles.monthText}>
+                        {event?.event_date ? new Date(event.event_date).toLocaleDateString('nl-NL', { 
+                          month: 'short' 
+                        }) : ''}
+                      </Text>
+                    </>
+                  ) : (
+                    <>
+                      <Text style={styles.dateText}>
+                        {event?.event_date ? new Date(event.event_date).toLocaleDateString('nl-NL', { 
+                          day: 'numeric' 
+                        }) : ''}
+                      </Text>
+                      <Text style={styles.monthText}>
+                        {event?.event_date ? new Date(event.event_date).toLocaleDateString('nl-NL', { 
+                          month: 'short' 
+                        }) : ''}
+                      </Text>
+                    </>
+                  )}
                 </View>
                 
                 {/* Time and Location Blocks */}
@@ -313,7 +346,7 @@ const styles = StyleSheet.create({
   pageNamePill: {
     marginLeft: 12,
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    height: 40, // Same height as back button
     borderRadius: 20,
     backgroundColor: 'rgba(255, 255, 255, 0.9)',
     shadowColor: '#000',
@@ -321,6 +354,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 4,
     elevation: 5,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   pageNameText: {
     fontSize: 14,
@@ -363,7 +398,19 @@ const styles = StyleSheet.create({
   },
   dateBlock: {
     width: 80,
-    height: 80,
+    height: 80, // Same height as meta blocks (2x40px)
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  dateBlockWide: {
+    width: 120, // Wider for multi-day events
+    height: 80, // Same height as meta blocks
     borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
@@ -385,6 +432,12 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     textTransform: 'uppercase',
     marginTop: 2,
+  },
+  dateRangeText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginHorizontal: 4,
   },
   metaBlocks: {
     flex: 1,
