@@ -167,8 +167,8 @@ export default function EventDetailScreen({ event: initialEvent, onClose, onSele
               )}
             </View>
 
-            {/* Event Title and Meta Info below Hero */}
-            <View style={styles.eventHeader}>
+            {/* Event Title and Meta Info in Tile */}
+            <View style={styles.contentTile}>
               <Text style={styles.eventTitle}>{event?.title || 'Evenement'}</Text>
               <View style={styles.metaContainer}>
                 {/* Date Block - Dynamic size for multi-day events */}
@@ -379,11 +379,6 @@ const styles = StyleSheet.create({
     height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  // Event Header below Hero
-  eventHeader: {
-    padding: 20,
-    backgroundColor: Colors.background.primary,
   },
   eventTitle: {
     fontSize: 28,
