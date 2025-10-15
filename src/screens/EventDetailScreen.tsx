@@ -139,30 +139,37 @@ export default function EventDetailScreen({ event: initialEvent, onClose, onSele
             <TouchableOpacity style={styles.backButton} onPress={onClose}>
               <Ionicons name="chevron-back" size={24} color="#000" />
             </TouchableOpacity>
-            
-            {/* Event Title and Meta Info over Hero */}
-            <View style={styles.heroContent}>
-              <Text style={styles.heroTitle}>{event?.title || 'Evenement'}</Text>
-              <View style={styles.heroMeta}>
-                <View style={styles.metaItem}>
-                  <Ionicons name="calendar-outline" size={16} color="#FFFFFF" />
-                  <Text style={styles.metaText}>
-                    {event?.event_date ? new Date(event.event_date).toLocaleDateString('nl-NL', { 
-                      weekday: 'short', 
-                      day: 'numeric', 
-                      month: 'short' 
-                    }) : ''}
-                  </Text>
-                </View>
-                <View style={styles.metaItem}>
+          </View>
+
+          {/* Event Title and Meta Info below Hero */}
+          <View style={styles.eventHeader}>
+            <Text style={styles.eventTitle}>{event?.title || 'Evenement'}</Text>
+            <View style={styles.metaContainer}>
+              {/* Date Block - Larger */}
+              <View style={[styles.dateBlock, { backgroundColor: organizationColor }]}>
+                <Text style={styles.dateText}>
+                  {event?.event_date ? new Date(event.event_date).toLocaleDateString('nl-NL', { 
+                    day: 'numeric' 
+                  }) : ''}
+                </Text>
+                <Text style={styles.monthText}>
+                  {event?.event_date ? new Date(event.event_date).toLocaleDateString('nl-NL', { 
+                    month: 'short' 
+                  }) : ''}
+                </Text>
+              </View>
+              
+              {/* Time and Location Blocks */}
+              <View style={styles.metaBlocks}>
+                <View style={[styles.metaBlock, { backgroundColor: organizationColor }]}>
                   <Ionicons name="time-outline" size={16} color="#FFFFFF" />
-                  <Text style={styles.metaText}>
+                  <Text style={styles.metaBlockText}>
                     {event?.event_date ? formatTime(event.event_date) : ''}
                   </Text>
                 </View>
-                <View style={styles.metaItem}>
+                <View style={[styles.metaBlock, { backgroundColor: organizationColor }]}>
                   <Ionicons name="location-outline" size={16} color="#FFFFFF" />
-                  <Text style={styles.metaText}>{event?.location || ''}</Text>
+                  <Text style={styles.metaBlockText}>{event?.location || ''}</Text>
                 </View>
               </View>
             </View>
@@ -287,7 +294,7 @@ const styles = StyleSheet.create({
   },
   // Hero Section
   heroSection: {
-    height: screenHeight * 0.45,
+    height: screenHeight * 0.4,
     position: 'relative',
   },
   heroImage: {
@@ -318,42 +325,69 @@ const styles = StyleSheet.create({
     elevation: 5,
     zIndex: 10,
   },
-  heroContent: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
+  // Event Header below Hero
+  eventHeader: {
     padding: 20,
-    paddingBottom: 30,
-    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    backgroundColor: Colors.background.primary,
   },
-  heroTitle: {
+  eventTitle: {
     fontSize: 28,
     fontWeight: '700',
-    color: '#FFFFFF',
-    marginBottom: 12,
-    textShadowColor: 'rgba(0, 0, 0, 0.5)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
+    color: Colors.text.primary,
+    marginBottom: 16,
   },
-  heroMeta: {
+  metaContainer: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    alignItems: 'flex-start',
     gap: 16,
   },
-  metaItem: {
+  dateBlock: {
+    width: 80,
+    height: 80,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  dateText: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    lineHeight: 28,
+  },
+  monthText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    textTransform: 'uppercase',
+    marginTop: 2,
+  },
+  metaBlocks: {
+    flex: 1,
+    gap: 8,
+  },
+  metaBlock: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
-  metaText: {
+  metaBlockText: {
     fontSize: 14,
     color: '#FFFFFF',
-    marginLeft: 6,
+    marginLeft: 8,
     fontWeight: '500',
+    flex: 1,
   },
   // Scroll View
   scrollView: {
