@@ -196,6 +196,7 @@ export default function EventDetailScreen({ event: initialEvent, onClose, onSele
                 <View style={styles.pageNamePill}>
                   <Text style={styles.pageNameText}>{fromPage}</Text>
                 </View>
+                <View style={styles.spacer} />
                 <TouchableOpacity style={styles.shareButton} onPress={shareEvent}>
                   <Ionicons name="share-outline" size={20} color="#000" />
                 </TouchableOpacity>
@@ -226,7 +227,7 @@ export default function EventDetailScreen({ event: initialEvent, onClose, onSele
             </View>
 
             {/* Event Title and Meta Info in Tile */}
-            <View style={styles.contentTile}>
+            <View style={[styles.contentTile, styles.firstTile]}>
               <Text style={styles.eventTitle}>{event?.title || 'Evenement'}</Text>
               <View style={styles.metaContainer}>
                 {/* Date Block - Dynamic size for multi-day events */}
@@ -426,6 +427,9 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         color: '#000',
       },
+      spacer: {
+        flex: 1,
+      },
       shareButton: {
         width: 40,
         height: 40,
@@ -438,7 +442,6 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.25,
         shadowRadius: 4,
         elevation: 5,
-        marginLeft: 12,
       },
   // Hero Section - Now scrollable
   heroSection: {
@@ -542,7 +545,8 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background.primary,
   },
   scrollContent: {
-    padding: 20,
+    paddingTop: 20,
+    paddingHorizontal: 20,
     paddingBottom: 40,
   },
   // Content Tiles
@@ -556,6 +560,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 8,
     elevation: 3,
+  },
+  firstTile: {
+    marginTop: 24,
   },
   tileTitle: {
     fontSize: 20,
