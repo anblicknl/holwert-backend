@@ -13,6 +13,7 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as Calendar from 'expo-calendar';
 import { Colors } from '../constants/Colors';
 import Header, { HEADER_HEIGHT } from '../components/Header';
 import ApiService from '../services/api';
@@ -105,31 +106,39 @@ const AgendaScreen: React.FC<{ onSelectEvent?: (event: Event) => void }> = ({ on
     }
   };
 
-  const addToCalendar = (event: Event) => {
+  const addToCalendar = async (event: Event) => {
     try {
       const startDate = new Date(event.event_date);
-      const endDate = event.end_date ? new Date(event.end_date) : new Date(startDate.getTime() + 2 * 60 * 60 * 1000); // Default 2 hours
-      
-      // Format dates for calendar
-      const formatDateForCalendar = (date: Date) => {
-        return date.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
-      };
-      
+      const endDate = event.end_date ? new Date(event.end_date) : new Date(startDate.getTime() + 2 * 60 * 60 * 1000);
+
+      // Try native calendar first
+      const { status } = await Calendar.requestCalendarPermissionsAsync();
+      if (status === 'granted') {
+        const calendars = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
+        const defaultCal = calendars.find(c => c.allowsModifications) || calendars[0];
+        if (defaultCal?.id) {
+          await Calendar.createEventAsync(defaultCal.id, {
+            title: event.title,
+            startDate,
+            endDate,
+            timeZone: undefined,
+            location: event.location,
+            notes: event.description,
+          });
+          Alert.alert('Toegevoegd', 'Evenement is toegevoegd aan je kalender');
+          return;
+        }
+      }
+
+      // Fallback to Google Calendar URL
+      const formatDateForCalendar = (date: Date) => date.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
       const startDateStr = formatDateForCalendar(startDate);
       const endDateStr = formatDateForCalendar(endDate);
-      
-      // Create calendar event details
       const title = encodeURIComponent(event.title);
       const description = encodeURIComponent(event.description || '');
       const location = encodeURIComponent(event.location || '');
-      
-      // Create calendar URL
       const calendarUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${startDateStr}/${endDateStr}&details=${description}&location=${location}`;
-      
-      // Open calendar
       Linking.openURL(calendarUrl);
-      
-      Alert.alert('Toegevoegd', 'Evenement is toegevoegd aan je kalender');
     } catch (error) {
       console.error('Error adding to calendar:', error);
       Alert.alert('Fout', 'Kon evenement niet toevoegen aan kalender');

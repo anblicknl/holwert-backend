@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "holwert-mobile-app",
+    "name": "Dorpsapp Holwert",
     "slug": "holwert-mobile-app",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -13,7 +13,11 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.holwert.dorpsapp",
+      "infoPlist": {
+        "NSCalendarsUsageDescription": "Deze app gebruikt je agenda om evenementen toe te voegen."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -21,7 +25,12 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.holwert.dorpsapp",
+      "permissions": [
+        "android.permission.READ_CALENDAR",
+        "android.permission.WRITE_CALENDAR"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
