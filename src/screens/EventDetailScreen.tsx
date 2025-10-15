@@ -206,7 +206,7 @@ export default function EventDetailScreen({ event: initialEvent, onClose, onSele
                 </TouchableOpacity>
               </View>
 
-          <ScrollView
+          <Animated.ScrollView
             style={styles.scrollView}
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
@@ -389,7 +389,7 @@ export default function EventDetailScreen({ event: initialEvent, onClose, onSele
               </View>
             )}
 
-          </ScrollView>
+          </Animated.ScrollView>
         </View>
       );
 }
