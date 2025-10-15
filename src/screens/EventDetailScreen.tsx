@@ -29,6 +29,7 @@ interface Event {
   organizer_id?: number;
   organizer_first_name?: string;
   organizer_last_name?: string;
+  max_attendees?: number;
 }
 
 interface EventDetailScreenProps {
@@ -110,15 +111,14 @@ export default function EventDetailScreen({ event: initialEvent, onClose, onSele
   };
 
   if (isLoading || !event) {
-    return (
-      <View style={styles.container}>
-        <Header title="Evenement" showBackButton onBackPress={onClose} />
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={Colors.primary.blue} />
-          <Text style={styles.loadingText}>Evenement laden...</Text>
+      return (
+        <View style={styles.container}>
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={Colors.primary.blue} />
+            <Text style={styles.loadingText}>Evenement laden...</Text>
+          </View>
         </View>
-      </View>
-    );
+      );
   }
 
       return (
