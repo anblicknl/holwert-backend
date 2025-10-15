@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
-import { View, Text, Image, RefreshControl, TouchableOpacity, Share, StyleSheet, Animated, Dimensions } from 'react-native';
-import Header, { HEADER_HEIGHT } from '../components/Header';
+import { View, Text, Image, RefreshControl, TouchableOpacity, Share, StyleSheet, Animated, Dimensions, Platform, StatusBar } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { get, post, del } from '../api/client';
@@ -135,8 +134,19 @@ export default function NewsDetailScreen({ route, navigation, onSelectOrganizati
 
   return (
     <View style={{ flex:1 }}>
-      {/* Header buiten de ScrollView, zodat de pijl niet meescrollt en geen dubbele achtergrond ontstaat */}
-      <Header title="Nieuws" showBackButton onBackPress={() => navigation.goBack()} showWeather backOffset={76} />
+      {/* Fixed overlay header: back button + page name pill + share button (rechts) */}
+      <View style={styles.fixedHeader}>
+        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+          <Ionicons name="chevron-back" size={24} color="#000" />
+        </TouchableOpacity>
+        <View style={styles.pageNamePill}>
+          <Text style={styles.pageNameText}>Nieuws</Text>
+        </View>
+        <View style={{ flex: 1 }} />
+        <TouchableOpacity style={styles.shareButton} onPress={shareItem}>
+          <Ionicons name="share-outline" size={20} color="#000" />
+        </TouchableOpacity>
+      </View>
       <Animated.ScrollView 
         onScroll={Animated.event(
           [{ nativeEvent: { contentOffset: { y: scrollY } } }],
@@ -145,7 +155,7 @@ export default function NewsDetailScreen({ route, navigation, onSelectOrganizati
         scrollEventThrottle={16}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       > 
-        <View style={{ paddingTop: HEADER_HEIGHT + 32 }}>
+        <View style={{ paddingTop: (Platform.OS === 'ios' ? 100 : 80) }}>
           <Animated.View 
             style={[styles.heroWrap, {
               transform: [{
@@ -247,6 +257,61 @@ export default function NewsDetailScreen({ route, navigation, onSelectOrganizati
 }
 
 const styles = StyleSheet.create({
+  fixedHeader: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 50 : 30,
+    left: 20,
+    right: 20,
+    zIndex: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  pageNamePill: {
+    marginLeft: 12,
+    paddingHorizontal: 16,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  pageNameText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#000',
+  },
+  shareButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+    marginLeft: 12,
+  },
   center: { flex:1, alignItems:'center', justifyContent:'center' },
   hero: { width: '100%', height: 360 },
   heroWrap: { position:'relative' },
