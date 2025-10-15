@@ -398,7 +398,7 @@ const styles = StyleSheet.create({
   },
   dateBlock: {
     width: 80,
-    height: 80, // Same height as meta blocks (2x40px)
+    height: 88, // 2x40px + 8px gap = 88px
     borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
@@ -410,7 +410,7 @@ const styles = StyleSheet.create({
   },
   dateBlockWide: {
     width: 120, // Wider for multi-day events
-    height: 80, // Same height as meta blocks
+    height: 88, // 2x40px + 8px gap = 88px
     borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
