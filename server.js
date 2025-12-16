@@ -869,6 +869,27 @@ app.get('/api/auth/verify', authenticateToken, (req, res) => {
 
 // ===== ADMIN ENDPOINTS =====
 
+// Get admin dashboard statistics
+app.get('/api/admin/stats', authenticateToken, async (req, res) => {
+  try {
+    const [usersResult, orgsResult, newsResult, eventsResult] = await Promise.all([
+      pool.query('SELECT COUNT(*) as count FROM users'),
+      pool.query('SELECT COUNT(*) as count FROM organizations'),
+      pool.query('SELECT COUNT(*) as count FROM news'),
+      pool.query('SELECT COUNT(*) as count FROM events')
+    ]);
+    res.json({
+      users: parseInt(usersResult.rows[0].count) || 0,
+      organizations: parseInt(orgsResult.rows[0].count) || 0,
+      news: parseInt(newsResult.rows[0].count) || 0,
+      events: parseInt(eventsResult.rows[0].count) || 0
+    });
+  } catch (error) {
+    console.error('Get admin stats error:', error);
+    res.status(500).json({ error: 'Failed to get stats', message: error.message });
+  }
+});
+
 // Get all news articles (admin)
 app.get('/api/admin/news', authenticateToken, async (req, res) => {
   try {
