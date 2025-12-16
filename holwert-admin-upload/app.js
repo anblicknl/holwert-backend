@@ -67,7 +67,7 @@ class HolwertAdmin {
 
     showLoginScreen() {
         const loginScreen = document.getElementById('loginScreen');
-        const mainScreen = document.getElementById('dashboardScreen');
+        const mainScreen = document.getElementById('mainScreen');
         
         if (loginScreen) {
             loginScreen.classList.add('active');
@@ -82,7 +82,7 @@ class HolwertAdmin {
     showMainScreen() {
         console.log('=== SHOW MAIN SCREEN ===');
         const loginScreen = document.getElementById('loginScreen');
-        const mainScreen = document.getElementById('dashboardScreen');
+        const mainScreen = document.getElementById('mainScreen');
         
         console.log('Login screen element:', loginScreen);
         console.log('Main screen element:', mainScreen);
