@@ -1073,7 +1073,7 @@ app.get('/api/admin/organizations', authenticateToken, async (req, res) => {
         COALESCE(o.logo_url, '') as logo_url,
         COALESCE(o.brand_color, '#667eea') as brand_color,
         COALESCE(o.is_approved, false) as is_active,
-        (SELECT COUNT(*) FROM users u WHERE u.organization_id = o.id) as user_count
+        0 as user_count
       FROM organizations o
       WHERE 1=1
     `;
