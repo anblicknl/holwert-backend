@@ -1038,6 +1038,95 @@ app.get('/api/admin/news/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// Update news article (admin) - allows changing organization
+app.put('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, content, excerpt, category, custom_category, organization_id, image_url, image_data, is_published, published_at } = req.body;
+
+    // Validation
+    if (!title || !content) {
+      return res.status(400).json({
+        error: 'Title and content are required'
+      });
+    }
+
+    // Handle category logic
+    let finalCategory = category || 'dorpsnieuws';
+    let finalCustomCategory = null;
+    
+    if (category === 'overig' && custom_category) {
+      finalCustomCategory = custom_category;
+    }
+
+    // Build update query dynamically to handle optional fields
+    let updateFields = [];
+    let values = [];
+    let paramCount = 1;
+
+    updateFields.push(`title = $${paramCount++}`);
+    values.push(title);
+
+    updateFields.push(`content = $${paramCount++}`);
+    values.push(content);
+
+    updateFields.push(`excerpt = $${paramCount++}`);
+    values.push(excerpt || null);
+
+    updateFields.push(`category = $${paramCount++}`);
+    values.push(finalCategory);
+
+    updateFields.push(`custom_category = $${paramCount++}`);
+    values.push(finalCustomCategory);
+
+    updateFields.push(`organization_id = $${paramCount++}`);
+    values.push(organization_id || null);
+
+    if (image_url !== undefined) {
+      updateFields.push(`image_url = $${paramCount++}`);
+      values.push(image_url || null);
+    }
+
+    if (image_data !== undefined) {
+      updateFields.push(`image_data = $${paramCount++}`);
+      values.push(image_data || null);
+    }
+
+    if (is_published !== undefined) {
+      updateFields.push(`is_published = $${paramCount++}`);
+      values.push(is_published);
+    }
+
+    if (published_at) {
+      updateFields.push(`published_at = $${paramCount++}`);
+      values.push(published_at);
+    }
+
+    updateFields.push('updated_at = NOW()');
+
+    values.push(id);
+    const query = `UPDATE news SET ${updateFields.join(', ')} WHERE id = $${paramCount} RETURNING id, title, content, excerpt, category, custom_category, organization_id, image_url, is_published, published_at, created_at, updated_at`;
+
+    const result = await pool.query(query, values);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Article not found' });
+    }
+
+    res.json({
+      message: 'Article updated successfully',
+      article: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error('Update admin news error:', error);
+    res.status(500).json({
+      error: 'Failed to update article',
+      message: error.message
+    });
+  }
+});
+
 // Delete news article (admin)
 app.delete('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
