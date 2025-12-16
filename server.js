@@ -1264,13 +1264,20 @@ app.get('/events', async (req, res) => {
     const params = [];
     
     // Filter by organization_id if provided
+    let paramCount = 0;
     if (organization_id) {
-      query += ` AND e.organization_id = $${params.length + 1}`;
+      paramCount++;
+      query += ` AND e.organization_id = $${paramCount}`;
       params.push(parseInt(organization_id));
     }
     
-    query += ` ORDER BY e.event_date ASC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-    params.push(parseInt(limit), parseInt(offset));
+    paramCount++;
+    query += ` ORDER BY e.event_date ASC LIMIT $${paramCount}`;
+    params.push(parseInt(limit));
+    
+    paramCount++;
+    query += ` OFFSET $${paramCount}`;
+    params.push(parseInt(offset));
 
     const result = await pool.query(query, params);
 
@@ -1338,13 +1345,20 @@ app.get('/api/events', async (req, res) => {
     
     const params = [];
     
+    let paramCount = 0;
     if (organization_id) {
-      query += ` AND e.organization_id = $${params.length + 1}`;
+      paramCount++;
+      query += ` AND e.organization_id = $${paramCount}`;
       params.push(parseInt(organization_id));
     }
     
-    query += ` ORDER BY e.event_date ASC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-    params.push(parseInt(limit), parseInt(offset));
+    paramCount++;
+    query += ` ORDER BY e.event_date ASC LIMIT $${paramCount}`;
+    params.push(parseInt(limit));
+    
+    paramCount++;
+    query += ` OFFSET $${paramCount}`;
+    params.push(parseInt(offset));
 
     const result = await pool.query(query, params);
 
