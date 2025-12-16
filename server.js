@@ -881,18 +881,26 @@ app.get('/api/admin/news', authenticateToken, async (req, res) => {
     `;
     const params = [];
 
+    let paramCount = 0;
     if (status) {
+      paramCount++;
       params.push(status);
-      query += ` AND n.status = $${params.length}`;
+      query += ` AND n.status = $${paramCount}`;
     }
 
     if (category) {
+      paramCount++;
       params.push(category);
-      query += ` AND n.category = $${params.length}`;
+      query += ` AND n.category = $${paramCount}`;
     }
 
-    query += ` ORDER BY n.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-    params.push(parseInt(limit), parseInt(offset));
+    paramCount++;
+    query += ` ORDER BY n.created_at DESC LIMIT $${paramCount}`;
+    params.push(parseInt(limit));
+    
+    paramCount++;
+    query += ` OFFSET $${paramCount}`;
+    params.push(parseInt(offset));
 
     const result = await pool.query(query, params);
 
@@ -1601,13 +1609,20 @@ app.get('/api/admin/users', authenticateToken, async (req, res) => {
     `;
     const params = [];
 
+    let paramCount = 0;
     if (role) {
+      paramCount++;
       params.push(role);
-      query += ` AND u.role = $${params.length}`;
+      query += ` AND u.role = $${paramCount}`;
     }
 
-    query += ` ORDER BY u.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-    params.push(parseInt(limit), parseInt(offset));
+    paramCount++;
+    query += ` ORDER BY u.created_at DESC LIMIT $${paramCount}`;
+    params.push(parseInt(limit));
+    
+    paramCount++;
+    query += ` OFFSET $${paramCount}`;
+    params.push(parseInt(offset));
 
     const result = await pool.query(query, params);
 
@@ -1739,19 +1754,27 @@ app.get('/api/organizations', async (req, res) => {
       WHERE is_approved = true
     `;
     const params = [];
+    let paramCount = 0;
 
     if (category) {
+      paramCount++;
       params.push(category);
-      query += ` AND category = $${params.length}`;
+      query += ` AND category = $${paramCount}`;
     }
 
     if (search) {
+      paramCount++;
       params.push(`%${search}%`);
-      query += ` AND (name ILIKE $${params.length} OR description ILIKE $${params.length})`;
+      query += ` AND (name ILIKE $${paramCount} OR description ILIKE $${paramCount})`;
     }
 
-    query += ` ORDER BY name ASC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-    params.push(parseInt(limit), parseInt(offset));
+    paramCount++;
+    query += ` ORDER BY name ASC LIMIT $${paramCount}`;
+    params.push(parseInt(limit));
+    
+    paramCount++;
+    query += ` OFFSET $${paramCount}`;
+    params.push(parseInt(offset));
 
     const result = await pool.query(query, params);
 
