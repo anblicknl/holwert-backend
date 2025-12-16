@@ -67,7 +67,7 @@ class HolwertAdmin {
 
     showLoginScreen() {
         const loginScreen = document.getElementById('loginScreen');
-        const mainScreen = document.getElementById('mainScreen');
+        const mainScreen = document.getElementById('dashboardScreen');
         
         if (loginScreen) {
             loginScreen.classList.add('active');
@@ -82,7 +82,7 @@ class HolwertAdmin {
     showMainScreen() {
         console.log('=== SHOW MAIN SCREEN ===');
         const loginScreen = document.getElementById('loginScreen');
-        const mainScreen = document.getElementById('mainScreen');
+        const mainScreen = document.getElementById('dashboardScreen');
         
         console.log('Login screen element:', loginScreen);
         console.log('Main screen element:', mainScreen);
@@ -102,12 +102,6 @@ class HolwertAdmin {
             console.log('Main screen style:', mainScreen.style.display);
         } else {
             console.error('Main screen element not found!');
-        }
-        
-        // Hide DEMO MODE indicator (we're using real API)
-        const demoIndicator = document.getElementById('demoModeIndicator');
-        if (demoIndicator) {
-            demoIndicator.style.display = 'none';
         }
         
         console.log('=== END SHOW MAIN SCREEN ===');
@@ -857,7 +851,7 @@ class HolwertAdmin {
 
     // Organization management
     displayOrganizations(organizations) {
-        const container = document.getElementById('organizationsList');
+        const container = document.getElementById('organizationsContent');
         if (!container) {
             console.error('organizationsList container not found');
             return;
@@ -917,7 +911,7 @@ class HolwertAdmin {
                     this.displayOrganizations(data.organizations);
                 } else {
                     console.log('No organizations found in response');
-                    const container = document.getElementById('organizationsList');
+                    const container = document.getElementById('organizationsContent');
                     if (container) {
                         container.innerHTML = '<p class="empty-message">Geen organisaties gevonden</p>';
                     }
@@ -927,7 +921,7 @@ class HolwertAdmin {
                 console.error('Failed to load organizations:', response.status, errorData);
                 this.showNotification(`Fout bij laden organisaties: ${errorData.error || response.statusText}`, 'error');
                 
-                const container = document.getElementById('organizationsList');
+                const container = document.getElementById('organizationsContent');
                 if (container) {
                     container.innerHTML = `<p class="empty-message">Fout: ${errorData.error || response.statusText}</p>`;
                 }
@@ -936,7 +930,7 @@ class HolwertAdmin {
             console.error('Error loading organizations:', error);
             this.showNotification(`Fout bij laden organisaties: ${error.message}`, 'error');
             
-            const container = document.getElementById('organizationsList');
+            const container = document.getElementById('organizationsContent');
             if (container) {
                 container.innerHTML = `<p class="empty-message">Fout: ${error.message}</p>`;
             }
