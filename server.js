@@ -279,8 +279,8 @@ app.get('/api/news', async (req, res) => {
     const { organization_id } = req.query;
     
     let query = `
-      SELECT n.id, n.title, COALESCE(n.content, '') as content, n.image_url, n.image_data,
-             n.created_at, n.updated_at,
+      SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt, n.image_url, n.image_data,
+             n.created_at, n.updated_at, n.organization_id,
              u.first_name, u.last_name,
              o.name as organization_name, o.logo_url as organization_logo, o.brand_color as organization_brand_color
       FROM news n
