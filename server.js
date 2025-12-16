@@ -373,6 +373,7 @@ app.get('/api/news/related', async (req, res) => {
       return res.status(400).json({ error: 'organization_id is required' });
     }
     const params = [organization_id];
+    let paramCount = 1; // organization_id is already $1
     let query = `
       SELECT n.id, n.title, COALESCE(n.content, '') as content, n.image_url, n.image_data,
              n.created_at,
@@ -383,11 +384,13 @@ app.get('/api/news/related', async (req, res) => {
       LEFT JOIN organizations o ON n.organization_id = o.id
       WHERE n.is_published = true AND n.organization_id = $1`;
     if (exclude) {
+      paramCount++;
       params.push(parseInt(exclude));
-      query += ` AND n.id <> $${params.length}`;
+      query += ` AND n.id <> $${paramCount}`;
     }
+    paramCount++;
     params.push(parseInt(limit));
-    query += ` ORDER BY n.created_at DESC LIMIT $${params.length}`;
+    query += ` ORDER BY n.created_at DESC LIMIT $${paramCount}`;
 
     const result = await pool.query(query, params);
 
@@ -1544,7 +1547,10 @@ app.get('/api/admin/found-lost', authenticateToken, requireAdmin, async (req, re
     const { status } = req.query;
     let query = `SELECT * FROM found_lost WHERE 1=1`;
     const params = [];
-    if (status) { params.push(status); query += ` AND status = $${params.length}`; }
+    if (status) { 
+      params.push(status); 
+      query += ` AND status = $1`; 
+    }
     query += ' ORDER BY created_at DESC LIMIT 200';
     const result = await pool.query(query, params);
     res.json({ items: result.rows });
