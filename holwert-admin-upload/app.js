@@ -104,6 +104,12 @@ class HolwertAdmin {
             console.error('Main screen element not found!');
         }
         
+        // Hide DEMO MODE indicator (we're using real API)
+        const demoIndicator = document.getElementById('demoModeIndicator');
+        if (demoIndicator) {
+            demoIndicator.style.display = 'none';
+        }
+        
         console.log('=== END SHOW MAIN SCREEN ===');
     }
 
