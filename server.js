@@ -1418,14 +1418,21 @@ app.get('/api/admin/events', authenticateToken, async (req, res) => {
       WHERE 1=1
     `;
     const params = [];
+    let paramCount = 0;
 
     if (status) {
+      paramCount++;
       params.push(status);
-      query += ` AND e.status = $${params.length}`;
+      query += ` AND e.status = $${paramCount}`;
     }
 
-    query += ` ORDER BY e.event_date DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-    params.push(parseInt(limit), parseInt(offset));
+    paramCount++;
+    query += ` ORDER BY e.event_date DESC LIMIT $${paramCount}`;
+    params.push(parseInt(limit));
+    
+    paramCount++;
+    query += ` OFFSET $${paramCount}`;
+    params.push(parseInt(offset));
 
     const result = await pool.query(query, params);
 
