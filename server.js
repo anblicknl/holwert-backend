@@ -582,6 +582,144 @@ app.get('/api/organizations/:id/followers/count', async (req, res) => {
   }
 });
 
+// ==================== PUSH NOTIFICATIONS ENDPOINTS ====================
+
+// Register/Update push token
+app.post('/api/push/token', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { token, device_type, device_name, notification_preferences } = req.body;
+    
+    if (!token) {
+      return res.status(400).json({ error: 'Push token is required' });
+    }
+    
+    // Check if token already exists
+    const existingToken = await pool.query(
+      'SELECT id FROM push_tokens WHERE token = $1',
+      [token]
+    );
+    
+    if (existingToken.rows.length > 0) {
+      // Update existing token
+      await pool.query(
+        `UPDATE push_tokens 
+         SET user_id = $1, 
+             device_type = $2, 
+             device_name = $3,
+             notification_preferences = COALESCE($4, notification_preferences),
+             is_active = true,
+             last_used_at = CURRENT_TIMESTAMP,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE token = $5`,
+        [userId, device_type, device_name, notification_preferences ? JSON.stringify(notification_preferences) : null, token]
+      );
+      
+      console.log(`✅ Updated push token for user ${userId}`);
+      res.json({ success: true, message: 'Push token updated' });
+    } else {
+      // Insert new token
+      await pool.query(
+        `INSERT INTO push_tokens (user_id, token, device_type, device_name, notification_preferences)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [userId, token, device_type, device_name, notification_preferences ? JSON.stringify(notification_preferences) : null]
+      );
+      
+      console.log(`✅ Registered new push token for user ${userId}`);
+      res.json({ success: true, message: 'Push token registered' });
+    }
+  } catch (error) {
+    console.error('Register push token error:', error);
+    res.status(500).json({ error: 'Failed to register push token', message: error.message });
+  }
+});
+
+// Update notification preferences for current user
+app.put('/api/push/preferences', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { notification_preferences } = req.body;
+    
+    if (!notification_preferences) {
+      return res.status(400).json({ error: 'Notification preferences are required' });
+    }
+    
+    await pool.query(
+      `UPDATE push_tokens 
+       SET notification_preferences = $1, updated_at = CURRENT_TIMESTAMP
+       WHERE user_id = $2`,
+      [JSON.stringify(notification_preferences), userId]
+    );
+    
+    res.json({ success: true, message: 'Notification preferences updated' });
+  } catch (error) {
+    console.error('Update notification preferences error:', error);
+    res.status(500).json({ error: 'Failed to update preferences', message: error.message });
+  }
+});
+
+// Delete push token (unregister device)
+app.delete('/api/push/token/:token', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { token } = req.params;
+    
+    const result = await pool.query(
+      'DELETE FROM push_tokens WHERE token = $1 AND user_id = $2',
+      [token, userId]
+    );
+    
+    if (result.rowCount > 0) {
+      console.log(`✅ Deleted push token for user ${userId}`);
+      res.json({ success: true, message: 'Push token deleted' });
+    } else {
+      res.status(404).json({ error: 'Push token not found' });
+    }
+  } catch (error) {
+    console.error('Delete push token error:', error);
+    res.status(500).json({ error: 'Failed to delete push token', message: error.message });
+  }
+});
+
+// Deactivate all push tokens for current user
+app.post('/api/push/deactivate', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    
+    await pool.query(
+      'UPDATE push_tokens SET is_active = false, updated_at = CURRENT_TIMESTAMP WHERE user_id = $1',
+      [userId]
+    );
+    
+    console.log(`✅ Deactivated all push tokens for user ${userId}`);
+    res.json({ success: true, message: 'All push tokens deactivated' });
+  } catch (error) {
+    console.error('Deactivate push tokens error:', error);
+    res.status(500).json({ error: 'Failed to deactivate push tokens', message: error.message });
+  }
+});
+
+// Get user's push tokens (for debugging/management)
+app.get('/api/push/tokens', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    
+    const result = await pool.query(
+      `SELECT id, device_type, device_name, notification_preferences, is_active, 
+              last_used_at, created_at, updated_at
+       FROM push_tokens 
+       WHERE user_id = $1
+       ORDER BY last_used_at DESC`,
+      [userId]
+    );
+    
+    res.json({ tokens: result.rows });
+  } catch (error) {
+    console.error('Get push tokens error:', error);
+    res.status(500).json({ error: 'Failed to get push tokens', message: error.message });
+  }
+});
+
 // Get single published news (public)
 app.get('/api/news/:id', async (req, res) => {
   try {
@@ -691,14 +829,51 @@ app.post('/api/news', authenticateToken, async (req, res) => {
       [title, content, excerpt || null, authorId, organization_id || null, image_url || null, req.body.image_data || null, finalCategory, finalCustomCategory, isPublished]
     );
 
+    const newArticle = result.rows[0];
+    
+    // Send push notification if published and has organization
+    if (isPublished && organization_id) {
+      try {
+        // Get organization name
+        const orgResult = await pool.query(
+          'SELECT name FROM organizations WHERE id = $1',
+          [organization_id]
+        );
+        
+        if (orgResult.rows.length > 0) {
+          const orgName = orgResult.rows[0].name;
+          
+          // Send notification to followers (async, don't wait)
+          sendNotificationToFollowers(
+            organization_id,
+            {
+              title: `📰 Nieuw bericht van ${orgName}`,
+              body: title,
+              data: {
+                type: 'news',
+                newsId: newArticle.id,
+                organizationId: organization_id
+              }
+            },
+            'news'
+          ).catch(err => console.error('Push notification error:', err));
+          
+          console.log(`📢 Queued push notification for news article ${newArticle.id}`);
+        }
+      } catch (notifError) {
+        console.error('Error preparing push notification:', notifError);
+        // Don't fail the request if notification fails
+      }
+    }
+
     const message = isPublished 
       ? 'News article published successfully' 
       : 'News article created and submitted for moderation';
 
     res.status(201).json({
       message: message,
-      articleId: result.rows[0].id,
-      article: result.rows[0],
+      articleId: newArticle.id,
+      article: newArticle,
       isPublished: isPublished,
       requiresModeration: !isPublished
     });
@@ -1599,7 +1774,49 @@ app.post('/api/admin/events', authenticateToken, requireAdmin, async (req, res) 
        RETURNING id, title, description, event_date, end_date, location, organization_id, status, created_at`,
       [title, description || null, event_date, end_date || null, location || null, organization_id || null, status, req.user.userId]
     );
-    res.status(201).json({ event: result.rows[0] });
+    
+    const newEvent = result.rows[0];
+    
+    // Send push notification if event is scheduled and has organization
+    if (status === 'scheduled' && organization_id) {
+      try {
+        // Get organization name
+        const orgResult = await pool.query(
+          'SELECT name FROM organizations WHERE id = $1',
+          [organization_id]
+        );
+        
+        if (orgResult.rows.length > 0) {
+          const orgName = orgResult.rows[0].name;
+          const eventDate = new Date(event_date).toLocaleDateString('nl-NL', { 
+            day: 'numeric', 
+            month: 'long' 
+          });
+          
+          // Send notification to followers (async, don't wait)
+          sendNotificationToFollowers(
+            organization_id,
+            {
+              title: `📅 Nieuw evenement: ${title}`,
+              body: `${orgName} organiseert dit op ${eventDate}`,
+              data: {
+                type: 'event',
+                eventId: newEvent.id,
+                organizationId: organization_id
+              }
+            },
+            'agenda'
+          ).catch(err => console.error('Push notification error:', err));
+          
+          console.log(`📢 Queued push notification for event ${newEvent.id}`);
+        }
+      } catch (notifError) {
+        console.error('Error preparing push notification:', notifError);
+        // Don't fail the request if notification fails
+      }
+    }
+    
+    res.status(201).json({ event: newEvent });
   } catch (error) {
     console.error('Create event error:', error);
     res.status(500).json({ error: 'Failed to create event', message: error.message });
@@ -2029,10 +2246,245 @@ app.use('*', (req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });
 
+// ==================== PUSH NOTIFICATION HELPER FUNCTIONS ====================
+
+/**
+ * Send push notification via Expo Push API
+ * @param {Array} pushTokens - Array of Expo push tokens
+ * @param {Object} notification - Notification object { title, body, data }
+ * @returns {Promise<Object>} Result with success/failure info
+ */
+async function sendPushNotification(pushTokens, notification) {
+  try {
+    // Filter valid Expo push tokens
+    const validTokens = pushTokens.filter(token => 
+      token && token.startsWith('ExponentPushToken[')
+    );
+    
+    if (validTokens.length === 0) {
+      console.log('⚠️ No valid Expo push tokens to send to');
+      return { success: false, message: 'No valid tokens' };
+    }
+    
+    // Prepare messages for Expo Push API
+    const messages = validTokens.map(token => ({
+      to: token,
+      sound: 'default',
+      title: notification.title,
+      body: notification.body,
+      data: notification.data || {},
+      priority: 'high',
+      channelId: 'default'
+    }));
+    
+    // Send to Expo Push API
+    const response = await axios.post(
+      'https://exp.host/--/api/v2/push/send',
+      messages,
+      {
+        headers: {
+          'Accept': 'application/json',
+          'Accept-Encoding': 'gzip, deflate',
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+    
+    console.log(`✅ Sent ${validTokens.length} push notification(s)`);
+    
+    // Log results
+    if (response.data && response.data.data) {
+      const tickets = response.data.data;
+      const successCount = tickets.filter(t => t.status === 'ok').length;
+      const errorCount = tickets.filter(t => t.status === 'error').length;
+      
+      console.log(`   Success: ${successCount}, Errors: ${errorCount}`);
+      
+      if (errorCount > 0) {
+        const errors = tickets.filter(t => t.status === 'error');
+        errors.forEach(err => {
+          console.error(`   Error: ${err.message || err.details?.error}`);
+        });
+      }
+    }
+    
+    return {
+      success: true,
+      sent: validTokens.length,
+      response: response.data
+    };
+  } catch (error) {
+    console.error('❌ Push notification error:', error.message);
+    if (error.response) {
+      console.error('   Response:', error.response.data);
+    }
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Send notification to specific users
+ * @param {Array} userIds - Array of user IDs
+ * @param {Object} notification - Notification object
+ * @param {String} notificationType - Type of notification (news, agenda, etc)
+ */
+async function sendNotificationToUsers(userIds, notification, notificationType) {
+  try {
+    if (!userIds || userIds.length === 0) {
+      console.log('⚠️ No users to send notification to');
+      return;
+    }
+    
+    // Get active push tokens for these users with matching notification preferences
+    const result = await pool.query(
+      `SELECT pt.id, pt.user_id, pt.token, pt.notification_preferences
+       FROM push_tokens pt
+       WHERE pt.user_id = ANY($1)
+       AND pt.is_active = true
+       AND (pt.notification_preferences->$2)::boolean = true`,
+      [userIds, notificationType]
+    );
+    
+    if (result.rows.length === 0) {
+      console.log(`⚠️ No active tokens found for users with ${notificationType} notifications enabled`);
+      return;
+    }
+    
+    console.log(`📤 Sending ${notificationType} notification to ${result.rows.length} device(s)`);
+    
+    const tokens = result.rows.map(row => row.token);
+    const sendResult = await sendPushNotification(tokens, notification);
+    
+    // Log to notification history
+    if (sendResult.success) {
+      for (const row of result.rows) {
+        await pool.query(
+          `INSERT INTO notification_history 
+           (user_id, push_token_id, notification_type, title, body, data, status)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [
+            row.user_id,
+            row.id,
+            notificationType,
+            notification.title,
+            notification.body,
+            JSON.stringify(notification.data || {}),
+            'sent'
+          ]
+        );
+      }
+    }
+    
+    return sendResult;
+  } catch (error) {
+    console.error('❌ Error sending notification to users:', error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Send notification to followers of an organization
+ * @param {Number} organizationId - Organization ID
+ * @param {Object} notification - Notification object
+ * @param {String} notificationType - Type of notification
+ */
+async function sendNotificationToFollowers(organizationId, notification, notificationType) {
+  try {
+    // Get all followers of this organization
+    await ensureFollowsTable();
+    const followersResult = await pool.query(
+      'SELECT user_id FROM follows WHERE organization_id = $1',
+      [organizationId]
+    );
+    
+    if (followersResult.rows.length === 0) {
+      console.log(`⚠️ No followers found for organization ${organizationId}`);
+      return;
+    }
+    
+    const userIds = followersResult.rows.map(row => row.user_id);
+    console.log(`📢 Notifying ${userIds.length} follower(s) of organization ${organizationId}`);
+    
+    return await sendNotificationToUsers(userIds, notification, notificationType);
+  } catch (error) {
+    console.error('❌ Error sending notification to followers:', error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+// Initialize push notifications tables
+async function initializePushNotificationsTables() {
+  try {
+    console.log('📦 Initializing push notifications tables...');
+    
+    // Create push_tokens table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS push_tokens (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        token VARCHAR(255) UNIQUE NOT NULL,
+        device_type VARCHAR(50),
+        device_name VARCHAR(255),
+        notification_preferences JSONB DEFAULT '{
+          "news": true,
+          "agenda": true,
+          "organizations": true,
+          "weather": true
+        }'::jsonb,
+        is_active BOOLEAN DEFAULT true,
+        last_used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    
+    // Create indexes
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_push_tokens_user_id ON push_tokens(user_id);
+      CREATE INDEX IF NOT EXISTS idx_push_tokens_token ON push_tokens(token);
+      CREATE INDEX IF NOT EXISTS idx_push_tokens_active ON push_tokens(is_active);
+    `);
+    
+    // Create notification_history table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS notification_history (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        push_token_id INTEGER REFERENCES push_tokens(id) ON DELETE SET NULL,
+        notification_type VARCHAR(50),
+        title VARCHAR(255),
+        body TEXT,
+        data JSONB,
+        status VARCHAR(50),
+        error_message TEXT,
+        sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        delivered_at TIMESTAMP
+      )
+    `);
+    
+    // Create indexes for notification_history
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_notification_history_user_id ON notification_history(user_id);
+      CREATE INDEX IF NOT EXISTS idx_notification_history_type ON notification_history(notification_type);
+      CREATE INDEX IF NOT EXISTS idx_notification_history_sent_at ON notification_history(sent_at);
+    `);
+    
+    console.log('✅ Push notifications tables initialized');
+  } catch (error) {
+    console.error('❌ Error initializing push notifications tables:', error.message);
+  }
+}
+
 // Start server
 app.listen(PORT, async () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  
+  // Initialize push notifications tables
+  await initializePushNotificationsTables();
 });
 
 module.exports = app;
