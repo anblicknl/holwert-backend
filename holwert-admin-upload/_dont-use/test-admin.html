@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="nl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Holwert Admin (Test Loader)</title>
+    <style>
+      body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:#f5f7fb; }
+      .container { max-width: 1120px; margin: 24px auto; padding: 0 12px; }
+    </style>
+  </head>
+  <body>
+    <div id="appRoot" class="container"></div>
+    <script src="app.js?v=test"></script>
+    <script>
+      try {
+        // Force instant boot and demo-bypass
+        const a = new HolwertAdmin();
+        // Inject demo flag behavior
+        a.token = a.token || 'demo-token';
+        a.currentUser = a.currentUser || { role: 'superadmin', email: 'demo@holwert.local' };
+        a.showDashboard();
+        a.loadDashboard();
+      } catch (e) {
+        console.error('Admin boot failed', e);
+        document.body.innerHTML = '<pre style="padding:16px;white-space:pre-wrap">Admin boot failed:\n' + (e && (e.stack || e.message || e)) + '</pre>';
+      }
+    </script>
+  </body>
+  </html>
+

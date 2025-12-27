@@ -1151,6 +1151,27 @@ app.get('/api/admin/stats', authenticateToken, async (req, res) => {
   }
 });
 
+// Get moderation count (admin)
+app.get('/api/admin/moderation/count', authenticateToken, async (req, res) => {
+  try {
+    const [orgsResult, newsResult, eventsResult] = await Promise.all([
+      pool.query('SELECT COUNT(*) as count FROM organizations WHERE is_approved = false'),
+      pool.query("SELECT COUNT(*) as count FROM news WHERE status = 'pending'"),
+      pool.query("SELECT COUNT(*) as count FROM events WHERE status = 'pending'")
+    ]);
+    
+    const totalCount = 
+      parseInt(orgsResult.rows[0].count) + 
+      parseInt(newsResult.rows[0].count) + 
+      parseInt(eventsResult.rows[0].count);
+    
+    res.json({ count: totalCount });
+  } catch (error) {
+    console.error('Get moderation count error:', error);
+    res.status(500).json({ error: 'Failed to get moderation count', message: error.message });
+  }
+});
+
 // Get all news articles (admin)
 app.get('/api/admin/news', authenticateToken, async (req, res) => {
   try {
@@ -1432,7 +1453,9 @@ app.get('/api/admin/organizations', authenticateToken, async (req, res) => {
 
     if (status) {
       paramCount++;
-      params.push(status);
+      // Convert status string to boolean: 'pending' = false, 'approved' = true
+      const isApproved = status === 'approved';
+      params.push(isApproved);
       query += ` AND o.is_approved = $${paramCount}`;
     }
 
@@ -1451,7 +1474,9 @@ app.get('/api/admin/organizations', authenticateToken, async (req, res) => {
     const countParams = [];
     
     if (status) {
-      countParams.push(status);
+      // Convert status string to boolean: 'pending' = false, 'approved' = true
+      const isApproved = status === 'approved';
+      countParams.push(isApproved);
       countQuery += ` AND o.is_approved = $${countParams.length}`;
     }
 

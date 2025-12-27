@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Holwert API Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 20px; border: 1px solid #ccc; border-radius: 5px; }
+        .success { color: green; }
+        .error { color: red; }
+        .info { color: blue; }
+        button { padding: 10px 20px; margin: 5px; cursor: pointer; }
+        input { padding: 8px; margin: 5px; width: 200px; }
+    </style>
+</head>
+<body>
+    <h1>Holwert API Test</h1>
+    
+    <div class="test-section">
+        <h2>1. Health Check</h2>
+        <button onclick="testHealth()">Test Health</button>
+        <div id="healthResult"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>2. Login Test</h2>
+        <input type="email" id="email" placeholder="admin@holwert.nl" value="admin@holwert.nl">
+        <input type="password" id="password" placeholder="admin123" value="admin123">
+        <button onclick="testLogin()">Test Login</button>
+        <div id="loginResult"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>3. Dashboard Test</h2>
+        <button onclick="testDashboard()">Test Dashboard</button>
+        <div id="dashboardResult"></div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:3000/api';
+        let authToken = null;
+
+        async function testHealth() {
+            const resultDiv = document.getElementById('healthResult');
+            try {
+                const response = await fetch(`${API_BASE}/health`);
+                const data = await response.json();
+                resultDiv.innerHTML = `<div class="success">✅ Health check successful: ${JSON.stringify(data)}</div>`;
+            } catch (error) {
+                resultDiv.innerHTML = `<div class="error">❌ Health check failed: ${error.message}</div>`;
+            }
+        }
+
+        async function testLogin() {
+            const resultDiv = document.getElementById('loginResult');
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+
+            try {
+                const response = await fetch(`${API_BASE}/auth/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ email, password }),
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    authToken = data.token;
+                    resultDiv.innerHTML = `<div class="success">✅ Login successful! Token: ${data.token.substring(0, 50)}...</div>`;
+                } else {
+                    resultDiv.innerHTML = `<div class="error">❌ Login failed: ${data.message}</div>`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<div class="error">❌ Login error: ${error.message}</div>`;
+            }
+        }
+
+        async function testDashboard() {
+            const resultDiv = document.getElementById('dashboardResult');
+            
+            if (!authToken) {
+                resultDiv.innerHTML = `<div class="error">❌ Please login first!</div>`;
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/admin/stats/users`, {
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`
+                    }
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    resultDiv.innerHTML = `<div class="success">✅ Dashboard API works! Users: ${data.count}</div>`;
+                } else {
+                    resultDiv.innerHTML = `<div class="error">❌ Dashboard API failed: ${data.message}</div>`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<div class="error">❌ Dashboard error: ${error.message}</div>`;
+            }
+        }
+
+        // Auto-test health on page load
+        window.onload = function() {
+            testHealth();
+        };
+    </script>
+</body>
+</html>

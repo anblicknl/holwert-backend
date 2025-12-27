@@ -1,5 +1,3 @@
-console.log('=== SCRIPT LOADED ===');
-
 class HolwertAdmin {
     constructor() {
         // Use production API if available, otherwise localhost
@@ -34,22 +32,6 @@ class HolwertAdmin {
             });
         }
 
-        // Add News button
-        const addNewsBtn = document.getElementById('addNewsBtn');
-        if (addNewsBtn) {
-            addNewsBtn.addEventListener('click', () => {
-                this.showCreateNewsModal();
-            });
-        }
-
-        // Add Organization button
-        const addOrganizationBtn = document.getElementById('addOrganizationBtn');
-        if (addOrganizationBtn) {
-            addOrganizationBtn.addEventListener('click', () => {
-                this.showCreateOrganizationModal();
-            });
-        }
-
         // Navigation
         const navLinks = document.querySelectorAll('.nav-link');
         navLinks.forEach(link => {
@@ -62,23 +44,16 @@ class HolwertAdmin {
     }
 
     checkAuth() {
-        console.log('=== CHECK AUTH ===');
         console.log('HolwertAdmin initialized');
         console.log('API Base URL:', this.apiBaseUrl);
         console.log('Token:', this.token);
         
         if (this.token) {
-            console.log('Token found, showing main screen');
             this.showMainScreen();
-            console.log('Calling showSection(dashboard)');
-            this.showSection('dashboard');
-            console.log('Calling loadDashboard()');
             this.loadDashboard();
         } else {
-            console.log('No token, showing login screen');
             this.showLoginScreen();
         }
-        console.log('=== END CHECK AUTH ===');
     }
 
     showLoginScreen() {
@@ -96,76 +71,49 @@ class HolwertAdmin {
     }
 
     showMainScreen() {
-        console.log('=== SHOW MAIN SCREEN ===');
+        console.log('Showing main screen');
         const loginScreen = document.getElementById('loginScreen');
         const mainScreen = document.getElementById('mainScreen');
-        
-        console.log('Login screen element:', loginScreen);
-        console.log('Main screen element:', mainScreen);
-        console.log('All elements with id containing "dashboard":', document.querySelectorAll('[id*="dashboard"]'));
-        console.log('All elements with class "screen":', document.querySelectorAll('.screen'));
         
         if (loginScreen) {
             loginScreen.classList.remove('active');
             loginScreen.style.display = 'none';
-            console.log('Login screen hidden');
         }
         if (mainScreen) {
             mainScreen.classList.add('active');
             mainScreen.style.display = 'block';
-            console.log('Main screen shown');
-            console.log('Main screen classes:', mainScreen.className);
-            console.log('Main screen style:', mainScreen.style.display);
-        } else {
-            console.error('Main screen element not found!');
         }
         
-        console.log('=== END SHOW MAIN SCREEN ===');
+        console.log('Main screen should be visible now');
     }
 
     async handleLogin() {
         console.log('=== LOGIN START ===');
         
-        const emailEl = document.getElementById('email');
-        const passwordEl = document.getElementById('password');
+        const email = document.getElementById('email').value;
+        const password = document.getElementById('password').value;
         const errorDiv = document.getElementById('loginError');
-        const submitBtn = document.querySelector('#loginForm button[type="submit"]')
-            || document.querySelector('#loginForm input[type="submit"]')
-            || document.querySelector('#loginForm .btn')
-            || document.querySelector('button[type="submit"]');
-        let span = null;
+        const submitBtn = document.querySelector('#loginForm button[type="submit"]');
 
-        const email = emailEl ? emailEl.value : '';
-        const password = passwordEl ? passwordEl.value : '';
-
-        console.log('Email element present:', !!emailEl);
-        console.log('Password element present:', !!passwordEl);
-        console.log('Submit button present:', !!submitBtn);
         console.log('Email:', email);
-        console.log('Password length:', password ? password.length : 0);
+        console.log('Password length:', password.length);
 
         // Clear previous errors
-        if (errorDiv) {
-            errorDiv.innerHTML = '';
-            errorDiv.style.display = 'none';
-        }
+        errorDiv.innerHTML = '';
+        errorDiv.style.display = 'none';
 
         // Basic validation
         if (!email || !password) {
             console.log('Validation failed: missing fields');
-            if (errorDiv) {
-                errorDiv.innerHTML = 'Vul alle velden in';
-                errorDiv.style.display = 'block';
-            }
+            errorDiv.innerHTML = 'Vul alle velden in';
+            errorDiv.style.display = 'block';
             return;
         }
 
-        // Show loading state (null-safe)
-        if (submitBtn) {
-            submitBtn.disabled = true;
-            span = submitBtn.querySelector('span');
-            if (span) span.textContent = 'Inloggen...';
-        }
+        // Show loading state
+        submitBtn.disabled = true;
+        const span = submitBtn.querySelector('span');
+        if (span) span.textContent = 'Inloggen...';
 
         try {
             console.log('Sending request to:', `${this.apiBaseUrl}/auth/login`);
@@ -192,11 +140,9 @@ class HolwertAdmin {
                 if (span) span.textContent = 'Succesvol!';
                 
                 // Show success message
-                if (errorDiv) {
-                    errorDiv.innerHTML = 'Inloggen succesvol!';
-                    errorDiv.style.display = 'block';
-                    errorDiv.style.color = 'green';
-                }
+                errorDiv.innerHTML = 'Inloggen succesvol!';
+                errorDiv.style.display = 'block';
+                errorDiv.style.color = 'green';
                 
                 setTimeout(() => {
                     console.log('Switching to main screen');
@@ -204,21 +150,17 @@ class HolwertAdmin {
                 }, 1000);
             } else {
                 console.log('Login failed:', data);
-                if (errorDiv) {
-                    errorDiv.innerHTML = data.message || 'Inloggen mislukt';
-                    errorDiv.style.display = 'block';
-                    errorDiv.style.color = 'red';
-                }
-            }
-        } catch (error) {
-            console.error('Login error:', error);
-            if (errorDiv) {
-                errorDiv.innerHTML = 'Verbindingsfout: ' + error.message;
+                errorDiv.innerHTML = data.message || 'Inloggen mislukt';
                 errorDiv.style.display = 'block';
                 errorDiv.style.color = 'red';
             }
+        } catch (error) {
+            console.error('Login error:', error);
+            errorDiv.innerHTML = 'Verbindingsfout: ' + error.message;
+            errorDiv.style.display = 'block';
+            errorDiv.style.color = 'red';
         } finally {
-            if (submitBtn) submitBtn.disabled = false;
+            submitBtn.disabled = false;
             if (span) span.textContent = 'Inloggen';
             console.log('=== LOGIN END ===');
         }
@@ -302,42 +244,20 @@ class HolwertAdmin {
     }
 
     showSection(sectionName) {
-        console.log('=== SHOW SECTION ===');
-        console.log('Section name:', sectionName);
-        
         // Update navigation
         document.querySelectorAll('.nav-link').forEach(link => {
             link.classList.remove('active');
         });
-        const navLink = document.querySelector(`[data-section="${sectionName}"]`);
-        if (navLink) {
-            navLink.classList.add('active');
-            console.log('Nav link activated:', navLink);
-        } else {
-            console.error('Nav link not found for section:', sectionName);
-        }
+        document.querySelector(`[data-section="${sectionName}"]`).classList.add('active');
 
-        // Show section content - support both .section and .content-section
-        document.querySelectorAll('.section, .content-section').forEach(section => {
+        // Show section content
+        document.querySelectorAll('.content-section').forEach(section => {
             section.classList.remove('active');
-            console.log('Removed active from section:', section.id);
         });
-        const targetSection = document.getElementById(sectionName);
-        if (targetSection) {
-            targetSection.classList.add('active');
-            console.log('Activated section:', targetSection);
-            console.log('Section classes:', targetSection.className);
-        } else {
-            console.error('Target section not found:', sectionName);
-        }
+        document.getElementById(sectionName).classList.add('active');
 
         // Load section data
         this.loadSectionData(sectionName);
-        
-        // Refresh notification counts when navigating
-        this.loadNotificationCounts();
-        
-        console.log('=== END SHOW SECTION ===');
     }
 
     async loadSectionData(sectionName) {
@@ -426,87 +346,9 @@ class HolwertAdmin {
             // Load pending content
             this.loadPendingContent();
             this.loadRecentActivity();
-            
-            // Load notification counts
-            this.loadNotificationCounts();
 
         } catch (error) {
             console.error('Error loading dashboard:', error);
-        }
-    }
-
-    async loadNotificationCounts() {
-        try {
-            // Haal notificatie counts op van verschillende endpoints
-            const [moderationCount, pendingOrgsCount, pendingEventsCount] = await Promise.all([
-                this.getModerationCount(),
-                this.getPendingOrganizationsCount(),
-                this.getPendingEventsCount()
-            ]);
-
-            // Update notificatie bolletjes
-            this.updateNotificationBadge('moderation', moderationCount);
-            this.updateNotificationBadge('organizations', pendingOrgsCount);
-            this.updateNotificationBadge('events', pendingEventsCount);
-
-        } catch (error) {
-            console.error('Error loading notification counts:', error);
-        }
-    }
-
-    async getModerationCount() {
-        try {
-            const response = await fetch(`${this.apiBaseUrl}/admin/moderation/count`, {
-                headers: { 'Authorization': `Bearer ${this.token}` }
-            });
-            if (response.ok) {
-                const data = await response.json();
-                return data.count || 0;
-            }
-        } catch (error) {
-            console.error('Error getting moderation count:', error);
-        }
-        // Fallback: return 0 if endpoint doesn't exist
-        return 0;
-    }
-
-    async getPendingOrganizationsCount() {
-        try {
-            const response = await fetch(`${this.apiBaseUrl}/admin/organizations?status=pending`, {
-                headers: { 'Authorization': `Bearer ${this.token}` }
-            });
-            if (response.ok) {
-                const data = await response.json();
-                return data.length || 0;
-            }
-        } catch (error) {
-            console.error('Error getting pending organizations count:', error);
-        }
-        // Fallback: return 0 if endpoint doesn't exist or fails
-        return 0;
-    }
-
-    async getPendingEventsCount() {
-        // Events zijn automatisch goedgekeurd, geen pending count nodig
-        return 0;
-    }
-
-    updateNotificationBadge(section, count) {
-        const navLink = document.querySelector(`[data-section="${section}"]`);
-        if (!navLink) return;
-
-        // Verwijder bestaande badge
-        const existingBadge = navLink.querySelector('.notification-badge');
-        if (existingBadge) {
-            existingBadge.remove();
-        }
-
-        // Voeg nieuwe badge toe als count > 0
-        if (count > 0) {
-            const badge = document.createElement('span');
-            badge.className = 'notification-badge';
-            badge.textContent = count > 99 ? '99+' : count.toString();
-            navLink.appendChild(badge);
         }
     }
 
@@ -634,7 +476,6 @@ class HolwertAdmin {
                 this.showNotification(result.message, 'success');
                 this.loadDashboard(); // Refresh dashboard
                 this.loadPendingContent(); // Refresh pending content
-                this.loadNotificationCounts(); // Refresh notification badges
             } else {
                 const error = await response.json();
                 this.showNotification(error.message || 'Fout bij goedkeuren', 'error');
@@ -666,7 +507,6 @@ class HolwertAdmin {
                 this.showNotification(result.message, 'success');
                 this.loadDashboard(); // Refresh dashboard
                 this.loadPendingContent(); // Refresh pending content
-                this.loadNotificationCounts(); // Refresh notification badges
             } else {
                 const error = await response.json();
                 this.showNotification(error.message || 'Fout bij afwijzen', 'error');
@@ -866,112 +706,23 @@ class HolwertAdmin {
     }
 
     // Organization management
-    displayOrganizations(organizations) {
-        const container = document.getElementById('organizationsTableBody');
-        if (!container) {
-            console.error('organizationsTableBody container not found');
-            return;
-        }
-
-        if (!organizations || organizations.length === 0) {
-            container.innerHTML = '<tr><td colspan="5" class="empty-message">Geen organisaties gevonden</td></tr>';
-            return;
-        }
-
-        container.innerHTML = organizations.map(org => `
-            <tr>
-                <td>${org.name || '-'}</td>
-                <td>${org.category || 'Geen categorie'}</td>
-                <td>${org.user_count || 0}</td>
-                <td>
-                    <span class="status-badge ${org.is_active ? 'status-published' : 'status-draft'}">
-                        ${org.is_active ? 'Actief' : 'Inactief'}
-                    </span>
-                </td>
-                <td>
-                    <div class="action-buttons">
-                        <button class="btn-icon btn-edit" onclick="admin.editOrganization(${org.id})" title="Bewerken">
-                            <i class="fas fa-edit"></i>
-                        </button>
-                        <button class="btn-icon btn-delete" onclick="admin.deleteOrganization(${org.id})" title="Verwijderen">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    </div>
-                </td>
-            </tr>
-        `).join('');
-    }
-
     async loadOrganizations() {
         try {
-            console.log('Loading organizations from:', `${this.apiBaseUrl}/admin/organizations`);
-            console.log('Token exists:', !!this.token);
-            
             const response = await fetch(`${this.apiBaseUrl}/admin/organizations`, {
                 headers: {
                     'Authorization': `Bearer ${this.token}`
                 }
             });
 
-            console.log('Response status:', response.status);
-            console.log('Response ok:', response.ok);
-
             if (response.ok) {
                 const data = await response.json();
-                console.log('Organizations data:', data);
-                console.log('Organizations count:', data.organizations ? data.organizations.length : 0);
-                
-                if (data.organizations && data.organizations.length > 0) {
-                    this.displayOrganizations(data.organizations);
-                } else {
-                    console.log('No organizations found in response');
-                    const container = document.getElementById('organizationsTableBody');
-                    if (container) {
-                        container.innerHTML = '<tr><td colspan="5" class="empty-message">Geen organisaties gevonden</td></tr>';
-                    }
-                }
+                this.displayOrganizations(data.organizations);
             } else {
-                const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-                console.error('Failed to load organizations:', response.status, errorData);
-                
-                // Als token verlopen is, log uit
-                if (response.status === 401 || errorData.error === 'Invalid token') {
-                    this.showNotification('Sessie verlopen. Log opnieuw in.', 'error');
-                    setTimeout(() => this.logout(), 2000);
-                    return;
-                }
-                
-                this.showNotification(`Fout bij laden organisaties: ${errorData.message || errorData.error || response.statusText}`, 'error');
-                
-                const container = document.getElementById('organizationsTableBody');
-                if (container) {
-                    container.innerHTML = `<tr><td colspan="5" class="empty-message">Fout: ${errorData.message || errorData.error || response.statusText}</td></tr>`;
-                }
+                console.error('Failed to load organizations');
             }
         } catch (error) {
             console.error('Error loading organizations:', error);
-            this.showNotification(`Fout bij laden organisaties: ${error.message}`, 'error');
-            
-            const container = document.getElementById('organizationsTableBody');
-            if (container) {
-                container.innerHTML = `<tr><td colspan="5" class="empty-message">Fout: ${error.message}</td></tr>`;
-            }
         }
-    }
-
-    showCreateOrganizationModal() {
-        this.showNotification('Organisatie aanmaken functie is nog niet geïmplementeerd', 'info');
-        // TODO: Implementeer create organization modal (zoals bij nieuws/events)
-    }
-
-    editOrganization(id) {
-        this.showNotification('Organisatie bewerken functie is nog niet geïmplementeerd', 'info');
-        // TODO: Implementeer edit organization modal
-    }
-
-    deleteOrganization(id) {
-        this.showNotification('Organisatie verwijderen functie is nog niet geïmplementeerd', 'info');
-        // TODO: Implementeer delete organization
     }
 
 
@@ -1092,12 +843,12 @@ class HolwertAdmin {
                     `).join('');
                 }
             } else {
-                console.log('Failed to load pending content:', response.status);
-                container.innerHTML = '<p class="text-muted">Geen content wacht op goedkeuring</p>';
+                console.error('Failed to load pending content:', response.status);
+                container.innerHTML = '<p class="text-muted">Fout bij laden van wachtende content</p>';
             }
         } catch (error) {
-            console.log('Error loading pending content:', error.message);
-            container.innerHTML = '<p class="text-muted">Geen content wacht op goedkeuring</p>';
+            console.error('Error loading pending content:', error);
+            container.innerHTML = '<p class="text-muted">Fout bij laden van wachtende content</p>';
         }
     }
 
@@ -1157,11 +908,11 @@ class HolwertAdmin {
                     `).join('');
                 }
             } else {
-                console.log('Failed to load recent activity:', response.status);
+                console.error('Failed to load recent activity:', response.status);
                 container.innerHTML = '<p class="text-muted">Geen recente activiteit</p>';
             }
         } catch (error) {
-            console.log('Error loading recent activity:', error.message);
+            console.error('Error loading recent activity:', error);
             container.innerHTML = '<p class="text-muted">Geen recente activiteit</p>';
         }
     }
@@ -1193,43 +944,36 @@ class HolwertAdmin {
     }
 
     displayNews(news) {
+        const container = document.getElementById('newsContent');
         console.log('displayNews called with:', news);
+        console.log('Container found:', container);
         
-        // Wait a bit for the DOM to update after section activation
-        setTimeout(() => {
-            // Try both possible container IDs
-            let container = document.getElementById('newsList');
-            if (!container) {
-                container = document.getElementById('newsContent');
-                console.log('newsList not found, trying newsContent:', container);
-            }
-            
-            console.log('Container found:', container);
-            console.log('All elements with id newsList:', document.querySelectorAll('#newsList'));
-            console.log('All elements with id newsContent:', document.querySelectorAll('#newsContent'));
-            console.log('News section element:', document.getElementById('news'));
-            
-            if (!container) {
-                console.error('Neither newsList nor newsContent container found!');
-                console.log('Available elements with "news" in ID:', document.querySelectorAll('[id*="news"]'));
-                return;
-            }
-            
-            this.renderNewsContent(container, news);
-        }, 200);
-    }
-    
-    renderNewsContent(container, news) {
+        if (!container) {
+            console.error('newsContent container not found!');
+            return;
+        }
         
         if (!news || news.length === 0) {
             console.log('No news, showing empty state');
             container.innerHTML = `
+                <div class="section-header">
+                    <h3>Nieuws Beheer</h3>
+                    <button class="btn btn-primary" onclick="admin.showCreateNewsModal()">
+                        <i class="fas fa-plus"></i> Nieuw Artikel
+                    </button>
+                </div>
                 <p class="text-muted">Geen nieuws artikelen gevonden</p>
             `;
             return;
         }
 
         const newsHTML = `
+            <div class="section-header">
+                <h3>Nieuws Beheer</h3>
+                <button class="btn btn-primary" onclick="admin.showCreateNewsModal()">
+                    <i class="fas fa-plus"></i> Nieuw Artikel
+                </button>
+            </div>
             <div class="data-table-container">
                 <table class="data-table">
                     <thead>
@@ -1262,8 +1006,8 @@ class HolwertAdmin {
                                     ` : '<span class="text-muted">Geen organisatie</span>'}
                                 </td>
                                 <td>
-                                    <span class="status-badge published">
-                                        Gepubliceerd
+                                    <span class="status-badge ${article.is_published ? 'published' : 'pending'}">
+                                        ${article.is_published ? 'Gepubliceerd' : 'Wachtend'}
                                     </span>
                                 </td>
                                 <td>
@@ -1292,330 +1036,195 @@ class HolwertAdmin {
         container.innerHTML = newsHTML;
     }
 
-    // Nieuwe uniforme functie voor nieuws modal (net als events)
-    async openNewsModal(newsId = null, mode = 'create') {
+    async showCreateNewsModal() {
+        // First load organizations for the dropdown
+        let organizations = [];
         try {
-            // Laad organizaties
-            let organizations = [];
-            try {
-                console.log('Fetching organizations for news modal...');
-                const response = await fetch(`${this.apiBaseUrl}/admin/organizations`, {
-                    headers: { 'Authorization': `Bearer ${this.token}` }
-                });
-                console.log('Organizations fetch status:', response.status);
-                if (response.ok) {
-                    const data = await response.json();
-                    organizations = data.organizations || [];
-                    console.log('Organizations loaded:', organizations.length);
-                } else {
-                    const errorData = await response.json().catch(() => ({}));
-                    console.error('Failed to load organizations:', errorData);
-                    this.showNotification('Kon organisaties niet laden. Organisatie dropdown is mogelijk leeg.', 'warning');
+            const response = await fetch(`${this.apiBaseUrl}/admin/organizations`, {
+                headers: {
+                    'Authorization': `Bearer ${this.token}`
                 }
-            } catch (error) {
-                console.error('Error loading organizations:', error);
-                this.showNotification('Fout bij laden organisaties. Organisatie dropdown is mogelijk leeg.', 'warning');
+            });
+            if (response.ok) {
+                const data = await response.json();
+                organizations = data.organizations || [];
             }
+        } catch (error) {
+            console.error('Error loading organizations:', error);
+        }
 
-            const categories = ['dorpsnieuws', 'sport', 'cultuur', 'onderwijs', 'zorg', 'overig'];
-            
-            // Als edit mode, haal nieuws artikel op
-            let article = null;
-            if (mode === 'edit' && newsId) {
-                const res = await fetch(`${this.apiBaseUrl}/admin/news/${newsId}`, {
-                    headers: { 'Authorization': `Bearer ${this.token}` }
-                });
-                if (res.ok) {
-                    article = await res.json();
-                }
-            }
-
-            const isEdit = mode === 'edit' && article;
-            const title = isEdit ? 'Nieuws Bewerken' : 'Nieuw Nieuws Artikel';
-            const buttonText = isEdit ? 'Bijwerken' : 'Opslaan';
-            
-            // Formatteer datum voor input (standaard vandaag)
-            const today = new Date().toISOString().split('T')[0];
-            const pubDate = article?.published_at ? new Date(article.published_at).toISOString().split('T')[0] : today;
-            const pubTime = article?.published_at ? new Date(article.published_at).toTimeString().slice(0, 5) : '12:00';
-
-            const overlay = document.createElement('div');
-            overlay.className = 'modal-overlay';
-            overlay.innerHTML = `
+        const categories = ['dorpsnieuws', 'sport', 'cultuur', 'onderwijs', 'zorg', 'overig'];
+        
+        const modalHTML = `
+            <div class="modal-overlay">
                 <div class="modal-content large">
                     <div class="modal-header">
-                        <h3>${title}</h3>
-                        <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">
+                        <h3>Nieuw Nieuws Artikel</h3>
+                        <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">
                             <i class="fas fa-times"></i>
                         </button>
                     </div>
                     <div class="modal-body">
-                        <form id="newsForm" class="event-form">
+                        <form id="createNewsForm" class="edit-form">
                             <div class="form-group">
-                                <label for="newsTitle">Titel *</label>
-                                <input type="text" id="newsTitle" name="title" 
-                                    value="${article?.title || ''}" 
-                                    placeholder="Titel van het artikel" required>
+                                <label for="createNewsTitle">Titel *</label>
+                                <input type="text" id="createNewsTitle" name="title" required>
                             </div>
                             
                             <div class="form-group">
-                                <label for="newsExcerpt">Samenvatting</label>
-                                <textarea id="newsExcerpt" name="excerpt" rows="2" 
-                                    placeholder="Korte samenvatting...">${article?.excerpt || ''}</textarea>
+                                <label for="createNewsExcerpt">Samenvatting</label>
+                                <textarea id="createNewsExcerpt" name="excerpt" rows="3" placeholder="Korte samenvatting van het artikel..."></textarea>
                             </div>
                             
                             <div class="form-row">
                                 <div class="form-group">
-                                    <label for="newsCategory">Categorie</label>
-                                    <select id="newsCategory" name="category">
+                                    <label for="createNewsCategory">Categorie</label>
+                                    <select id="createNewsCategory" name="category" onchange="admin.toggleCreateCustomCategory()">
                                         ${categories.map(cat => `
-                                            <option value="${cat}" ${article?.category === cat ? 'selected' : ''}>
-                                                ${cat.charAt(0).toUpperCase() + cat.slice(1)}
-                                            </option>
+                                            <option value="${cat}">${cat.charAt(0).toUpperCase() + cat.slice(1)}</option>
                                         `).join('')}
                                     </select>
                                 </div>
-                                <div class="form-group">
-                                    <label for="newsOrganization">Organisatie</label>
-                                    <select id="newsOrganization" name="organization_id">
-                                        <option value="">Geen organisatie</option>
-                                        ${organizations.map(org => `
-                                            <option value="${org.id}" ${article?.organization_id == org.id ? 'selected' : ''}>
-                                                ${org.name}
-                                            </option>
-                                        `).join('')}
-                                    </select>
-                                </div>
-                            </div>
-                            
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label for="newsPubDate">Publicatiedatum *</label>
-                                    <input type="date" id="newsPubDate" name="published_date" 
-                                        value="${pubDate}" required>
-                                    <small class="form-hint">Datum waarop dit artikel wordt/werd gepubliceerd</small>
-                                </div>
-                                <div class="form-group">
-                                    <label for="newsPubTime">Publicatietijd</label>
-                                    <input type="time" id="newsPubTime" name="published_time" 
-                                        value="${pubTime}">
+                                <div class="form-group" id="createCustomCategoryGroup" style="display: none;">
+                                    <label for="createNewsCustomCategory">Aangepaste Categorie</label>
+                                    <input type="text" id="createNewsCustomCategory" name="custom_category" placeholder="Voer eigen categorie in...">
                                 </div>
                             </div>
                             
                             <div class="form-group">
-                                <label for="newsImage">Afbeelding</label>
-                                <input type="file" id="newsImage" accept="image/*" class="file-input"
-                                    onchange="admin.previewNewsImage(this)">
-                                <small class="form-hint">Of laat leeg om huidige afbeelding te behouden</small>
-                                <div id="newsImagePreview" class="image-preview" style="display: none;">
-                                    <img id="newsImagePreviewImg" src="" alt="Preview">
-                                    <button type="button" class="btn-remove-image" 
-                                        onclick="admin.removeNewsImagePreview()">
-                                        <i class="fas fa-times"></i>
-                                    </button>
-                                </div>
-                                ${article?.image_url ? `
-                                    <div class="current-image">
-                                        <small>Huidige afbeelding:</small>
-                                        <img src="${article.image_url}" alt="Current" style="max-width: 200px; margin-top: 8px;">
+                                <label for="createNewsOrganization">Organisatie (optioneel)</label>
+                                <select id="createNewsOrganization" name="organization_id">
+                                    <option value="">Geen organisatie</option>
+                                    ${organizations.map(org => `
+                                        <option value="${org.id}">${org.name}</option>
+                                    `).join('')}
+                                </select>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label>Afbeelding</label>
+                                <div class="profile-image-section">
+                                    <div class="image-options">
+                                        <div class="option-tabs">
+                                            <button type="button" class="tab-btn active" onclick="admin.switchImageTab('url')">URL</button>
+                                            <button type="button" class="tab-btn" onclick="admin.switchImageTab('upload')">Upload</button>
+                                        </div>
+                                        <div class="tab-content">
+                                            <div id="url-tab" class="tab-pane active">
+                                                <input type="url" id="createNewsImage" name="image_url" placeholder="https://...">
+                                            </div>
+                                            <div id="upload-tab" class="tab-pane">
+                                                <input type="file" id="createNewsImageUpload" name="image_file" accept="image/*" onchange="admin.previewUploadedImage(this)">
+                                                <div id="uploadPreview" class="upload-preview" style="display: none;">
+                                                    <img id="uploadedImagePreview" src="" alt="Preview" class="preview-img">
+                                                    <button type="button" class="btn btn-sm btn-secondary" onclick="admin.clearUploadPreview()">Verwijder</button>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
-                                ` : ''}
+                                </div>
                             </div>
                             
                             <div class="form-group">
-                                <label for="newsArticleContent">Inhoud *</label>
-                                <textarea id="newsArticleContent" name="content" rows="10" 
-                                    placeholder="De volledige inhoud van het artikel..." required>${article?.content || ''}</textarea>
+                                <label for="createNewsContent">Inhoud *</label>
+                                <textarea id="createNewsContent" name="content" rows="10" required></textarea>
                             </div>
                             
                             <div class="form-group">
-                                <label class="checkbox-label">
-                                    <input type="checkbox" id="newsPublished" name="is_published" 
-                                        ${article?.is_published !== false ? 'checked' : ''}>
-                                    <span>Direct publiceren (toon in app)</span>
+                                <label>
+                                    <input type="checkbox" id="createNewsPublished" name="is_published" checked>
+                                    Direct publiceren
                                 </label>
-                                <small class="form-hint">Uitvinken om als concept op te slaan</small>
                             </div>
                         </form>
                     </div>
                     <div class="modal-footer">
-                        <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">
-                            Annuleren
-                        </button>
-                        <button class="btn btn-primary" onclick="admin.saveNews(${newsId ? `'${newsId}'` : 'null'})">
-                            ${buttonText}
-                        </button>
+                        <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">Annuleren</button>
+                        <button class="btn btn-primary" onclick="admin.createNews()">Artikel Aanmaken</button>
                     </div>
                 </div>
-            `;
-            
-            document.body.appendChild(overlay);
-        } catch (e) {
-            console.error('openNewsModal error:', e);
-            this.showNotification('Fout bij openen nieuws-modal', 'error');
+            </div>
+        `;
+
+        document.body.insertAdjacentHTML('beforeend', modalHTML);
+    }
+
+    toggleCreateCustomCategory() {
+        const categorySelect = document.getElementById('createNewsCategory');
+        const customGroup = document.getElementById('createCustomCategoryGroup');
+        
+        if (categorySelect.value === 'overig') {
+            customGroup.style.display = 'block';
+        } else {
+            customGroup.style.display = 'none';
         }
     }
 
-    async showCreateNewsModal() {
-        // Roep nieuwe uniforme functie aan
-        await this.openNewsModal(null, 'create');
-    }
-
-    async editNews(newsId) {
-        // Roep nieuwe uniforme functie aan
-        await this.openNewsModal(newsId, 'edit');
-    }
-
-    // Helper functiesvoor image preview
-    previewNewsImage(input) {
-        if (input.files && input.files[0]) {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const preview = document.getElementById('newsImagePreview');
-                const img = document.getElementById('newsImagePreviewImg');
-                img.src = e.target.result;
-                preview.style.display = 'block';
-            };
-            reader.readAsDataURL(input.files[0]);
-        }
-    }
-
-    removeNewsImagePreview() {
-        document.getElementById('newsImage').value = '';
-        document.getElementById('newsImagePreview').style.display = 'none';
-    }
-
-    async compressNewsImage(file) {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const img = new Image();
-                img.onload = () => {
-                    const canvas = document.createElement('canvas');
-                    let width = img.width;
-                    let height = img.height;
-                    const maxSize = 1200;
-                    if (width > height && width > maxSize) {
-                        height = (height / width) * maxSize;
-                        width = maxSize;
-                    } else if (height > maxSize) {
-                        width = (width / height) * maxSize;
-                        height = maxSize;
-                    }
-                    canvas.width = width;
-                    canvas.height = height;
-                    const ctx = canvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0, width, height);
-                    resolve(canvas.toDataURL('image/jpeg', 0.8));
-                };
-                img.onerror = reject;
-                img.src = e.target.result;
-            };
-            reader.onerror = reject;
-            reader.readAsDataURL(file);
-        });
-    }
-
-    async saveNews(newsId) {
-        try {
-            // Parse newsId correct (kan 'null' string zijn)
-            const actualNewsId = newsId && newsId !== 'null' && newsId !== null ? parseInt(newsId) : null;
-            
-            const title = (document.getElementById('newsTitle').value || '').trim();
-            const excerpt = (document.getElementById('newsExcerpt').value || '').trim();
-            const content = (document.getElementById('newsArticleContent').value || '').trim();
-            const category = document.getElementById('newsCategory')?.value;
-            const organization_id_val = document.getElementById('newsOrganization')?.value;
-            const organization_id = (organization_id_val && organization_id_val !== '' && organization_id_val !== '0') 
-                ? parseInt(organization_id_val) 
-                : null;
-            
-            const pubDate = document.getElementById('newsPubDate').value;
-            const pubTime = document.getElementById('newsPubTime').value || '12:00';
-            const published_at = pubDate ? `${pubDate}T${pubTime}:00.000Z` : new Date().toISOString();
-            
-            // Handle image upload
-            const uploadedFile = document.getElementById('newsImage')?.files[0];
-            let imageUrl = null;
-            
-            if (uploadedFile) {
-                try {
-                    const compressedBase64 = await this.compressNewsImage(uploadedFile);
-                    imageUrl = compressedBase64;
-                    console.log('News image compressed, length:', compressedBase64.length);
-                    
-                    if (compressedBase64.length > 4 * 1024 * 1024) {
-                        this.showNotification('Afbeelding is te groot. Kies een kleinere afbeelding.', 'error');
-                        return;
-                    }
-                } catch (error) {
-                    console.error('Error processing image:', error);
-                    this.showNotification('Fout bij verwerken van afbeelding', 'error');
+    async createNews() {
+        const form = document.getElementById('createNewsForm');
+        const formData = new FormData(form);
+        
+        // Handle image upload
+        const uploadedFile = document.getElementById('createNewsImageUpload').files[0];
+        let imageUrl = formData.get('image_url') || null;
+        
+        if (uploadedFile) {
+            try {
+                const compressedBase64 = await this.compressAndConvertToBase64(uploadedFile);
+                imageUrl = compressedBase64;
+                console.log('Image compressed and converted to base64, length:', compressedBase64.length);
+                
+                if (compressedBase64.length > 4 * 1024 * 1024) {
+                    this.showNotification('Afbeelding is te groot. Kies een kleinere afbeelding.', 'error');
                     return;
                 }
-            } else if (actualNewsId) {
-                // Bij bewerken zonder nieuwe afbeelding, behoud bestaande
-                imageUrl = undefined; // Stuur undefined zodat backend bestaande waarde behoudt
-            }
-
-            // Validatie met debug logging
-            console.log('=== NEWS VALIDATION ===');
-            console.log('Title:', title, '(length:', title.length, ')');
-            console.log('Content:', content, '(length:', content.length, ')');
-            console.log('Title empty?', !title);
-            console.log('Content empty?', !content);
-            
-            if (!title || !content) {
-                const missingFields = [];
-                if (!title) missingFields.push('Titel');
-                if (!content) missingFields.push('Inhoud');
-                this.showNotification(`Vul de volgende verplichte velden in: ${missingFields.join(', ')}`, 'error');
+            } catch (error) {
+                console.error('Error processing image:', error);
+                this.showNotification('Fout bij verwerken van afbeelding', 'error');
                 return;
             }
+        }
 
-            const body = {
-                title,
-                excerpt: excerpt || null,
-                content,
-                category,
-                organization_id,
-                published_at,
-                is_published: document.getElementById('newsPublished').checked
-            };
-            
-            // Voeg image_url alleen toe als het gedefinieerd is
-            if (imageUrl !== undefined) {
-                body.image_url = imageUrl;
-            }
+        const newsData = {
+            title: formData.get('title'),
+            content: formData.get('content'),
+            excerpt: formData.get('excerpt') || null,
+            category: formData.get('category'),
+            custom_category: formData.get('custom_category') || null,
+            organization_id: formData.get('organization_id') || null,
+            image_url: imageUrl,
+            is_published: document.getElementById('createNewsPublished').checked
+        };
 
-            const url = actualNewsId ? `${this.apiBaseUrl}/admin/news/${actualNewsId}` : `${this.apiBaseUrl}/news`;
-            const method = actualNewsId ? 'PUT' : 'POST';
-
-            const res = await fetch(url, {
-                method,
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/news`, {
+                method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${this.token}`
                 },
-                body: JSON.stringify(body)
+                body: JSON.stringify(newsData)
             });
 
-            if (!res.ok) {
-                let msg = `HTTP ${res.status}`;
-                try { 
-                    const j = await res.json(); 
-                    msg = j.message || j.error || msg;
-                } catch {}
-                this.showNotification(`Opslaan mislukt: ${msg}`, 'error');
-                return;
+            if (response.ok) {
+                this.showNotification('Nieuws artikel aangemaakt', 'success');
+                document.querySelector('.modal-overlay').remove();
+                this.loadNews();
+            } else {
+                let errorMessage = 'Onbekende fout';
+                try {
+                    const error = await response.json();
+                    console.error('Create error response:', error);
+                    errorMessage = error.message || error.error || 'Onbekende fout';
+                } catch (parseError) {
+                    console.error('Error parsing response:', parseError);
+                    errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+                }
+                this.showNotification(`Fout bij aanmaken: ${errorMessage}`, 'error');
             }
-
-            this.showNotification('Nieuws artikel opgeslagen', 'success');
-            document.querySelector('.modal-overlay')?.remove();
-            this.loadNews();
-        } catch (e) {
-            console.error('saveNews error:', e);
-            this.showNotification(`Fout bij opslaan nieuws: ${e?.message || 'Onbekende fout'}`, 'error');
+        } catch (error) {
+            console.error('Error creating news:', error);
+            this.showNotification('Fout bij aanmaken nieuws artikel', 'error');
         }
     }
 
@@ -1646,117 +1255,69 @@ class HolwertAdmin {
     }
 
     showNewsModal(article) {
-        // Create modal element
-        const modalOverlay = document.createElement('div');
-        modalOverlay.className = 'modal-overlay';
-        
-        // Close on overlay click
-        modalOverlay.addEventListener('click', function(e) {
-            if (e.target === modalOverlay) {
-                modalOverlay.remove();
-            }
-        });
-        
-        // Create modal content
-        const modalContent = document.createElement('div');
-        modalContent.className = 'modal-content';
-        
-        // Prevent content clicks from closing modal
-        modalContent.addEventListener('click', function(e) {
-            e.stopPropagation();
-        });
-        
-        // Hero Image
-        let heroHTML = '';
-        if (article.image_url) {
-            heroHTML = `
-                <div class="modal-hero-image">
-                    <img src="${article.image_url}" alt="${article.title}">
-                    <div class="modal-hero-overlay"></div>
-                </div>
-            `;
-        } else {
-            heroHTML = `
-                <div class="modal-hero-image">
-                    <div class="modal-hero-fallback">
-                        <i class="fas fa-newspaper"></i>
+        const modalHTML = `
+            <div class="modal-overlay">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h3>${article.title}</h3>
+                        <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">
+                            <i class="fas fa-times"></i>
+                        </button>
                     </div>
-                </div>
-            `;
-        }
-        
-        // Close Button
-        const closeBtn = document.createElement('button');
-        closeBtn.className = 'modal-close-btn modal-close-btn-white';
-        closeBtn.innerHTML = '<i class="fas fa-times"></i>';
-        
-        // Close button functionality
-        closeBtn.addEventListener('click', function() {
-            modalOverlay.remove();
-        });
-        
-        // Content
-        const contentHTML = `
-            <div class="modal-body-content">
-                <!-- Title -->
-                <h2 class="modal-title">${article.title}</h2>
-                
-                <!-- Meta Info -->
-                <div class="news-meta">
-                    <div class="news-meta-item">
-                        <i class="fas fa-calendar-alt"></i>
-                        <span>${new Date(article.created_at).toLocaleDateString('nl-NL')}</span>
-                    </div>
-                    <div class="news-meta-item">
-                        <i class="fas fa-tag"></i>
-                        <span>${article.custom_category || article.category}</span>
-                    </div>
-                    ${article.organization_name ? `
-                        <div class="news-meta-item">
-                            <i class="fas fa-building"></i>
-                            <span>${article.organization_name}</span>
+                    <div class="modal-body">
+                        <div class="news-details">
+                            <div class="news-meta">
+                                <div class="meta-item">
+                                    <strong>Categorie:</strong> 
+                                    <span class="category-badge">${article.custom_category || article.category}</span>
+                                </div>
+                                <div class="meta-item">
+                                    <strong>Status:</strong> 
+                                    <span class="status-badge ${article.is_published ? 'published' : 'pending'}">
+                                        ${article.is_published ? 'Gepubliceerd' : 'Wachtend'}
+                                    </span>
+                                </div>
+                                <div class="meta-item">
+                                    <strong>Datum:</strong> ${new Date(article.created_at).toLocaleDateString('nl-NL')}
+                                </div>
+                                ${article.organization_name ? `
+                                    <div class="meta-item">
+                                        <strong>Organisatie:</strong> ${article.organization_name}
+                                    </div>
+                                ` : ''}
+                                <div class="meta-item">
+                                    <strong>Auteur:</strong> ${article.first_name} ${article.last_name}
+                                </div>
+                            </div>
+                            
+                            ${article.image_url ? `
+                                <div class="news-image">
+                                    <img src="${article.image_url}" alt="Nieuws afbeelding" style="max-width: 100%; height: auto; border-radius: 8px;">
+                                </div>
+                            ` : ''}
+                            
+                            ${article.excerpt ? `
+                                <div class="news-excerpt">
+                                    <h4>Samenvatting</h4>
+                                    <p>${article.excerpt}</p>
+                                </div>
+                            ` : ''}
+                            
+                            <div class="news-content">
+                                <h4>Inhoud</h4>
+                                <div class="content-text">${article.content}</div>
+                            </div>
                         </div>
-                    ` : ''}
-                </div>
-                
-                <!-- Excerpt -->
-                ${article.excerpt ? `
-                    <div class="news-excerpt">
-                        <p>${article.excerpt}</p>
                     </div>
-                ` : ''}
-                
-                <!-- Content -->
-                <div class="news-content">
-                    <div class="news-content-text">${article.content}</div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">Sluiten</button>
+                        <button class="btn btn-primary" onclick="admin.editNews(${article.id}); this.closest('.modal-overlay').remove()">Bewerken</button>
+                    </div>
                 </div>
-                
-                <!-- Author -->
-                <div class="news-author">
-                    <i class="fas fa-user"></i>
-                    <span>Door ${article.first_name} ${article.last_name}</span>
-                </div>
-            </div>
-            
-            <!-- Footer -->
-            <div class="modal-footer-content">
-                <button class="btn btn-secondary">Sluiten</button>
             </div>
         `;
-        
-        // Assemble modal
-        modalContent.innerHTML = heroHTML + contentHTML;
-        modalContent.appendChild(closeBtn);
-        modalOverlay.appendChild(modalContent);
-        
-        // Add close functionality to footer button
-        const footerBtn = modalContent.querySelector('.btn-secondary');
-        footerBtn.addEventListener('click', function() {
-            modalOverlay.remove();
-        });
-        
-        // Add to DOM
-        document.body.appendChild(modalOverlay);
+
+        document.body.insertAdjacentHTML('beforeend', modalHTML);
     }
 
     async editNews(newsId) {
@@ -2000,506 +1561,58 @@ class HolwertAdmin {
                 const data = await response.json();
                 this.displayEvents(data.events || []);
             } else {
-                const container = document.getElementById('eventsContent');
-                if (container) container.innerHTML = '<p>Fout bij laden events.</p>';
+                document.getElementById('eventsList').innerHTML = '<p>Fout bij laden events.</p>';
             }
         } catch (error) {
             console.error('Error loading events:', error);
-            const container = document.getElementById('eventsContent');
-            if (container) container.innerHTML = '<p>Fout bij laden events.</p>';
+            document.getElementById('eventsList').innerHTML = '<p>Fout bij laden events.</p>';
         }
     }
 
     displayEvents(events) {
-        const container = document.getElementById('eventsContent');
-        if (!container) return;
-
-        const rows = (events || []).map(ev => {
-            const startTxt = ev.event_date ? new Date(ev.event_date).toLocaleString('nl-NL') : '-';
-            const endTxt = ev.event_end_date ? new Date(ev.event_end_date).toLocaleString('nl-NL') : '';
-            const dateCell = endTxt ? `${startTxt} – ${endTxt}` : startTxt;
-            return `
-            <tr>
-                <td>${ev.title}</td>
-                <td>${dateCell}</td>
-                <td>${ev.location || '-'}</td>
-                <td>${ev.organization_name || '-'}</td>
-                <td><span class="status-badge status-published">GEPUBLICEERD</span></td>
-                <td>
-                    <div class="action-buttons">
-                        <button class="btn-icon btn-view" onclick="admin.viewEvent(${ev.id}, ${JSON.stringify(ev).replace(/"/g, '&quot;')})" title="Bekijken">
-                            <i class="fas fa-eye"></i>
-                        </button>
-                        <button class="btn-icon btn-edit" onclick="admin.editEvent(${ev.id})" title="Bewerken">
-                            <i class="fas fa-edit"></i>
-                        </button>
-                        <button class="btn-icon btn-delete" onclick="admin.deleteEvent(${ev.id}, '${(ev.title || '').replace(/'/g, "\\'")}')">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    </div>
-                </td>
-            </tr>`;
-        }).join('');
-
-        container.innerHTML = `
-            <div class="section-header">
-                <h2>Evenementen</h2>
-            </div>
-            <div class="data-table-container">
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Titel</th>
-                            <th>Datum/Tijd</th>
-                            <th>Locatie</th>
-                            <th>Organisatie</th>
-                            <th>Status</th>
-                            <th>Acties</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${rows || ''}
-                    </tbody>
-                </table>
-            </div>
-        `;
-    }
-
-    async viewEvent(id, eventData = null) {
-        try {
-            let event;
-            if (eventData) {
-                // Gebruik de doorgegeven event data
-                event = eventData;
-            } else {
-                // Fallback: haal event data op via API
-                const response = await fetch(`${this.apiBaseUrl}/events/${id}`);
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                event = await response.json();
-            }
-            this.showEventPreviewModal(event);
-        } catch (err) {
-            console.error('Error loading event:', err);
-            this.showNotification('Fout bij laden evenement', 'error');
-        }
-    }
-
-    async editEvent(id) {
-        // Gebruik de nieuwe uniforme openEventModal functie
-        await this.openEventModal(id, 'edit');
-    }
-
-    async deleteEvent(id, title) {
-        if (!confirm(`Weet je zeker dat je "${title}" wilt verwijderen?`)) {
+        const eventsList = document.getElementById('eventsList');
+        
+        if (events.length === 0) {
+            eventsList.innerHTML = `
+                <div class="org-content-header">
+                    <button class="btn btn-primary" onclick="admin.openEventModal(null)">
+                        <i class="fas fa-plus"></i> Nieuw event
+                    </button>
+                </div>
+                <p>Geen events gevonden.</p>`;
             return;
         }
 
-        try {
-            const response = await fetch(`${this.apiBaseUrl}/admin/events/${id}`, {
-                method: 'DELETE',
-                headers: {
-                    'Authorization': `Bearer ${this.token}`,
-                    'Content-Type': 'application/json'
-                }
-            });
-
-            if (response.ok) {
-                this.showNotification('Evenement succesvol verwijderd', 'success');
-                this.loadEvents(); // Herlaad de lijst
-                this.loadNotificationCounts(); // Refresh notification badges
-            } else {
-                const error = await response.json();
-                this.showNotification(error.message || 'Fout bij verwijderen', 'error');
-            }
-        } catch (err) {
-            console.error('Error deleting event:', err);
-            this.showNotification('Fout bij verwijderen evenement', 'error');
-        }
-    }
-
-    async openCreateEventModal() {
-        // Gebruik de nieuwe uniforme openEventModal functie
-        await this.openEventModal(null, 'create');
-    }
-
-    showCreateEventModal(organizations) {
-        const modal = document.createElement('div');
-        modal.className = 'modal-overlay';
-        modal.innerHTML = `
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h3>Nieuw Evenement</h3>
-                    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">
-                        <i class="fas fa-times"></i>
-                    </button>
-                </div>
-                <div class="modal-body">
-                    <form id="createEventForm">
-                        <div class="form-group">
-                            <label for="eventTitle">Titel *</label>
-                            <input type="text" id="eventTitle" name="title" placeholder="Evenement titel">
-                        </div>
-                        
-                        <div class="form-group">
-                            <label for="eventOrganization">Organisatie</label>
-                            <select id="eventOrganization" name="organization_id">
-                                <option value="">Selecteer organisatie</option>
-                                ${organizations.map(org => `<option value="${org.id}">${org.name}</option>`).join('')}
-                            </select>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label for="eventDescription">Beschrijving</label>
-                            <textarea id="eventDescription" name="description" rows="4" placeholder="Beschrijving van het evenement"></textarea>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label for="eventLocation">Locatie</label>
-                            <input type="text" id="eventLocation" name="location" placeholder="Locatie van het evenement">
-                        </div>
-                        
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="eventStartDate">Start Datum</label>
-                                <input type="date" id="eventStartDate" name="event_date">
-                            </div>
-                            <div class="form-group">
-                                <label for="eventStartTime">Start Tijd</label>
-                                <input type="time" id="eventStartTime" name="start_time">
-                            </div>
-                        </div>
-                        
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="eventEndDate">Eind Datum</label>
-                                <input type="date" id="eventEndDate" name="end_date">
-                            </div>
-                            <div class="form-group">
-                                <label for="eventEndTime">Eind Tijd</label>
-                                <input type="time" id="eventEndTime" name="end_time">
-                            </div>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label for="eventImageUrl">Afbeelding URL</label>
-                            <input type="url" id="eventImageUrl" name="image_url" placeholder="https://...">
-                        </div>
-                    </form>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">Annuleren</button>
-                    <button type="button" class="btn btn-primary" onclick="admin.createEvent()">Opslaan</button>
-                </div>
+        eventsList.innerHTML = `
+            <div class="org-content-header">
+                <button class="btn btn-primary" onclick="admin.openEventModal(null)">
+                    <i class="fas fa-plus"></i> Nieuw event
+                </button>
             </div>
-        `;
-        
-        document.body.appendChild(modal);
-    }
-
-    async openEditEventModal(event, organizations) {
-        const modal = document.createElement('div');
-        modal.className = 'modal-overlay';
-        
-        // Format dates for input fields
-        const startDate = event.event_date ? new Date(event.event_date).toISOString().split('T')[0] : '';
-        const startTime = event.event_date ? new Date(event.event_date).toTimeString().slice(0, 5) : '';
-        const endDate = event.event_end_date ? new Date(event.event_end_date).toISOString().split('T')[0] : '';
-        const endTime = event.event_end_date ? new Date(event.event_end_date).toTimeString().slice(0, 5) : '';
-        
-        modal.innerHTML = `
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h3>Evenement Bewerken</h3>
-                    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">
-                        <i class="fas fa-times"></i>
-                    </button>
-                </div>
-                <div class="modal-body">
-                    <form id="editEventForm">
-                        <div class="form-group">
-                            <label for="editEventTitle">Titel *</label>
-                            <input type="text" id="editEventTitle" name="title" value="${event.title || ''}" placeholder="Evenement titel">
+            <div class="org-content-list">
+                ${events.map(event => `
+                    <div class="content-item">
+                        <div class="content-header">
+                            <h5>${event.title}</h5>
+                            <span class="content-status status-${event.is_published ? 'active' : 'inactive'}">
+                                ${event.is_published ? 'Gepubliceerd' : 'Wachtend'}
+                            </span>
                         </div>
-                        
-                        <div class="form-group">
-                            <label for="editEventOrganization">Organisatie</label>
-                            <select id="editEventOrganization" name="organization_id">
-                                <option value="">Selecteer organisatie</option>
-                                ${organizations.map(org => `<option value="${org.id}" ${org.id == event.organization_id ? 'selected' : ''}>${org.name}</option>`).join('')}
-                            </select>
+                        <div class="content-meta">
+                            <small>${new Date(event.event_date).toLocaleDateString('nl-NL')} - ${event.location || 'Locatie onbekend'}</small>
                         </div>
-                        
-                        <div class="form-group">
-                            <label for="editEventDescription">Beschrijving</label>
-                            <textarea id="editEventDescription" name="description" rows="4" placeholder="Beschrijving van het evenement">${event.description || ''}</textarea>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label for="editEventLocation">Locatie</label>
-                            <input type="text" id="editEventLocation" name="location" value="${event.location || ''}" placeholder="Locatie van het evenement">
-                        </div>
-                        
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="editEventStartDate">Start Datum</label>
-                                <input type="date" id="editEventStartDate" name="event_date" value="${startDate}">
-                            </div>
-                            <div class="form-group">
-                                <label for="editEventStartTime">Start Tijd</label>
-                                <input type="time" id="editEventStartTime" name="start_time" value="${startTime}">
-                            </div>
-                        </div>
-                        
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="editEventEndDate">Eind Datum</label>
-                                <input type="date" id="editEventEndDate" name="end_date" value="${endDate}">
-                            </div>
-                            <div class="form-group">
-                                <label for="editEventEndTime">Eind Tijd</label>
-                                <input type="time" id="editEventEndTime" name="end_time" value="${endTime}">
-                            </div>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label for="editEventImageUrl">Afbeelding URL</label>
-                            <input type="url" id="editEventImageUrl" name="image_url" value="${event.image_url || ''}" placeholder="https://...">
-                        </div>
-                    </form>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">Annuleren</button>
-                    <button type="button" class="btn btn-primary" onclick="admin.updateEvent(${event.id})">Opslaan</button>
-                </div>
-            </div>
-        `;
-        
-        document.body.appendChild(modal);
-    }
-
-    async createEvent() {
-        const form = document.getElementById('createEventForm');
-        if (!form) return;
-
-        const formData = new FormData(form);
-        const eventData = {
-            title: formData.get('title'),
-            organization_id: formData.get('organization_id') || null,
-            description: formData.get('description'),
-            location: formData.get('location'),
-            event_date: formData.get('event_date'),
-            event_end_date: formData.get('end_date'),
-            image_url: formData.get('image_url'),
-            is_published: true // Automatisch goedgekeurd
-        };
-
-        try {
-            const response = await fetch(`${this.apiBaseUrl}/admin/events`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${this.token}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(eventData)
-            });
-
-            if (response.ok) {
-                this.showNotification('Evenement succesvol aangemaakt', 'success');
-                document.querySelector('.modal-overlay').remove();
-                this.loadEvents(); // Herlaad de lijst
-                this.loadNotificationCounts(); // Refresh notification badges
-            } else {
-                const error = await response.json();
-                this.showNotification(error.message || 'Fout bij aanmaken', 'error');
-            }
-        } catch (err) {
-            console.error('Error creating event:', err);
-            this.showNotification('Fout bij aanmaken evenement', 'error');
-        }
-    }
-
-    async updateEvent(id) {
-        const form = document.getElementById('editEventForm');
-        if (!form) return;
-
-        const formData = new FormData(form);
-        const eventData = {
-            title: formData.get('title'),
-            organization_id: formData.get('organization_id') || null,
-            description: formData.get('description'),
-            location: formData.get('location'),
-            event_date: formData.get('event_date'),
-            event_end_date: formData.get('end_date'),
-            image_url: formData.get('image_url'),
-            is_published: true // Automatisch goedgekeurd
-        };
-
-        try {
-            const response = await fetch(`${this.apiBaseUrl}/admin/events/${id}`, {
-                method: 'PUT',
-                headers: {
-                    'Authorization': `Bearer ${this.token}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(eventData)
-            });
-
-            if (response.ok) {
-                this.showNotification('Evenement succesvol bijgewerkt', 'success');
-                document.querySelector('.modal-overlay').remove();
-                this.loadEvents(); // Herlaad de lijst
-                this.loadNotificationCounts(); // Refresh notification badges
-            } else {
-                const error = await response.json();
-                this.showNotification(error.message || 'Fout bij bijwerken', 'error');
-            }
-        } catch (err) {
-            console.error('Error updating event:', err);
-            this.showNotification('Fout bij bijwerken evenement', 'error');
-        }
-    }
-
-    showEventPreviewModal(event) {
-        const eventDate = event.event_date ? new Date(event.event_date).toLocaleDateString('nl-NL', {
-            weekday: 'long',
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric'
-        }) : '';
-        const eventTime = event.event_date ? new Date(event.event_date).toLocaleTimeString('nl-NL', {
-            hour: '2-digit',
-            minute: '2-digit'
-        }) : '';
-        const endTime = event.event_end_date ? new Date(event.event_end_date).toLocaleTimeString('nl-NL', {
-            hour: '2-digit',
-            minute: '2-digit'
-        }) : '';
-
-        // Create modal element
-        const modalOverlay = document.createElement('div');
-        modalOverlay.className = 'modal-overlay';
-        
-        // Close on overlay click
-        modalOverlay.addEventListener('click', function(e) {
-            if (e.target === modalOverlay) {
-                modalOverlay.remove();
-            }
-        });
-        
-        // Create modal content
-        const modalContent = document.createElement('div');
-        modalContent.className = 'modal-content';
-        
-        // Prevent content clicks from closing modal
-        modalContent.addEventListener('click', function(e) {
-            e.stopPropagation();
-        });
-        
-        // Hero Image
-        const heroImage = event.image_url || 'https://images.unsplash.com/photo-1540575467063-178a50c2df87?ixlib=rb-4.0.3&auto=format&fit=crop&w=1200&q=80';
-        let heroHTML = `
-            <div class="modal-hero-image">
-                <img src="${heroImage}" alt="${event.title || 'Event'}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                <div class="modal-hero-fallback" style="display: none;">
-                    <i class="fas fa-calendar-alt"></i>
-                </div>
-                <div class="modal-hero-overlay"></div>
-            </div>
-        `;
-        
-        // Close Button
-        const closeBtn = document.createElement('button');
-        closeBtn.className = 'modal-close-btn';
-        closeBtn.innerHTML = '<i class="fas fa-times"></i>';
-        
-        // Close button functionality
-        closeBtn.addEventListener('click', function() {
-            modalOverlay.remove();
-        });
-        
-        // Content
-        const contentHTML = `
-            <div class="modal-body-content">
-                <!-- Title -->
-                <h1 class="modal-title">${event.title || 'Geen titel'}</h1>
-                
-                <!-- Event Details -->
-                <div class="modal-details-box">
-                    <!-- Date -->
-                    <div class="modal-detail-item">
-                        <div class="modal-detail-icon" style="background: #e3f2fd;">
-                            <i class="fas fa-calendar" style="color: #1976d2;"></i>
-                        </div>
-                        <div class="modal-detail-content">
-                            <div class="modal-detail-label">Datum</div>
-                            <div class="modal-detail-value">${eventDate}</div>
+                        <div class="content-actions">
+                            <button class="btn btn-sm btn-secondary" onclick="admin.openEventModal(${event.id}, 'edit')">
+                                <i class="fas fa-edit"></i> Bewerken
+                            </button>
+                            <button class="btn btn-sm btn-primary" onclick="admin.openEventModal(${event.id}, 'view')">
+                                <i class="fas fa-eye"></i> Bekijken
+                            </button>
                         </div>
                     </div>
-                    
-                    <!-- Time -->
-                    <div class="modal-detail-item">
-                        <div class="modal-detail-icon" style="background: #f3e5f5;">
-                            <i class="fas fa-clock" style="color: #7b1fa2;"></i>
-                        </div>
-                        <div class="modal-detail-content">
-                            <div class="modal-detail-label">Tijd</div>
-                            <div class="modal-detail-value">${eventTime}${endTime ? ` - ${endTime}` : ''}</div>
-                        </div>
-                    </div>
-                    
-                    <!-- Location -->
-                    <div class="modal-detail-item">
-                        <div class="modal-detail-icon" style="background: #e8f5e8;">
-                            <i class="fas fa-map-marker-alt" style="color: #388e3c;"></i>
-                        </div>
-                        <div class="modal-detail-content">
-                            <div class="modal-detail-label">Locatie</div>
-                            <div class="modal-detail-value">${event.location || 'Locatie onbekend'}</div>
-                        </div>
-                    </div>
-                    
-                    <!-- Organization -->
-                    ${event.organization_name ? `
-                        <div class="modal-detail-item">
-                            <div class="modal-detail-icon" style="background: #fff3e0;">
-                                <i class="fas fa-building" style="color: #f57c00;"></i>
-                            </div>
-                            <div class="modal-detail-content">
-                                <div class="modal-detail-label">Organisatie</div>
-                                <div class="modal-detail-value">${event.organization_name}</div>
-                            </div>
-                        </div>
-                    ` : ''}
-                </div>
-                
-                <!-- Description -->
-                ${event.description ? `
-                    <div class="modal-description">
-                        <h3 class="modal-description-title">Over dit evenement</h3>
-                        <div class="modal-description-text">${event.description}</div>
-                    </div>
-                ` : ''}
-            </div>
-            
-            <!-- Footer -->
-            <div class="modal-footer-content">
-                <button class="btn btn-primary" style="width: 100%;">Sluiten</button>
+                `).join('')}
             </div>
         `;
-        
-        // Assemble modal
-        modalContent.innerHTML = heroHTML + contentHTML;
-        modalContent.appendChild(closeBtn);
-        modalOverlay.appendChild(modalContent);
-        
-        // Add close functionality to footer button
-        const footerBtn = modalContent.querySelector('.btn-primary');
-        footerBtn.addEventListener('click', function() {
-            modalOverlay.remove();
-        });
-        
-        // Add to DOM
-        document.body.appendChild(modalOverlay);
     }
 
     async loadFoundLost() {
@@ -2507,94 +1620,7 @@ class HolwertAdmin {
     }
 
     async loadModeration() {
-        try {
-            const container = document.getElementById('moderationContent');
-            if (!container) return;
-
-            // Toon loading state
-            container.innerHTML = '<div class="loading-spinner">Laden...</div>';
-
-            // Haal pending content op
-            const response = await fetch(`${this.apiBaseUrl}/admin/moderation/pending`, {
-                headers: {
-                    'Authorization': `Bearer ${this.token}`,
-                    'Content-Type': 'application/json'
-                }
-            });
-
-            if (response.ok) {
-                const pendingItems = await response.json();
-                this.displayModerationContent(pendingItems);
-            } else {
-                container.innerHTML = '<p class="text-muted">Geen content wacht op moderatie</p>';
-            }
-        } catch (error) {
-            console.error('Error loading moderation content:', error);
-            document.getElementById('moderationContent').innerHTML = '<p class="text-muted">Fout bij laden moderatie content</p>';
-        }
-    }
-
-    displayModerationContent(items) {
-        const container = document.getElementById('moderationContent');
-        if (!container) return;
-
-        if (!items || items.length === 0) {
-            container.innerHTML = `
-                <div class="empty-state">
-                    <i class="fas fa-check-circle" style="font-size: 48px; color: #28a745; margin-bottom: 16px;"></i>
-                    <h3>Alles is gemodereerd!</h3>
-                    <p>Er is momenteel geen content die wacht op goedkeuring.</p>
-                </div>
-            `;
-            return;
-        }
-
-        const itemsHtml = items.map(item => `
-            <div class="moderation-item" style="background: white; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border-left: 4px solid #ffc107;">
-                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
-                    <div>
-                        <h4 style="margin: 0; color: #212529; font-size: 18px;">${item.title || 'Geen titel'}</h4>
-                        <p style="margin: 4px 0 0 0; color: #6c757d; font-size: 14px;">
-                            <i class="fas fa-tag" style="margin-right: 6px;"></i>
-                            ${item.type || 'Onbekend type'}
-                        </p>
-                    </div>
-                    <div style="display: flex; gap: 8px;">
-                        <button class="btn-icon btn-approve" onclick="admin.approveContent('${item.type}', ${item.id})" title="Goedkeuren">
-                            <i class="fas fa-check"></i>
-                        </button>
-                        <button class="btn-icon btn-reject" onclick="admin.rejectContent('${item.type}', ${item.id})" title="Afwijzen">
-                            <i class="fas fa-times"></i>
-                        </button>
-                    </div>
-                </div>
-                
-                ${item.description ? `
-                    <div style="margin-bottom: 12px;">
-                        <p style="color: #495057; line-height: 1.5; margin: 0;">${item.description}</p>
-                    </div>
-                ` : ''}
-                
-                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #6c757d;">
-                    <span>
-                        <i class="fas fa-user" style="margin-right: 4px;"></i>
-                        ${item.author_name || 'Onbekende gebruiker'}
-                    </span>
-                    <span>
-                        <i class="fas fa-clock" style="margin-right: 4px;"></i>
-                        ${item.created_at ? new Date(item.created_at).toLocaleDateString('nl-NL') : 'Onbekende datum'}
-                    </span>
-                </div>
-            </div>
-        `).join('');
-
-        container.innerHTML = `
-            <div class="moderation-header" style="margin-bottom: 20px;">
-                <h3 style="margin: 0; color: #212529;">Content wacht op moderatie (${items.length})</h3>
-                <p style="margin: 4px 0 0 0; color: #6c757d;">Beoordeel en goedkeur of wijs af</p>
-            </div>
-            ${itemsHtml}
-        `;
+        document.getElementById('moderationContent').innerHTML = '<p class="text-muted">Moderatie sectie - Wordt geïmplementeerd</p>';
     }
 
     // User management methods
@@ -2932,71 +1958,6 @@ class HolwertAdmin {
         });
     }
 
-    compressEventImage(file) {
-        return new Promise((resolve, reject) => {
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            const img = new Image();
-            
-            img.onload = () => {
-                // Calculate new dimensions (max 1200px width/height for events)
-                const maxSize = 1200;
-                let { width, height } = img;
-                
-                if (width > height) {
-                    if (width > maxSize) {
-                        height = (height * maxSize) / width;
-                        width = maxSize;
-                    }
-                } else {
-                    if (height > maxSize) {
-                        width = (width * maxSize) / height;
-                        height = maxSize;
-                    }
-                }
-                
-                // Set canvas dimensions
-                canvas.width = width;
-                canvas.height = height;
-                
-                // Draw and compress
-                ctx.drawImage(img, 0, 0, width, height);
-                
-                // Convert to base64 with good compression (0.7 quality for events)
-                const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
-                resolve(compressedBase64);
-            };
-            
-            img.onerror = () => reject(new Error('Failed to load image'));
-            img.src = URL.createObjectURL(file);
-        });
-    }
-
-    async previewEventImage(input) {
-        const file = input.files[0];
-        if (file) {
-            try {
-                const compressedBase64 = await this.compressEventImage(file);
-                const previewDiv = document.getElementById('evImagePreview');
-                const previewImg = document.getElementById('evImagePreviewImg');
-                if (previewDiv && previewImg) {
-                    previewImg.src = compressedBase64;
-                    previewDiv.style.display = 'block';
-                }
-            } catch (error) {
-                console.error('Error previewing image:', error);
-                this.showNotification('Fout bij voorvertoning afbeelding', 'error');
-            }
-        }
-    }
-
-    clearEventImagePreview() {
-        const input = document.getElementById('evImage');
-        const previewDiv = document.getElementById('evImagePreview');
-        if (input) input.value = '';
-        if (previewDiv) previewDiv.style.display = 'none';
-    }
-
     switchImageTab(tab) {
         // Remove active class from all tabs and panes
         document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
@@ -3171,8 +2132,8 @@ class HolwertAdmin {
                     <div class="content-item">
                         <div class="content-header">
                             <h5>${article.title}</h5>
-                            <span class="content-status status-active">
-                                Gepubliceerd
+                            <span class="content-status status-${article.is_published ? 'active' : 'inactive'}">
+                                ${article.is_published ? 'Gepubliceerd' : 'Wachtend'}
                             </span>
                         </div>
                         <div class="content-meta">
@@ -3209,10 +2170,7 @@ class HolwertAdmin {
                             <small>${new Date(event.event_date).toLocaleDateString('nl-NL')} - ${event.location || 'Locatie onbekend'}</small>
                         </div>
                         <div class="content-actions">
-                            <button class="btn btn-sm btn-secondary" onclick="admin.openEventModal(${event.id}, 'edit')">
-                                <i class="fas fa-edit"></i> Bewerken
-                            </button>
-                            <button class="btn btn-sm btn-primary" onclick="admin.openEventModal(${event.id}, 'view')">
+                            <button class="btn btn-sm btn-primary" onclick="admin.openEventModal(${event.id})">
                                 <i class="fas fa-eye"></i> Bekijken
                             </button>
                         </div>
@@ -3263,131 +2221,28 @@ class HolwertAdmin {
                 event_end_date: '',
                 location: '',
                 organization_id: '',
-                organization_name: '',
-                image_url: ''
+                organization_name: ''
             };
-            
-            let organizations = [];
-            
-            // Haal organisaties op voor dropdown (bij create en edit)
-            if (mode !== 'view') {
-                try {
-                    const orgRes = await fetch(`${this.apiBaseUrl}/admin/organizations`, {
-                        headers: {
-                            'Authorization': `Bearer ${this.token}`,
-                            'Content-Type': 'application/json'
-                        }
-                    });
-                    if (orgRes.ok) {
-                        const orgData = await orgRes.json();
-                        organizations = orgData.organizations || [];
-                        console.log('Organizations loaded:', organizations.length);
-                    } else {
-                        // Niet gooien van error, gewoon loggen en doorgaan zonder organisaties
-                        const errorText = await orgRes.text();
-                        console.warn('Failed to load organizations:', orgRes.status, errorText);
-                        // Toon alleen een waarschuwing, geen error
-                        this.showNotification('Organisaties konden niet worden geladen. Je kunt nog steeds een event aanmaken.', 'warning');
-                    }
-                } catch (err) {
-                    // Bij network errors, gewoon loggen en doorgaan
-                    console.warn('Error loading organizations (continuing anyway):', err);
-                    // Geen notification - modal wordt gewoon getoond zonder organisaties
-                }
-            }
             
             if (eventId) {
                 // Haal event data op voor bewerken/bekijken
-                try {
-                    const eventIdNum = parseInt(eventId);
-                    if (isNaN(eventIdNum)) {
-                        throw new Error(`Ongeldig event ID: ${eventId}`);
-                    }
-                    
-                    // Try route parameter first, then fallback to query parameter
-                    let eventUrl = `${this.apiBaseUrl}/admin/events/${eventIdNum}`;
-                    console.log('Loading event with ID:', eventIdNum);
-                    console.log('Trying route parameter URL:', eventUrl);
-                    console.log('API Base URL:', this.apiBaseUrl);
-                    console.log('Token present:', !!this.token);
-                    
-                    let res = await fetch(eventUrl, {
-                        headers: { 
-                            'Authorization': `Bearer ${this.token}`,
-                            'Content-Type': 'application/json'
-                        }
-                    });
-                    
-                    // If route parameter fails with 404, try query parameter as fallback
-                    if (!res.ok && res.status === 404) {
-                        console.log('Route parameter failed, trying query parameter...');
-                        eventUrl = `${this.apiBaseUrl}/admin/events?id=${eventIdNum}`;
-                        console.log('Trying query parameter URL:', eventUrl);
-                        res = await fetch(eventUrl, {
-                            headers: { 
-                                'Authorization': `Bearer ${this.token}`,
-                                'Content-Type': 'application/json'
-                            }
-                        });
-                    }
-                    
-                    console.log('Event response status:', res.status, 'OK:', res.ok);
-                    console.log('Response URL:', res.url);
-                    
-                    if (!res.ok) {
-                        const errorText = await res.text();
-                        let errorData;
-                        try {
-                            errorData = JSON.parse(errorText);
-                        } catch {
-                            errorData = { error: errorText || `HTTP ${res.status}` };
-                        }
-                        console.error('Failed to load event:');
-                        console.error('  Status:', res.status);
-                        console.error('  URL:', eventUrl);
-                        console.error('  Response URL:', res.url);
-                        console.error('  Error data:', errorData);
-                        throw new Error(errorData.error || errorData.message || `HTTP ${res.status}: ${errorText}`);
-                    }
-                    
+                const res = await fetch(`${this.apiBaseUrl}/admin/events?search=&page=1&limit=1&id=${eventId}`, {
+                    headers: { 'Authorization': `Bearer ${this.token}` }
+                });
+                if (res.ok) {
                     const data = await res.json();
-                    console.log('Event data received:', data);
-                    
-                    // Handle both response structures: { event: {...} } or { events: [...] }
-                    let ev = null;
-                    if (data && data.event) {
-                        ev = data.event;
-                    } else if (data && data.events && Array.isArray(data.events) && data.events.length > 0) {
-                        // Fallback: if we got a list, find the event by ID
-                        ev = data.events.find(e => e.id === eventIdNum);
-                        if (!ev) {
-                            throw new Error(`Event met ID ${eventIdNum} niet gevonden in response`);
-                        }
-                    } else {
-                        throw new Error('Event data niet gevonden in response');
+                    const ev = (data.events || []).find(e => e.id === eventId) || null;
+                    if (ev) {
+                        initial = {
+                            title: ev.title || '',
+                            description: ev.description || '',
+                            event_date: ev.event_date ? new Date(ev.event_date).toISOString().slice(0,16) : '',
+                            event_end_date: ev.event_end_date ? new Date(ev.event_end_date).toISOString().slice(0,16) : (ev.event_date ? new Date(ev.event_date).toISOString().slice(0,16) : ''),
+                            location: ev.location || '',
+                            organization_id: ev.organization_id || '',
+                            organization_name: ev.organization_name || ''
+                        };
                     }
-                    
-                    if (!ev) {
-                        throw new Error('Event data niet gevonden in response');
-                    }
-                    initial = {
-                        title: ev.title || '',
-                        description: ev.description || '',
-                        event_date: ev.event_date ? new Date(ev.event_date).toISOString().slice(0,16) : '',
-                        event_end_date: ev.event_end_date ? new Date(ev.event_end_date).toISOString().slice(0,16) : (ev.event_date ? new Date(ev.event_date).toISOString().slice(0,16) : ''),
-                        location: ev.location || '',
-                        organization_id: ev.organization_id || '',
-                        organization_name: ev.organization_name || '',
-                        image_url: ev.image_url || ''
-                    };
-                    console.log('Initial data set:', initial);
-                    
-                } catch (err) {
-                    console.error('Error loading event:', err);
-                    const errorMsg = err.message || 'Onbekende fout';
-                    this.showNotification(`Fout bij laden evenement: ${errorMsg}`, 'error');
-                    // Stop hier - zonder event data kunnen we niet bewerken
-                    return;
                 }
             }
 
@@ -3460,7 +2315,7 @@ class HolwertAdmin {
             } else {
                 // Create/Edit modus - toon formulier
                 overlay.innerHTML = `
-                    <div class="modal-content">
+                    <div class="modal">
                         <div class="modal-header">
                             <h3>${mode === 'create' ? 'Nieuw event' : 'Event bewerken'}</h3>
                             <button class="close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
@@ -3490,33 +2345,14 @@ class HolwertAdmin {
                                     <input type="text" id="evLocation" value="${initial.location}" placeholder="Locatie">
                                 </div>
                                 <div class="form-group">
-                                    <label>Organisatie (optioneel)</label>
-                                    <select id="evOrg">
-                                        <option value="">Geen organisatie</option>
-                                        ${organizations.map(org => `
-                                            <option value="${org.id}" ${org.id == initial.organization_id ? 'selected' : ''}>${org.name || `Organisatie ${org.id}`}</option>
-                                        `).join('')}
-                                    </select>
-                                </div>
-                                <div class="form-group">
-                                    <label>Afbeelding (optioneel)</label>
-                                    <input type="file" id="evImage" accept="image/*" onchange="admin.previewEventImage(this)">
-                                    <div id="evImagePreview" style="display: none; margin-top: 10px;">
-                                        <img id="evImagePreviewImg" src="" style="max-width: 200px; max-height: 200px; border-radius: 8px;">
-                                        <button type="button" class="btn btn-sm btn-secondary" onclick="admin.clearEventImagePreview()" style="margin-top: 5px;">Verwijder afbeelding</button>
-                                    </div>
-                                    ${initial.image_url ? `
-                                        <div style="margin-top: 10px;" data-existing-image="${initial.image_url}">
-                                            <p>Huidige afbeelding:</p>
-                                            <img src="${initial.image_url}" style="max-width: 200px; max-height: 200px; border-radius: 8px;">
-                                        </div>
-                                    ` : ''}
+                                    <label>Organisatie-ID (optioneel)</label>
+                                    <input type="number" id="evOrg" value="${initial.organization_id}">
                                 </div>
                             </form>
                         </div>
                         <div class="modal-footer">
                             <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">Annuleren</button>
-                            <button class="btn btn-primary" onclick="admin.saveEvent(${eventId ? eventId : 'null'})">Opslaan</button>
+                            <button class="btn btn-primary" onclick="admin.saveEvent(${eventId || 'null'})">Opslaan</button>
                         </div>
                     </div>
                 `;
@@ -3546,63 +2382,16 @@ class HolwertAdmin {
 
     async saveEvent(eventId) {
         try {
-            // Parse eventId correct (kan 'null' string zijn) - MOET AAN HET BEGIN
-            const actualEventId = eventId && eventId !== 'null' && eventId !== null ? parseInt(eventId) : null;
-            
             // Verzamel formulier waarden
             const title = (document.getElementById('evTitle').value || '').trim();
             const description = (document.getElementById('evDesc').value || '').trim();
             const event_date_raw = document.getElementById('evStart').value;
             const event_end_date_raw = document.getElementById('evEnd').value;
             const location = (document.getElementById('evLocation').value || '').trim();
-            const organization_id_val = document.getElementById('evOrg')?.value;
-            const organization_id = (organization_id_val && organization_id_val !== '' && organization_id_val !== '0') 
-              ? parseInt(organization_id_val) 
-              : null;
-            
-            console.log('saveEvent - organization_id:', organization_id, 'from value:', organization_id_val);
+            const organization_id_val = document.getElementById('evOrg').value;
+            const organization_id = organization_id_val ? parseInt(organization_id_val) : null;
 
-            // Handle image upload
-            const uploadedFile = document.getElementById('evImage')?.files[0];
-            let imageUrl = null;
-            
-            if (uploadedFile) {
-                try {
-                    const compressedBase64 = await this.compressEventImage(uploadedFile);
-                    imageUrl = compressedBase64;
-                    console.log('Event image compressed and converted to base64, length:', compressedBase64.length);
-                    
-                    if (compressedBase64.length > 4 * 1024 * 1024) {
-                        this.showNotification('Afbeelding is te groot. Kies een kleinere afbeelding.', 'error');
-                        return;
-                    }
-                } catch (error) {
-                    console.error('Error processing image:', error);
-                    this.showNotification('Fout bij verwerken van afbeelding', 'error');
-                    return;
-                }
-            } else {
-                // Als er geen nieuwe afbeelding is geüpload, behoud de bestaande (bij edit)
-                const existingImage = document.querySelector('#evImagePreviewImg')?.src;
-                if (existingImage && existingImage.startsWith('data:image')) {
-                    imageUrl = existingImage;
-                } else if (actualEventId) {
-                    // Bij bewerken zonder nieuwe afbeelding, haal de bestaande image_url op
-                    const existingImageUrl = document.querySelector('[data-existing-image]')?.getAttribute('data-existing-image');
-                    if (existingImageUrl) {
-                        imageUrl = existingImageUrl;
-                    } else {
-                        // Stuur undefined in plaats van null, zodat backend de bestaande waarde behoudt
-                        imageUrl = undefined;
-                    }
-                }
-            }
-
-            // Validatie
-            if (!title || !description || !event_date_raw || !location) {
-                this.showNotification('Vul alle verplichte velden in', 'error');
-                return;
-            }
+            // Validatie verwijderd - organisaties kunnen nu zelf events plaatsen
 
             const body = {
                 title,
@@ -3611,17 +2400,12 @@ class HolwertAdmin {
                 event_end_date: event_end_date_raw ? new Date(event_end_date_raw).toISOString() : null,
                 location,
                 organization_id,
+                image_url: null,
                 is_published: true
             };
-            
-            // Voeg image_url alleen toe als het gedefinieerd is
-            if (imageUrl !== undefined) {
-                body.image_url = imageUrl;
-            }
 
-            // Bepaal URL en method op basis van actualEventId (al gedeclareerd aan het begin)
-            const url = actualEventId ? `${this.apiBaseUrl}/admin/events/${actualEventId}` : `${this.apiBaseUrl}/admin/events`;
-            const method = actualEventId ? 'PUT' : 'POST';
+            const url = eventId ? `${this.apiBaseUrl}/admin/events/${eventId}` : `${this.apiBaseUrl}/admin/events`;
+            const method = eventId ? 'PUT' : 'POST';
 
             const res = await fetch(url, {
                 method,
@@ -3634,14 +2418,8 @@ class HolwertAdmin {
 
             if (!res.ok) {
                 let msg = `HTTP ${res.status}`;
-                let errorDetails = '';
-                try { 
-                    const j = await res.json(); 
-                    msg = j.message || j.error || msg;
-                    errorDetails = j.details ? `\nDetails: ${j.details}` : '';
-                } catch {}
-                console.error('Save event failed:', res.status, msg, errorDetails);
-                this.showNotification(`Opslaan mislukt: ${msg}${errorDetails}`, 'error');
+                try { const j = await res.json(); msg = j.message || j.error || msg; } catch {}
+                this.showNotification(`Opslaan mislukt: ${msg}`, 'error');
                 return;
             }
 
@@ -3655,9 +2433,7 @@ class HolwertAdmin {
             }
         } catch (e) {
             console.error('saveEvent error:', e);
-            const errorMsg = e?.message || e?.toString() || 'Onbekende fout';
-            console.error('Full error details:', e);
-            this.showNotification(`Fout bij opslaan event: ${errorMsg}`, 'error');
+            this.showNotification('Fout bij opslaan event', 'error');
         }
     }
 }
@@ -3708,13 +2484,11 @@ window.testAPI = async function() {
 document.addEventListener('DOMContentLoaded', () => {
     console.log('=== DOM LOADED ===');
     console.log('Creating HolwertAdmin instance...');
-    console.log('HolwertAdmin class exists:', typeof HolwertAdmin);
     try {
-        window.admin = new HolwertAdmin();
+    window.admin = new HolwertAdmin();
         console.log('HolwertAdmin created successfully');
     } catch (error) {
         console.error('Error creating HolwertAdmin:', error);
-        console.error('Error stack:', error.stack);
     }
 });
 
