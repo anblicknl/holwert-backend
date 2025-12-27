@@ -636,7 +636,12 @@
                     return;
                 }
 
-                const response = await fetch('http://localhost:3000/api/admin/stats', {
+                // Use correct API URL
+                const apiUrl = window.location.hostname === 'localhost' 
+                    ? 'http://localhost:3000/api'
+                    : 'https://holwert-backend.vercel.app/api';
+                
+                const response = await fetch(`${apiUrl}/admin/stats`, {
                     headers: {
                         'Authorization': `Bearer ${token}`
                     }
