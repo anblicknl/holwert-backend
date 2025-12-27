@@ -60,6 +60,58 @@ app.get('/', (req, res) => {
   });
 });
 
+// Setup admin user (one-time use endpoint - remove after use!)
+app.get('/api/setup-admin', async (req, res) => {
+  try {
+    const email = 'admin@holwert.nl';
+    const password = 'admin123';
+    const hashedPassword = await bcrypt.hash(password, 10);
+    
+    // Check if admin already exists
+    const existingUser = await pool.query(
+      'SELECT id FROM users WHERE email = $1',
+      [email]
+    );
+    
+    if (existingUser.rows.length > 0) {
+      // Update existing admin
+      await pool.query(
+        'UPDATE users SET password = $1, role = $2, is_active = true WHERE email = $3',
+        [hashedPassword, 'admin', email]
+      );
+      
+      res.json({ 
+        success: true,
+        message: 'Admin user updated',
+        email: email,
+        note: 'Password has been reset to: admin123'
+      });
+    } else {
+      // Create new admin
+      await pool.query(
+        `INSERT INTO users (email, password, first_name, last_name, role, is_active)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [email, hashedPassword, 'Admin', 'Holwert', 'admin', true]
+      );
+      
+      res.json({ 
+        success: true,
+        message: 'Admin user created',
+        email: email,
+        password: 'admin123',
+        note: 'Please change password after first login!'
+      });
+    }
+  } catch (error) {
+    console.error('Setup admin error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to setup admin user',
+      message: error.message 
+    });
+  }
+});
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ 
