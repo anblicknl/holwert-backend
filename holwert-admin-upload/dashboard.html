@@ -3,897 +3,368 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Holwert - Dashboard</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-            background: linear-gradient(135deg, #f8f6f0 0%, #f0ede5 100%);
-            color: #2c2c2c;
-            line-height: 1.5;
-        }
-
-        .app-container {
-            display: flex;
-            min-height: 100vh;
-        }
-
-        /* Sidebar */
-        .sidebar {
-            width: 280px;
-            background: linear-gradient(180deg, #3a3a3a 0%, #2d2d2d 100%);
-            color: white;
-            padding: 24px 0;
-            position: fixed;
-            height: 100vh;
-            overflow-y: auto;
-        }
-
-        .sidebar-header {
-            padding: 0 24px 32px;
-            border-bottom: 1px solid #4a4a4a;
-            margin-bottom: 24px;
-        }
-
-        .logo {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            margin-bottom: 24px;
-        }
-
-        .logo-icon {
-            width: 32px;
-            height: 32px;
-            background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%);
-            border-radius: 12px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 16px;
-        }
-
-        .logo-text {
-            font-size: 18px;
-            font-weight: 600;
-        }
-
-        .user-profile {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 12px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 16px;
-        }
-
-        .user-avatar {
-            width: 40px;
-            height: 40px;
-            background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: 600;
-        }
-
-        .user-info h4 {
-            font-size: 14px;
-            font-weight: 600;
-            margin-bottom: 2px;
-        }
-
-        .user-info p {
-            font-size: 12px;
-            color: #adb5bd;
-        }
-
-        .nav-menu {
-            list-style: none;
-            padding: 0 16px;
-        }
-
-        .nav-item {
-            margin-bottom: 4px;
-        }
-
-        .nav-link {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 12px 16px;
-            color: #adb5bd;
-            text-decoration: none;
-            border-radius: 16px;
-            transition: all 0.2s ease;
-            font-size: 14px;
-            font-weight: 500;
-        }
-
-        .nav-link:hover {
-            background: rgba(255, 255, 255, 0.1);
-            color: white;
-        }
-
-        .nav-link.active {
-            background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%);
-            color: white;
-        }
-
-        .nav-icon {
-            width: 16px;
-            text-align: center;
-            font-size: 14px;
-        }
-
-        .nav-icon i {
-            font-size: 14px;
-        }
-
-        /* Main Content */
-        .main-content {
-            margin-left: 280px;
-            flex: 1;
-            padding: 32px;
-        }
-
-        .header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 32px;
-        }
-
-        .header-left h1 {
-            font-size: 28px;
-            font-weight: 600;
-            color: #212529;
-            margin-bottom: 4px;
-        }
-
-        .header-left p {
-            color: #6c757d;
-            font-size: 14px;
-        }
-
-        .header-right {
-            display: flex;
-            align-items: center;
-            gap: 16px;
-        }
-
-        .search-bar {
-            display: flex;
-            align-items: center;
-            background: white;
-            border: 1px solid #dee2e6;
-            border-radius: 8px;
-            padding: 8px 12px;
-            width: 300px;
-        }
-
-        .search-bar input {
-            border: none;
-            outline: none;
-            flex: 1;
-            font-size: 14px;
-            color: #212529;
-        }
-
-        .search-bar i {
-            color: #6c757d;
-            margin-right: 8px;
-        }
-
-        .header-actions {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-
-        .btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 8px 16px;
-            border: none;
-            border-radius: 6px;
-            font-size: 14px;
-            font-weight: 500;
-            text-decoration: none;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-
-        .btn-secondary {
-            background: #6c757d;
-            color: white;
-        }
-
-        .btn-secondary:hover {
-            background: #5a6268;
-        }
-
-        .btn-primary {
-            background: #007bff;
-            color: white;
-        }
-
-        .btn-primary:hover {
-            background: #0056b3;
-        }
-
-        /* Dashboard Grid */
-        .dashboard-grid {
-            display: grid;
-            grid-template-columns: 2fr 1fr;
-            gap: 24px;
-            margin-bottom: 32px;
-        }
-
-        .card {
-            background: linear-gradient(135deg, #ffffff 0%, #fafafa 100%);
-            border-radius: 20px;
-            padding: 24px;
-            border: 1px solid rgba(0, 0, 0, 0.05);
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
-        }
-
-        .card-header {
-            display: flex;
-            align-items: center;
-            justify-content: between;
-            margin-bottom: 20px;
-        }
-
-        .card-title {
-            font-size: 18px;
-            font-weight: 600;
-            color: #212529;
-        }
-
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 16px;
-            margin-bottom: 32px;
-        }
-
-        .stat-card {
-            background: linear-gradient(135deg, #ffffff 0%, #fafafa 100%);
-            border-radius: 20px;
-            padding: 20px;
-            border: 1px solid rgba(0, 0, 0, 0.05);
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
-        }
-
-        .stat-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 12px;
-        }
-
-        .stat-title {
-            font-size: 14px;
-            color: #6c757d;
-            font-weight: 500;
-        }
-
-        .stat-value {
-            font-size: 24px;
-            font-weight: 600;
-            color: #212529;
-            margin-bottom: 4px;
-        }
-
-        .stat-change {
-            font-size: 12px;
-            color: #28a745;
-        }
-
-        .stat-icon {
-            width: 40px;
-            height: 40px;
-            background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%);
-            border-radius: 16px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 16px;
-        }
-
-        .stat-icon i {
-            font-size: 16px;
-        }
-
-        /* Content Lists */
-        .content-list {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-        }
-
-        .content-item {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 12px;
-            background: linear-gradient(135deg, #f8f9fa 0%, #f0f0f0 100%);
-            border-radius: 16px;
-            border: 1px solid rgba(0, 0, 0, 0.05);
-        }
-
-        .content-icon {
-            width: 32px;
-            height: 32px;
-            background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%);
-            border-radius: 12px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 14px;
-        }
-
-        .content-icon i {
-            font-size: 14px;
-        }
-
-        .content-info {
-            flex: 1;
-        }
-
-        .content-title {
-            font-size: 14px;
-            font-weight: 500;
-            color: #212529;
-            margin-bottom: 2px;
-        }
-
-        .content-meta {
-            font-size: 12px;
-            color: #6c757d;
-        }
-
-        .content-actions {
-            display: flex;
-            gap: 8px;
-        }
-
-        .btn-sm {
-            padding: 4px 8px;
-            font-size: 12px;
-            border-radius: 4px;
-        }
-
-        /* Responsive */
-        @media (max-width: 768px) {
-            .sidebar {
-                transform: translateX(-100%);
-                transition: transform 0.3s ease;
-            }
-            
-            .main-content {
-                margin-left: 0;
-            }
-            
-            .dashboard-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            .stats-grid {
-                grid-template-columns: 1fr;
-            }
-        }
-    </style>
+    <title>Holwert Dorpsapp - Admin Panel</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
 <body>
-    <div class="app-container">
+    <!-- Login Screen -->
+    <div id="loginScreen" class="screen active">
+        <div class="login-container">
+            <div class="login-header">
+                <div class="logo-icon">
+                    <i class="fas fa-home"></i>
+                </div>
+                <h1>Holwert Dorpsapp</h1>
+                <p>Beheer je gemeenschap</p>
+            </div>
+            <form id="loginForm" class="login-form">
+                <div class="form-group">
+                    <label for="email">E-mailadres</label>
+                    <input type="email" id="email" name="email" placeholder="admin@holwert.nl" required>
+                </div>
+                <div class="form-group">
+                    <label for="password">Wachtwoord</label>
+                    <input type="password" id="password" name="password" placeholder="••••••••" required>
+                </div>
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-arrow-right"></i> 
+                    <span>Inloggen</span>
+                </button>
+            </form>
+            <div id="loginError" class="error-message"></div>
+        </div>
+    </div>
+
+    <!-- Main App Screen -->
+    <div id="mainScreen" class="screen">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <h1><i class="fas fa-home"></i> Holwert Dorpsapp</h1>
+                <span id="demoModeIndicator" class="demo-indicator" style="display: none;">DEMO MODE</span>
+            </div>
+            <div class="header-right">
+                <span id="userInfo" class="user-info"></span>
+                <button id="logoutBtn" class="btn btn-secondary">
+                    <i class="fas fa-sign-out-alt"></i> Uitloggen
+                </button>
+            </div>
+        </header>
+
         <!-- Sidebar -->
         <nav class="sidebar">
-            <div class="sidebar-header">
-                <div class="logo">
-                    <div class="logo-icon"><i class="fas fa-home"></i></div>
-                    <div class="logo-text">Holwert</div>
-                </div>
-                <div class="user-profile">
-                    <div class="user-avatar">SA</div>
-                    <div class="user-info">
-                        <h4>Super Admin</h4>
-                        <p>admin@holwert.nl</p>
-                    </div>
-                </div>
-            </div>
-            
             <ul class="nav-menu">
-                <li class="nav-item">
-                    <a href="#" class="nav-link active" data-section="dashboard">
-                        <span class="nav-icon"><i class="fas fa-chart-line"></i></span>
-                        Dashboard
-                    </a>
+                <li class="nav-item active" data-section="dashboard">
+                    <i class="fas fa-tachometer-alt"></i>
+                    <span>Dashboard</span>
                 </li>
-                <li class="nav-item">
-                    <a href="#" class="nav-link" data-section="users">
-                        <span class="nav-icon"><i class="fas fa-users"></i></span>
-                        Gebruikers
-                    </a>
+                <li class="nav-item" data-section="users">
+                    <i class="fas fa-users"></i>
+                    <span>Gebruikers</span>
                 </li>
-                <li class="nav-item">
-                    <a href="#" class="nav-link" data-section="organizations">
-                        <span class="nav-icon"><i class="fas fa-building"></i></span>
-                        Organisaties
-                    </a>
+                <li class="nav-item" data-section="organizations">
+                    <i class="fas fa-building"></i>
+                    <span>Organisaties</span>
                 </li>
-                <li class="nav-item">
-                    <a href="#" class="nav-link" data-section="news">
-                        <span class="nav-icon"><i class="fas fa-newspaper"></i></span>
-                        Nieuws
-                    </a>
+                <li class="nav-item" data-section="news">
+                    <i class="fas fa-newspaper"></i>
+                    <span>Nieuws</span>
                 </li>
-                <li class="nav-item">
-                    <a href="#" class="nav-link" data-section="events">
-                        <span class="nav-icon"><i class="fas fa-calendar"></i></span>
-                        Evenementen
-                    </a>
+                <li class="nav-item" data-section="events">
+                    <i class="fas fa-calendar"></i>
+                    <span>Evenementen</span>
                 </li>
-                <li class="nav-item">
-                    <a href="#" class="nav-link" data-section="found-lost">
-                        <span class="nav-icon"><i class="fas fa-search"></i></span>
-                        Gevonden/Verloren
-                    </a>
+                <li class="nav-item" data-section="found-lost">
+                    <i class="fas fa-search"></i>
+                    <span>Gevonden/Verloren</span>
                 </li>
-                <li class="nav-item">
-                    <a href="#" class="nav-link" data-section="moderation">
-                        <span class="nav-icon"><i class="fas fa-shield-alt"></i></span>
-                        Moderatie
-                    </a>
+                <li class="nav-item" data-section="moderation">
+                    <i class="fas fa-check-circle"></i>
+                    <span>Moderatie</span>
                 </li>
             </ul>
         </nav>
 
         <!-- Main Content -->
         <main class="main-content">
-            <header class="header">
-                <div class="header-left">
-                    <h1>Dashboard</h1>
-                    <p>Overzicht van je gemeenschap</p>
+            <!-- Dashboard Section -->
+            <section id="dashboard" class="content-section active">
+                <div class="section-header">
+                    <h2><i class="fas fa-tachometer-alt"></i> Dashboard</h2>
                 </div>
-                <div class="header-right">
-                    <div class="search-bar">
-                        <i class="fas fa-search"></i>
-                        <input type="text" placeholder="Zoek iets...">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon">
+                            <i class="fas fa-users"></i>
+                        </div>
+                        <div class="stat-content">
+                            <h3 id="totalUsers">-</h3>
+                            <p>Totaal Gebruikers</p>
+                        </div>
                     </div>
-                    <div class="header-actions">
-                        <button class="btn btn-secondary" onclick="logout()">
-                            <i class="fas fa-sign-out-alt"></i>
-                            Uitloggen
-                        </button>
+                    <div class="stat-card">
+                        <div class="stat-icon">
+                            <i class="fas fa-building"></i>
+                        </div>
+                        <div class="stat-content">
+                            <h3 id="totalOrganizations">-</h3>
+                            <p>Organisaties</p>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">
+                            <i class="fas fa-newspaper"></i>
+                        </div>
+                        <div class="stat-content">
+                            <h3 id="totalNews">-</h3>
+                            <p>Nieuwsartikelen</p>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">
+                            <i class="fas fa-calendar"></i>
+                        </div>
+                        <div class="stat-content">
+                            <h3 id="totalEvents">-</h3>
+                            <p>Evenementen</p>
+                        </div>
                     </div>
                 </div>
-            </header>
+                <div class="pending-content">
+                    <h3>Pending Content</h3>
+                    <div id="pendingContent" class="pending-list">
+                        <!-- Pending content will be loaded here -->
+                    </div>
+                </div>
+            </section>
 
-            <!-- Stats Grid -->
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <div class="stat-header">
-                        <div class="stat-title">Totaal Gebruikers</div>
-                        <div class="stat-icon"><i class="fas fa-users"></i></div>
-                    </div>
-                    <div class="stat-value" id="totalUsers">24</div>
-                    <div class="stat-change">+12% deze maand</div>
+            <!-- Users Section -->
+            <section id="users" class="content-section">
+                <div class="section-header">
+                    <h2><i class="fas fa-users"></i> Gebruikers</h2>
+                    <button id="addUserBtn" class="btn btn-primary">
+                        <i class="fas fa-plus"></i> Nieuwe Gebruiker
+                    </button>
                 </div>
-                <div class="stat-card">
-                    <div class="stat-header">
-                        <div class="stat-title">Organisaties</div>
-                        <div class="stat-icon"><i class="fas fa-building"></i></div>
-                    </div>
-                    <div class="stat-value" id="totalOrganizations">8</div>
-                    <div class="stat-change">+2 nieuwe</div>
+                <div class="filters">
+                    <input type="text" id="userSearch" placeholder="Zoek gebruikers...">
+                    <select id="userRoleFilter">
+                        <option value="">Alle rollen</option>
+                        <option value="user">User</option>
+                        <option value="admin">Admin</option>
+                        <option value="superadmin">Superadmin</option>
+                    </select>
                 </div>
-                <div class="stat-card">
-                    <div class="stat-header">
-                        <div class="stat-title">Nieuwsartikelen</div>
-                        <div class="stat-icon"><i class="fas fa-newspaper"></i></div>
-                    </div>
-                    <div class="stat-value" id="totalNews">156</div>
-                    <div class="stat-change">+8 deze week</div>
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Naam</th>
+                                <th>E-mail</th>
+                                <th>Rol</th>
+                                <th>Organisatie</th>
+                                <th>Status</th>
+                                <th>Acties</th>
+                            </tr>
+                        </thead>
+                        <tbody id="usersTableBody">
+                            <!-- Users will be loaded here -->
+                        </tbody>
+                    </table>
                 </div>
-                <div class="stat-card">
-                    <div class="stat-header">
-                        <div class="stat-title">Evenementen</div>
-                        <div class="stat-icon"><i class="fas fa-calendar"></i></div>
-                    </div>
-                    <div class="stat-value" id="totalEvents">43</div>
-                    <div class="stat-change">+3 komende week</div>
-                </div>
-            </div>
+            </section>
 
-            <!-- Dashboard Grid -->
-            <div class="dashboard-grid">
-                <div class="card">
-                    <div class="card-header">
-                        <h3 class="card-title">Wachtende Content</h3>
-                    </div>
-                    <div class="content-list" id="pendingContent">
-                        <div class="content-item">
-                            <div class="content-icon">
-                                <i class="fas fa-newspaper"></i>
-                            </div>
-                            <div class="content-info">
-                                <div class="content-title">Nieuwe speeltuin geopend</div>
-                                <div class="content-meta">Door Jan de Vries • 2 uur geleden</div>
-                            </div>
-                            <div class="content-actions">
-                                <button class="btn btn-sm btn-primary">Goedkeuren</button>
-                                <button class="btn btn-sm btn-secondary">Afwijzen</button>
-                            </div>
-                        </div>
-                        <div class="content-item">
-                            <div class="content-icon">
-                                <i class="fas fa-calendar"></i>
-                            </div>
-                            <div class="content-info">
-                                <div class="content-title">Dorpsfeest 2024</div>
-                                <div class="content-meta">Door Maria Jansen • 1 dag geleden</div>
-                            </div>
-                            <div class="content-actions">
-                                <button class="btn btn-sm btn-primary">Goedkeuren</button>
-                                <button class="btn btn-sm btn-secondary">Afwijzen</button>
-                            </div>
-                        </div>
-                        <div class="content-item">
-                            <div class="content-icon">
-                                <i class="fas fa-search"></i>
-                            </div>
-                            <div class="content-info">
-                                <div class="content-title">Gevonden: Zwarte fiets</div>
-                                <div class="content-meta">Door Piet Bakker • 2 dagen geleden</div>
-                            </div>
-                            <div class="content-actions">
-                                <button class="btn btn-sm btn-primary">Goedkeuren</button>
-                                <button class="btn btn-sm btn-secondary">Afwijzen</button>
-                            </div>
-                        </div>
-                    </div>
+            <!-- Organizations Section -->
+            <section id="organizations" class="content-section">
+                <div class="section-header">
+                    <h2><i class="fas fa-building"></i> Organisaties</h2>
+                    <button id="addOrganizationBtn" class="btn btn-primary">
+                        <i class="fas fa-plus"></i> Nieuwe Organisatie
+                    </button>
                 </div>
+                <div class="filters">
+                    <input type="text" id="orgSearch" placeholder="Zoek organisaties...">
+                    <select id="orgCategoryFilter">
+                        <option value="">Alle categorieën</option>
+                        <option value="gemeente">Gemeente</option>
+                        <option value="natuur">Natuur</option>
+                        <option value="cultuur">Cultuur</option>
+                        <option value="sport">Sport</option>
+                        <option value="onderwijs">Onderwijs</option>
+                        <option value="zorg">Zorg</option>
+                        <option value="overig">Overig</option>
+                    </select>
+                </div>
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Naam</th>
+                                <th>Categorie</th>
+                                <th>Gebruikers</th>
+                                <th>Status</th>
+                                <th>Acties</th>
+                            </tr>
+                        </thead>
+                        <tbody id="organizationsTableBody">
+                            <!-- Organizations will be loaded here -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
 
-                <div class="card">
-                    <div class="card-header">
-                        <h3 class="card-title">Recente Activiteit</h3>
-                    </div>
-                    <div class="content-list" id="recentActivity">
-                        <div class="content-item">
-                            <div class="content-icon">
-                                <i class="fas fa-user-plus"></i>
-                            </div>
-                            <div class="content-info">
-                                <div class="content-title">Nieuwe gebruiker geregistreerd</div>
-                                <div class="content-meta">Lisa van der Berg • 1 uur geleden</div>
-                            </div>
-                        </div>
-                        <div class="content-item">
-                            <div class="content-icon">
-                                <i class="fas fa-building"></i>
-                            </div>
-                            <div class="content-info">
-                                <div class="content-title">Organisatie toegevoegd</div>
-                                <div class="content-meta">Sportvereniging Holwert • 3 uur geleden</div>
-                            </div>
-                        </div>
-                        <div class="content-item">
-                            <div class="content-icon">
-                                <i class="fas fa-newspaper"></i>
-                            </div>
-                            <div class="content-info">
-                                <div class="content-title">Nieuwsartikel gepubliceerd</div>
-                                <div class="content-meta">Gemeente Holwert • 5 uur geleden</div>
-                            </div>
-                        </div>
-                    </div>
+            <!-- News Section -->
+            <section id="news" class="content-section">
+                <div class="section-header">
+                    <h2><i class="fas fa-newspaper"></i> Nieuws</h2>
+                    <button id="addNewsBtn" class="btn btn-primary">
+                        <i class="fas fa-plus"></i> Nieuw Artikel
+                    </button>
                 </div>
-            </div>
+                <div class="filters">
+                    <input type="text" id="newsSearch" placeholder="Zoek artikelen...">
+                    <select id="newsStatusFilter">
+                        <option value="">Alle statussen</option>
+                        <option value="published">Gepubliceerd</option>
+                        <option value="pending">Pending</option>
+                        <option value="draft">Draft</option>
+                    </select>
+                </div>
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Titel</th>
+                                <th>Auteur</th>
+                                <th>Organisatie</th>
+                                <th>Status</th>
+                                <th>Datum</th>
+                                <th>Acties</th>
+                            </tr>
+                        </thead>
+                        <tbody id="newsTableBody">
+                            <!-- News will be loaded here -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Events Section -->
+            <section id="events" class="content-section">
+                <div class="section-header">
+                    <h2><i class="fas fa-calendar"></i> Evenementen</h2>
+                    <button id="addEventBtn" class="btn btn-primary">
+                        <i class="fas fa-plus"></i> Nieuw Evenement
+                    </button>
+                </div>
+                <div class="filters">
+                    <input type="text" id="eventSearch" placeholder="Zoek evenementen...">
+                    <select id="eventStatusFilter">
+                        <option value="">Alle statussen</option>
+                        <option value="published">Gepubliceerd</option>
+                        <option value="pending">Pending</option>
+                        <option value="draft">Draft</option>
+                    </select>
+                </div>
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Titel</th>
+                                <th>Datum</th>
+                                <th>Locatie</th>
+                                <th>Organisator</th>
+                                <th>Status</th>
+                                <th>Acties</th>
+                            </tr>
+                        </thead>
+                        <tbody id="eventsTableBody">
+                            <!-- Events will be loaded here -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Found/Lost Section -->
+            <section id="found-lost" class="content-section">
+                <div class="section-header">
+                    <h2><i class="fas fa-search"></i> Gevonden/Verloren</h2>
+                </div>
+                <div class="filters">
+                    <input type="text" id="foundLostSearch" placeholder="Zoek items...">
+                    <select id="foundLostTypeFilter">
+                        <option value="">Alle types</option>
+                        <option value="found">Gevonden</option>
+                        <option value="lost">Verloren</option>
+                    </select>
+                    <select id="foundLostStatusFilter">
+                        <option value="">Alle statussen</option>
+                        <option value="pending">Pending</option>
+                        <option value="approved">Goedgekeurd</option>
+                        <option value="rejected">Afgewezen</option>
+                    </select>
+                </div>
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Type</th>
+                                <th>Titel</th>
+                                <th>Locatie</th>
+                                <th>Reporter</th>
+                                <th>Status</th>
+                                <th>Datum</th>
+                                <th>Acties</th>
+                            </tr>
+                        </thead>
+                        <tbody id="foundLostTableBody">
+                            <!-- Found/Lost items will be loaded here -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Moderation Section -->
+            <section id="moderation" class="content-section">
+                <div class="section-header">
+                    <h2><i class="fas fa-check-circle"></i> Moderatie</h2>
+                </div>
+                <div class="moderation-tabs">
+                    <button class="tab-btn active" data-type="all">Alle Pending</button>
+                    <button class="tab-btn" data-type="news">Nieuws</button>
+                    <button class="tab-btn" data-type="events">Evenementen</button>
+                    <button class="tab-btn" data-type="found-lost">Gevonden/Verloren</button>
+                </div>
+                <div id="moderationContent" class="moderation-content">
+                    <!-- Pending content for moderation will be loaded here -->
+                </div>
+            </section>
         </main>
     </div>
 
+    <!-- Modals -->
+    <div id="modalOverlay" class="modal-overlay" style="display: none;">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="modalTitle">Modal Title</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <!-- Modal content will be loaded here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Spinner -->
+    <div id="loadingSpinner" class="loading-spinner">
+        <div class="spinner"></div>
+    </div>
+
     <script>
-        console.error('❌ VERKEERD BESTAND: dashboard.html (incomplete versie zonder navigatie)');
-        console.error('⚠️ Upload index.html in plaats van dashboard.html!');
-        
-        // Navigation
-        document.querySelectorAll('.nav-link').forEach(link => {
-            link.addEventListener('click', (e) => {
-                e.preventDefault();
-                
-                // Remove active class from all links
-                document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
-                
-                // Add active class to clicked link
-                link.classList.add('active');
-                
-                // Load the appropriate content
-                const section = link.getAttribute('data-section');
-                if (section === 'dashboard') {
-                    loadDashboard();
-                } else {
-                    console.log('Navigate to:', section);
-                }
-            });
-        });
-
-        // Load dashboard data
-        async function loadDashboard() {
-            try {
-                const token = localStorage.getItem('authToken');
-                if (!token) {
-                    window.location.href = 'login.html';
-                    return;
-                }
-
-                // Use correct API URL
-                const apiUrl = window.location.hostname === 'localhost' 
-                    ? 'http://localhost:3000/api'
-                    : 'https://holwert-backend.vercel.app/api';
-                
-                const response = await fetch(`${apiUrl}/admin/stats`, {
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
-                });
-
-                if (response.ok) {
-                    const data = await response.json();
-                    updateDashboard(data);
-                } else {
-                    console.error('Failed to load dashboard stats');
-                }
-            } catch (error) {
-                console.error('Error loading dashboard:', error);
-            }
-        }
-
-        function updateDashboard(data) {
-            // Update statistics
-            if (data.statistics) {
-                document.getElementById('totalUsers').textContent = data.statistics.totalUsers || 0;
-                document.getElementById('totalOrganizations').textContent = data.statistics.totalOrganizations || 0;
-                document.getElementById('totalNews').textContent = data.statistics.totalNews || 0;
-                document.getElementById('totalEvents').textContent = data.statistics.totalEvents || 0;
-            }
-
-            // Update pending content
-            if (data.pendingContent) {
-                updatePendingContent(data.pendingContent);
-            }
-
-            // Update recent activity
-            if (data.recentActivity) {
-                updateRecentActivity(data.recentActivity);
-            }
-        }
-
-        function updatePendingContent(pendingContent) {
-            const container = document.getElementById('pendingContent');
-            if (!container) return;
-
-            if (pendingContent.length === 0) {
-                container.innerHTML = '<p class="text-muted">Geen wachtende content</p>';
-                return;
-            }
-
-            container.innerHTML = pendingContent.map(item => `
-                <div class="content-item">
-                    <div class="content-icon">
-                        <i class="fas fa-${getContentIcon(item.type)}"></i>
-                    </div>
-                    <div class="content-info">
-                        <div class="content-title">${item.title}</div>
-                        <div class="content-meta">${item.organization_name || 'Gebruiker'} • ${formatDate(item.timestamp)}</div>
-                    </div>
-                    <div class="content-actions">
-                        <button class="btn btn-sm btn-primary" onclick="approveContent('${item.type}', ${item.id})">
-                            Goedkeuren
-                        </button>
-                        <button class="btn btn-sm btn-secondary" onclick="rejectContent('${item.type}', ${item.id})">
-                            Afwijzen
-                        </button>
-                    </div>
-                </div>
-            `).join('');
-        }
-
-        function updateRecentActivity(recentActivity) {
-            const container = document.getElementById('recentActivity');
-            if (!container) return;
-
-            if (recentActivity.length === 0) {
-                container.innerHTML = '<p class="text-muted">Geen recente activiteit</p>';
-                return;
-            }
-
-            container.innerHTML = recentActivity.map(item => `
-                <div class="content-item">
-                    <div class="content-icon">
-                        <i class="fas fa-${getActivityIcon(item.type)}"></i>
-                    </div>
-                    <div class="content-info">
-                        <div class="content-title">${item.title}</div>
-                        <div class="content-meta">${item.description} • ${formatDate(item.timestamp)}</div>
-                    </div>
-                </div>
-            `).join('');
-        }
-
-        function getContentIcon(type) {
-            const icons = {
-                'news': 'newspaper',
-                'event': 'calendar',
-                'found_lost': 'search'
-            };
-            return icons[type] || 'file';
-        }
-
-        function getActivityIcon(type) {
-            const icons = {
-                'user': 'user-plus',
-                'news': 'newspaper',
-                'event': 'calendar',
-                'organization': 'building'
-            };
-            return icons[type] || 'activity';
-        }
-
-        function formatDate(dateString) {
-            const date = new Date(dateString);
-            const now = new Date();
-            const diffInHours = Math.floor((now - date) / (1000 * 60 * 60));
-
-            if (diffInHours < 1) {
-                return 'Zojuist';
-            } else if (diffInHours < 24) {
-                return `${diffInHours} uur geleden`;
-            } else {
-                const diffInDays = Math.floor(diffInHours / 24);
-                return `${diffInDays} dag${diffInDays > 1 ? 'en' : ''} geleden`;
-            }
-        }
-
-        // Content moderation functions (placeholder for now)
-        async function approveContent(type, id) {
-            showNotification('Goedkeuren functionaliteit wordt geïmplementeerd', 'info');
-        }
-
-        async function rejectContent(type, id) {
-            showNotification('Afwijzen functionaliteit wordt geïmplementeerd', 'info');
-        }
-
-        function showNotification(message, type = 'info') {
-            // Create notification element
-            const notification = document.createElement('div');
-            notification.className = `notification notification-${type}`;
-            notification.innerHTML = `
-                <div class="notification-content">
-                    <span class="notification-message">${message}</span>
-                    <button class="notification-close" onclick="this.parentElement.parentElement.remove()">×</button>
-                </div>
-            `;
-
-            // Add to page
-            document.body.appendChild(notification);
-
-            // Auto remove after 5 seconds
-            setTimeout(() => {
-                if (notification.parentElement) {
-                    notification.remove();
-                }
-            }, 5000);
-        }
-
-        // Load dashboard on page load
-        window.addEventListener('load', () => {
-            const token = localStorage.getItem('authToken');
-            if (!token) {
-                window.location.href = 'login.html';
-            } else {
-                loadDashboard();
-            }
-        });
-
-        // Logout function
-        function logout() {
-            localStorage.removeItem('authToken');
-            window.location.href = 'login.html';
-        }
-
-        // Check authentication on page load
-        window.addEventListener('load', () => {
-            const token = localStorage.getItem('authToken');
-            if (!token) {
-                window.location.href = 'login.html';
-            } else {
-                // Setup navigation after page loads
-                setupNavigation();
-            }
-        });
-
-        // Setup navigation event listeners
-        function setupNavigation() {
-            const navLinks = document.querySelectorAll('.nav-link');
-            navLinks.forEach(link => {
-                link.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    const section = link.getAttribute('data-section');
-                    
-                    // Remove active class from all links
-                    navLinks.forEach(l => l.classList.remove('active'));
-                    // Add active class to clicked link
-                    link.classList.add('active');
-                    
-                    // Hide all sections
-                    document.querySelectorAll('.content-section').forEach(s => {
-                        s.style.display = 'none';
-                    });
-                    
-                    // Show selected section
-                    const sectionElement = document.getElementById(section);
-                    if (sectionElement) {
-                        sectionElement.style.display = 'block';
-                        
-                        // Load data for the section
-                        switch(section) {
-                            case 'dashboard':
-                                loadDashboard();
-                                break;
-                            case 'news':
-                                loadNews();
-                                break;
-                            case 'events':
-                                loadEvents();
-                                break;
-                            case 'users':
-                                loadUsers();
-                                break;
-                            case 'organizations':
-                                loadOrganizations();
-                                break;
-                            // Add other sections as needed
-                        }
-                    }
-                });
-            });
-
-            // Logout button
-            const logoutBtn = document.getElementById('logoutBtn');
-            if (logoutBtn) {
-                logoutBtn.addEventListener('click', logout);
-            }
-        }
-
-        // Placeholder load functions (implement these based on your needs)
-        function loadNews() {
-            showNotification('Nieuws sectie - nog niet geïmplementeerd', 'info');
-        }
-
-        function loadEvents() {
-            showNotification('Evenementen sectie - nog niet geïmplementeerd', 'info');
-        }
-
-        function loadUsers() {
-            showNotification('Gebruikers sectie - nog niet geïmplementeerd', 'info');
-        }
-
-        function loadOrganizations() {
-            showNotification('Organisaties sectie - nog niet geïmplementeerd', 'info');
-        }
+        console.log('✅ CORRECT BESTAND GELADEN: index.html met app.js');
+        console.log('Timestamp:', new Date().toISOString());
     </script>
+    <script src="app.js"></script>
 </body>
 </html>
