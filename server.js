@@ -70,9 +70,11 @@ app.get('/api/setup-admin', async (req, res) => {
     
     // Check if admin already exists
     const existingUser = await pool.query(
-      'SELECT id FROM users WHERE email = $1',
+      'SELECT id, email, first_name, last_name FROM users WHERE email = $1',
       [email]
     );
+    
+    let userId;
     
     if (existingUser.rows.length > 0) {
       // Update existing admin
@@ -81,18 +83,47 @@ app.get('/api/setup-admin', async (req, res) => {
         [hashedPassword, 'admin', email]
       );
       
+      userId = existingUser.rows[0].id;
+      const user = existingUser.rows[0];
+      
+      // Generate NEW token with admin role
+      const newToken = jwt.sign(
+        { 
+          userId: user.id, 
+          email: user.email, 
+          role: 'admin' 
+        },
+        JWT_SECRET,
+        { expiresIn: '7d' }
+      );
+      
       res.json({ 
         success: true,
-        message: 'Admin user updated',
+        message: 'Admin user updated - Use this new token!',
         email: email,
-        note: 'Password has been reset to: admin123'
+        note: 'Password has been reset to: admin123',
+        token: newToken,
+        instruction: 'Copy this token and run: localStorage.setItem("authToken", "' + newToken + '") then refresh the page'
       });
     } else {
       // Create new admin
-      await pool.query(
+      const result = await pool.query(
         `INSERT INTO users (email, password, first_name, last_name, role, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, email, first_name, last_name`,
         [email, hashedPassword, 'Admin', 'Holwert', 'admin', true]
+      );
+      
+      const user = result.rows[0];
+      
+      // Generate token
+      const newToken = jwt.sign(
+        { 
+          userId: user.id, 
+          email: user.email, 
+          role: 'admin' 
+        },
+        JWT_SECRET,
+        { expiresIn: '7d' }
       );
       
       res.json({ 
@@ -100,7 +131,9 @@ app.get('/api/setup-admin', async (req, res) => {
         message: 'Admin user created',
         email: email,
         password: 'admin123',
-        note: 'Please change password after first login!'
+        token: newToken,
+        note: 'Please change password after first login!',
+        instruction: 'Copy this token and run: localStorage.setItem("authToken", "' + newToken + '") then refresh the page'
       });
     }
   } catch (error) {
