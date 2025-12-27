@@ -1172,6 +1172,49 @@ app.get('/api/admin/moderation/count', authenticateToken, async (req, res) => {
   }
 });
 
+// Get all pending items for moderation (admin)
+app.get('/api/admin/pending', authenticateToken, async (req, res) => {
+  try {
+    const [orgsResult, newsResult, eventsResult] = await Promise.all([
+      pool.query(`
+        SELECT id, name, description, contact_email, is_approved, created_at, 
+               'organization' as type
+        FROM organizations 
+        WHERE is_approved = false 
+        ORDER BY created_at DESC 
+        LIMIT 10
+      `),
+      pool.query(`
+        SELECT n.id, n.title as name, n.excerpt as description, n.status, n.created_at,
+               'news' as type, u.first_name, u.last_name
+        FROM news n
+        LEFT JOIN users u ON n.author_id = u.id
+        WHERE n.status = 'pending'
+        ORDER BY n.created_at DESC
+        LIMIT 10
+      `),
+      pool.query(`
+        SELECT e.id, e.title as name, e.description, e.status, e.created_at,
+               'event' as type, u.first_name, u.last_name
+        FROM events e
+        LEFT JOIN users u ON e.organizer_id = u.id
+        WHERE e.status = 'pending'
+        ORDER BY e.event_date DESC
+        LIMIT 10
+      `)
+    ]);
+
+    res.json({
+      organizations: orgsResult.rows,
+      news: newsResult.rows,
+      events: eventsResult.rows
+    });
+  } catch (error) {
+    console.error('Get pending items error:', error);
+    res.status(500).json({ error: 'Failed to get pending items', message: error.message });
+  }
+});
+
 // Get all news articles (admin)
 app.get('/api/admin/news', authenticateToken, async (req, res) => {
   try {
@@ -1435,16 +1478,8 @@ app.get('/api/admin/organizations', authenticateToken, async (req, res) => {
         o.id, 
         o.name, 
         o.description, 
-        o.contact_email, 
-        o.contact_phone, 
-        o.website, 
         o.is_approved, 
-        o.created_at,
-        COALESCE(o.category, '') as category,
-        COALESCE(o.logo_url, '') as logo_url,
-        COALESCE(o.brand_color, '#667eea') as brand_color,
-        COALESCE(o.is_approved, false) as is_active,
-        0 as user_count
+        o.created_at
       FROM organizations o
       WHERE 1=1
     `;
@@ -1494,9 +1529,15 @@ app.get('/api/admin/organizations', authenticateToken, async (req, res) => {
 
   } catch (error) {
     console.error('Get admin organizations error:', error);
+    console.error('Error details:', {
+      message: error.message,
+      stack: error.stack,
+      params: params
+    });
     res.status(500).json({
       error: 'Failed to get organizations',
-      message: error.message
+      message: error.message,
+      details: error.stack
     });
   }
 });
