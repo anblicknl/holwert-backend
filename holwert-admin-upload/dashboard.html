@@ -811,8 +811,81 @@
             const token = localStorage.getItem('authToken');
             if (!token) {
                 window.location.href = 'login.html';
+            } else {
+                // Setup navigation after page loads
+                setupNavigation();
             }
         });
+
+        // Setup navigation event listeners
+        function setupNavigation() {
+            const navLinks = document.querySelectorAll('.nav-link');
+            navLinks.forEach(link => {
+                link.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const section = link.getAttribute('data-section');
+                    
+                    // Remove active class from all links
+                    navLinks.forEach(l => l.classList.remove('active'));
+                    // Add active class to clicked link
+                    link.classList.add('active');
+                    
+                    // Hide all sections
+                    document.querySelectorAll('.content-section').forEach(s => {
+                        s.style.display = 'none';
+                    });
+                    
+                    // Show selected section
+                    const sectionElement = document.getElementById(section);
+                    if (sectionElement) {
+                        sectionElement.style.display = 'block';
+                        
+                        // Load data for the section
+                        switch(section) {
+                            case 'dashboard':
+                                loadDashboard();
+                                break;
+                            case 'news':
+                                loadNews();
+                                break;
+                            case 'events':
+                                loadEvents();
+                                break;
+                            case 'users':
+                                loadUsers();
+                                break;
+                            case 'organizations':
+                                loadOrganizations();
+                                break;
+                            // Add other sections as needed
+                        }
+                    }
+                });
+            });
+
+            // Logout button
+            const logoutBtn = document.getElementById('logoutBtn');
+            if (logoutBtn) {
+                logoutBtn.addEventListener('click', logout);
+            }
+        }
+
+        // Placeholder load functions (implement these based on your needs)
+        function loadNews() {
+            showNotification('Nieuws sectie - nog niet geïmplementeerd', 'info');
+        }
+
+        function loadEvents() {
+            showNotification('Evenementen sectie - nog niet geïmplementeerd', 'info');
+        }
+
+        function loadUsers() {
+            showNotification('Gebruikers sectie - nog niet geïmplementeerd', 'info');
+        }
+
+        function loadOrganizations() {
+            showNotification('Organisaties sectie - nog niet geïmplementeerd', 'info');
+        }
     </script>
 </body>
 </html>
