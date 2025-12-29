@@ -380,7 +380,7 @@ app.get('/api/news', async (req, res) => {
     }
     
     let query = `
-      SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt, n.image_url, n.image_data,
+      SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt, n.image_url,
              n.created_at, n.updated_at, n.organization_id,
              u.first_name, u.last_name,
              o.name as organization_name, o.logo_url as organization_logo, o.brand_color as organization_brand_color
@@ -404,50 +404,18 @@ app.get('/api/news', async (req, res) => {
     
     const result = await pool.query(query, params);
 
-    // Process image data to provide multiple variants
-    const processedNews = result.rows.map(article => {
-      let imageVariants = {};
-      
-      // Parse image_data if it exists
-      if (article.image_data) {
-        try {
-          const imageData = JSON.parse(article.image_data);
-          imageVariants = {
-            original: imageData.original?.url || article.image_url,
-            full: imageData.full?.url || imageData.large?.url || article.image_url,
-            large: imageData.large?.url || imageData.medium_large?.url || article.image_url,
-            medium: imageData.medium?.url || imageData.thumbnail?.url || article.image_url,
-            thumbnail: imageData.thumbnail?.url || article.image_url,
-            webp_large: imageData.webp_large?.url || imageData.large?.url || article.image_url,
-            webp_medium: imageData.webp_medium?.url || imageData.medium?.url || article.image_url
-          };
-        } catch (error) {
-          console.error('Error parsing image_data:', error);
-          imageVariants = {
-            original: article.image_url,
-            full: article.image_url,
-            large: article.image_url,
-            medium: article.image_url,
-            thumbnail: article.image_url
-          };
-        }
-      } else {
-        // Fallback to single image_url
-        imageVariants = {
-          original: article.image_url,
-          full: article.image_url,
-          large: article.image_url,
-          medium: article.image_url,
-          thumbnail: article.image_url
-        };
+    // Use image_url directly - no more base64 processing!
+    const processedNews = result.rows.map(article => ({
+      ...article,
+      // Provide image variants all pointing to the same URL for backward compatibility
+      image_variants: {
+        original: article.image_url,
+        full: article.image_url,
+        large: article.image_url,
+        medium: article.image_url,
+        thumbnail: article.image_url
       }
-
-      return {
-        ...article,
-        image_url: imageVariants.large, // Use large variant for mobile
-        image_variants: imageVariants
-      };
-    });
+    }));
 
     res.json({
       news: processedNews,
@@ -478,7 +446,7 @@ app.get('/api/news/related', async (req, res) => {
     const params = [organization_id];
     let paramCount = 1; // organization_id is already $1
     let query = `
-      SELECT n.id, n.title, COALESCE(n.content, '') as content, n.image_url, n.image_data,
+      SELECT n.id, n.title, COALESCE(n.content, '') as content, n.image_url,
              n.created_at,
              u.first_name, u.last_name,
              o.name as organization_name, o.logo_url as organization_logo, o.brand_color as organization_brand_color
@@ -843,7 +811,7 @@ app.get('/api/news/:id', async (req, res) => {
     }
     
     const result = await pool.query(`
-      SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt, n.image_url, n.image_data,
+      SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt, n.image_url,
              n.created_at, n.updated_at, n.category, n.custom_category, n.is_published,
              u.first_name, u.last_name,
              o.id as organization_id, o.name as organization_name, o.logo_url as organization_logo, o.brand_color as organization_brand_color
@@ -862,41 +830,18 @@ app.get('/api/news/:id', async (req, res) => {
 
     const article = result.rows[0];
 
-    // Process image variants similar to list
-    let imageVariants = {};
-    if (article.image_data) {
-      try {
-        const imageData = JSON.parse(article.image_data);
-        imageVariants = {
-          original: imageData.original?.url || article.image_url,
-          full: imageData.full?.url || imageData.large?.url || article.image_url,
-          large: imageData.large?.url || imageData.medium_large?.url || article.image_url,
-          medium: imageData.medium?.url || imageData.thumbnail?.url || article.image_url,
-          thumbnail: imageData.thumbnail?.url || article.image_url
-        };
-      } catch {
-        imageVariants = {
-          original: article.image_url,
-          full: article.image_url,
-          large: article.image_url,
-          medium: article.image_url,
-          thumbnail: article.image_url
-        };
-      }
-    } else {
-      imageVariants = {
-        original: article.image_url,
-        full: article.image_url,
-        large: article.image_url,
-        medium: article.image_url,
-        thumbnail: article.image_url
-      };
-    }
+    // Use image_url directly - no more base64 processing!
+    const imageVariants = {
+      original: article.image_url,
+      full: article.image_url,
+      large: article.image_url,
+      medium: article.image_url,
+      thumbnail: article.image_url
+    };
     
     res.json({
       article: {
         ...article,
-        image_url: imageVariants.large,
         image_variants: imageVariants
       }
     });
@@ -1328,7 +1273,7 @@ app.get('/api/admin/news/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
 
     const result = await pool.query(`
-      SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt, n.image_url, n.image_data, n.organization_id,
+      SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt, n.image_url, n.organization_id,
              n.created_at, n.updated_at, n.category, n.custom_category, n.is_published,
              u.first_name, u.last_name, o.name as organization_name, o.logo_url as organization_logo
       FROM news n
@@ -1345,45 +1290,18 @@ app.get('/api/admin/news/:id', authenticateToken, async (req, res) => {
 
     const article = result.rows[0];
 
-    // Process image data to provide multiple variants (same as public endpoint)
-    let imageVariants = {};
-    
-    if (article.image_data) {
-      try {
-        const imageData = JSON.parse(article.image_data);
-        imageVariants = {
-          original: imageData.original?.url || article.image_url,
-          full: imageData.full?.url || imageData.large?.url || article.image_url,
-          large: imageData.large?.url || imageData.medium_large?.url || article.image_url,
-          medium: imageData.medium?.url || imageData.thumbnail?.url || article.image_url,
-          thumbnail: imageData.thumbnail?.url || article.image_url,
-          webp_large: imageData.webp_large?.url || imageData.large?.url || article.image_url,
-          webp_medium: imageData.webp_medium?.url || imageData.medium?.url || article.image_url
-        };
-      } catch (error) {
-        console.error('Error parsing image_data:', error);
-        imageVariants = {
-          original: article.image_url,
-          full: article.image_url,
-          large: article.image_url,
-          medium: article.image_url,
-          thumbnail: article.image_url
-        };
-      }
-    } else {
-      imageVariants = {
-        original: article.image_url,
-        full: article.image_url,
-        large: article.image_url,
-        medium: article.image_url,
-        thumbnail: article.image_url
-      };
-    }
+    // Use image_url directly - no more base64 processing!
+    const imageVariants = {
+      original: article.image_url,
+      full: article.image_url,
+      large: article.image_url,
+      medium: article.image_url,
+      thumbnail: article.image_url
+    };
 
     res.json({
       article: {
         ...article,
-        image_url: imageVariants.large,
         image_variants: imageVariants
       }
     });
