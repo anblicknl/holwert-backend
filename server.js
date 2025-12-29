@@ -53,13 +53,26 @@ module.exports.pool = pool;
 const JWT_SECRET = process.env.JWT_SECRET || 'holwert-secret-key-2024';
 
 // Test route
-app.get('/', (req, res) => {
-  res.json({ 
-    message: 'Holwert Backend is running!',
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development',
-    database: 'Connected to PostgreSQL (Neon)'
-  });
+app.get('/', async (req, res) => {
+  try {
+    await pool.query('SELECT 1');
+    const dbHost = process.env.DATABASE_URL?.includes('supabase.co') ? 'Supabase' : 
+                   process.env.DATABASE_URL?.includes('neon.tech') ? 'Neon' : 'PostgreSQL';
+    res.json({ 
+      message: 'Holwert Backend is running!',
+      timestamp: new Date().toISOString(),
+      environment: process.env.NODE_ENV || 'development',
+      database: `Connected to ${dbHost}`
+    });
+  } catch (error) {
+    res.json({ 
+      message: 'Holwert Backend is running!',
+      timestamp: new Date().toISOString(),
+      environment: process.env.NODE_ENV || 'development',
+      database: 'Database connection failed',
+      error: error.message
+    });
+  }
 });
 
 // Setup admin user (one-time use endpoint - remove after use!)
@@ -148,13 +161,25 @@ app.get('/api/setup-admin', async (req, res) => {
 });
 
 // Health check
-app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development',
-    database: 'Connected to PostgreSQL (Neon)'
-  });
+app.get('/api/health', async (req, res) => {
+  try {
+    // Test database connection
+    await pool.query('SELECT 1');
+    const dbHost = process.env.DATABASE_URL?.includes('supabase.co') ? 'Supabase' : 
+                   process.env.DATABASE_URL?.includes('neon.tech') ? 'Neon' : 'PostgreSQL';
+    res.json({ 
+      status: 'OK', 
+      timestamp: new Date().toISOString(),
+      environment: process.env.NODE_ENV || 'development',
+      database: `Connected to ${dbHost}`
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'ERROR',
+      database: 'Connection failed',
+      error: error.message
+    });
+  }
 });
 
 // Simple test endpoint
