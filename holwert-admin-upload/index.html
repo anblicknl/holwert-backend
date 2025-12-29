@@ -147,14 +147,8 @@
                         <i class="fas fa-plus"></i> Nieuwe Gebruiker
                     </button>
                 </div>
-                <div class="filters">
-                    <input type="text" id="userSearch" placeholder="Zoek gebruikers...">
-                    <select id="userRoleFilter">
-                        <option value="">Alle rollen</option>
-                        <option value="user">User</option>
-                        <option value="admin">Admin</option>
-                        <option value="superadmin">Superadmin</option>
-                    </select>
+                <div id="usersContent">
+                    <!-- Users content will be loaded here by JavaScript -->
                 </div>
                 <div class="table-container">
                     <table class="data-table">
@@ -222,31 +216,8 @@
                         <i class="fas fa-plus"></i> Nieuw Artikel
                     </button>
                 </div>
-                <div class="filters">
-                    <input type="text" id="newsSearch" placeholder="Zoek artikelen...">
-                    <select id="newsStatusFilter">
-                        <option value="">Alle statussen</option>
-                        <option value="published">Gepubliceerd</option>
-                        <option value="pending">Pending</option>
-                        <option value="draft">Draft</option>
-                    </select>
-                </div>
-                <div class="table-container">
-                    <table class="data-table">
-                        <thead>
-                            <tr>
-                                <th>Titel</th>
-                                <th>Auteur</th>
-                                <th>Organisatie</th>
-                                <th>Status</th>
-                                <th>Datum</th>
-                                <th>Acties</th>
-                            </tr>
-                        </thead>
-                        <tbody id="newsTableBody">
-                            <!-- News will be loaded here -->
-                        </tbody>
-                    </table>
+                <div id="newsList">
+                    <!-- News content will be loaded here by JavaScript -->
                 </div>
             </section>
 
@@ -258,14 +229,8 @@
                         <i class="fas fa-plus"></i> Nieuw Evenement
                     </button>
                 </div>
-                <div class="filters">
-                    <input type="text" id="eventSearch" placeholder="Zoek evenementen...">
-                    <select id="eventStatusFilter">
-                        <option value="">Alle statussen</option>
-                        <option value="published">Gepubliceerd</option>
-                        <option value="pending">Pending</option>
-                        <option value="draft">Draft</option>
-                    </select>
+                <div id="eventsContent">
+                    <!-- Events content will be loaded here by JavaScript -->
                 </div>
                 <div class="table-container">
                     <table class="data-table">
@@ -291,19 +256,8 @@
                 <div class="section-header">
                     <h2><i class="fas fa-search"></i> Gevonden/Verloren</h2>
                 </div>
-                <div class="filters">
-                    <input type="text" id="foundLostSearch" placeholder="Zoek items...">
-                    <select id="foundLostTypeFilter">
-                        <option value="">Alle types</option>
-                        <option value="found">Gevonden</option>
-                        <option value="lost">Verloren</option>
-                    </select>
-                    <select id="foundLostStatusFilter">
-                        <option value="">Alle statussen</option>
-                        <option value="pending">Pending</option>
-                        <option value="approved">Goedgekeurd</option>
-                        <option value="rejected">Afgewezen</option>
-                    </select>
+                <div id="foundLostContent">
+                    <!-- Found/Lost content will be loaded here by JavaScript -->
                 </div>
                 <div class="table-container">
                     <table class="data-table">
@@ -362,9 +316,10 @@
     </div>
 
     <script>
-        console.log('✅ CORRECT BESTAND GELADEN: index.html met app.js');
-        console.log('Timestamp:', new Date().toISOString());
+        console.log('✅ CORRECT BESTAND GELADEN: index.html met admin-panel.js');
+        console.log('📅 Timestamp:', new Date().toISOString());
+        console.log('🔧 VERSION: IMAGE-PREVIEW-STYLING-FINAL');
     </script>
-    <script src="app.js"></script>
+    <script src="admin-panel.js?v=final"></script>
 </body>
 </html>

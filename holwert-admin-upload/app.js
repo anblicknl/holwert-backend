@@ -1,4 +1,4 @@
-console.log('=== SCRIPT LOADED ===');
+console.log('=== SCRIPT LOADED - VERSION 2024-12-27-20:00 ===');
 
 class HolwertAdmin {
     constructor() {
@@ -51,7 +51,7 @@ class HolwertAdmin {
         }
 
         // Navigation
-        const navLinks = document.querySelectorAll('.nav-link');
+        const navLinks = document.querySelectorAll('.nav-item');
         navLinks.forEach(link => {
             link.addEventListener('click', (e) => {
                 e.preventDefault();
@@ -306,10 +306,10 @@ class HolwertAdmin {
         console.log('Section name:', sectionName);
         
         // Update navigation
-        document.querySelectorAll('.nav-link').forEach(link => {
+        document.querySelectorAll('.nav-item').forEach(link => {
             link.classList.remove('active');
         });
-        const navLink = document.querySelector(`[data-section="${sectionName}"]`);
+        const navLink = document.querySelector(`.nav-item[data-section="${sectionName}"]`);
         if (navLink) {
             navLink.classList.add('active');
             console.log('Nav link activated:', navLink);
@@ -1169,25 +1169,29 @@ class HolwertAdmin {
     // ===== NEWS MANAGEMENT =====
     async loadNews() {
         try {
-            console.log('Loading news...');
+            console.log('🔄 Loading news from:', `${this.apiBaseUrl}/admin/news`);
             const response = await fetch(`${this.apiBaseUrl}/admin/news`, {
                 headers: {
                     'Authorization': `Bearer ${this.token}`
                 }
             });
 
-            console.log('News response status:', response.status);
+            console.log('📡 News response status:', response.status);
+            console.log('📡 News response ok:', response.ok);
             
             if (response.ok) {
                 const data = await response.json();
-                console.log('News data:', data);
+                console.log('✅ News data received:', data);
+                console.log('📰 Number of articles:', data.news ? data.news.length : 0);
                 this.displayNews(data.news || []);
             } else {
-                console.error('Failed to load news');
+                const errorText = await response.text();
+                console.error('❌ Failed to load news:', response.status, errorText);
                 this.displayNews([]);
             }
         } catch (error) {
-            console.error('Error loading news:', error);
+            console.error('💥 Error loading news:', error);
+            console.error('Error details:', error.message, error.stack);
             this.displayNews([]);
         }
     }
@@ -1197,20 +1201,33 @@ class HolwertAdmin {
         
         // Wait a bit for the DOM to update after section activation
         setTimeout(() => {
-            // Try both possible container IDs
+            // Try multiple possible container IDs
             let container = document.getElementById('newsList');
             if (!container) {
                 container = document.getElementById('newsContent');
                 console.log('newsList not found, trying newsContent:', container);
             }
+            if (!container) {
+                // Try old table body approach
+                container = document.getElementById('newsTableBody');
+                console.log('newsContent not found, trying newsTableBody:', container);
+            }
+            if (!container) {
+                // Last resort: create container in news section
+                const newsSection = document.getElementById('news');
+                if (newsSection) {
+                    console.log('Creating new container in news section');
+                    container = document.createElement('div');
+                    container.id = 'newsList';
+                    newsSection.innerHTML = '';
+                    newsSection.appendChild(container);
+                }
+            }
             
             console.log('Container found:', container);
-            console.log('All elements with id newsList:', document.querySelectorAll('#newsList'));
-            console.log('All elements with id newsContent:', document.querySelectorAll('#newsContent'));
-            console.log('News section element:', document.getElementById('news'));
             
             if (!container) {
-                console.error('Neither newsList nor newsContent container found!');
+                console.error('No container found!');
                 console.log('Available elements with "news" in ID:', document.querySelectorAll('[id*="news"]'));
                 return;
             }
@@ -1220,14 +1237,22 @@ class HolwertAdmin {
     }
     
     renderNewsContent(container, news) {
+        console.log('🎯 renderNewsContent called');
+        console.log('📦 News data:', news);
+        console.log('📍 Container:', container);
         
         if (!news || news.length === 0) {
-            console.log('No news, showing empty state');
+            console.log('❌ No news, showing empty state');
             container.innerHTML = `
-                <p class="text-muted">Geen nieuws artikelen gevonden</p>
+                <div class="empty-message">
+                    <p class="text-muted">Geen nieuws artikelen gevonden</p>
+                    <p><small>Er zijn nog geen nieuwsartikelen aangemaakt.</small></p>
+                </div>
             `;
             return;
         }
+        
+        console.log('✅ Rendering', news.length, 'news articles');
 
         const newsHTML = `
             <div class="data-table-container">
@@ -1271,13 +1296,13 @@ class HolwertAdmin {
                                 </td>
                                 <td>
                                     <div class="action-buttons">
-                                        <button class="btn btn-icon btn-view" onclick="admin.viewNews(${article.id})" title="Bekijken">
+                                        <button class="btn btn-icon btn-view" data-action="view" data-id="${article.id}" title="Bekijken">
                                             <i class="fas fa-eye"></i>
                                         </button>
-                                        <button class="btn btn-icon btn-edit" onclick="admin.editNews(${article.id})" title="Bewerken">
+                                        <button class="btn btn-icon btn-edit" data-action="edit" data-id="${article.id}" title="Bewerken">
                                             <i class="fas fa-edit"></i>
                                         </button>
-                                        <button class="btn btn-icon btn-delete" onclick="admin.deleteNews(${article.id}, '${article.title}')" title="Verwijderen">
+                                        <button class="btn btn-icon btn-delete" data-action="delete" data-id="${article.id}" data-title="${article.title.replace(/"/g, '&quot;')}" title="Verwijderen">
                                             <i class="fas fa-trash"></i>
                                         </button>
                                     </div>
@@ -1290,11 +1315,58 @@ class HolwertAdmin {
         `;
 
         container.innerHTML = newsHTML;
+        
+        // Add event listeners to action buttons
+        console.log('📌 Attaching event listeners to news action buttons');
+        
+        const self = this; // Bewaar this context
+        
+        container.querySelectorAll('.btn-view').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                const id = parseInt(btn.getAttribute('data-id'));
+                console.log('👁️ View button clicked for news:', id);
+                self.viewNews(id);
+            });
+        });
+        
+        container.querySelectorAll('.btn-edit').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                e.preventDefault();
+                const id = parseInt(btn.getAttribute('data-id'));
+                console.log('✏️ Edit button clicked for news:', id);
+                console.log('🔍 Checking editNews function:', typeof self.editNews);
+                console.log('🔍 Self object:', self);
+                try {
+                    console.log('🚀 About to call editNews...');
+                    await self.editNews(id);
+                    console.log('✅ editNews completed');
+                } catch (err) {
+                    console.error('💥 Error calling editNews:', err);
+                    console.error('💥 Error stack:', err.stack);
+                    alert('Error: ' + err.message);
+                }
+            });
+        });
+        
+        container.querySelectorAll('.btn-delete').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                const id = parseInt(btn.getAttribute('data-id'));
+                const title = btn.getAttribute('data-title');
+                console.log('🗑️ Delete button clicked for news:', id, title);
+                self.deleteNews(id, title);
+            });
+        });
     }
 
     // Nieuwe uniforme functie voor nieuws modal (net als events)
     async openNewsModal(newsId = null, mode = 'create') {
         try {
+            console.log('🎬 openNewsModal called');
+            console.log('📝 Mode:', mode);
+            console.log('🆔 News ID:', newsId);
+            
             // Laad organizaties
             let organizations = [];
             try {
@@ -1322,25 +1394,39 @@ class HolwertAdmin {
             // Als edit mode, haal nieuws artikel op
             let article = null;
             if (mode === 'edit' && newsId) {
+                console.log('📡 Fetching article:', `${this.apiBaseUrl}/admin/news/${newsId}`);
                 const res = await fetch(`${this.apiBaseUrl}/admin/news/${newsId}`, {
                     headers: { 'Authorization': `Bearer ${this.token}` }
                 });
+                console.log('📡 Article fetch status:', res.status);
                 if (res.ok) {
-                    article = await res.json();
+                    const response = await res.json();
+                    article = response.article; // API returns { article: {...} }
+                    console.log('✅ Article loaded:', article);
+                } else {
+                    console.error('❌ Failed to load article:', res.status);
+                    const errorText = await res.text();
+                    console.error('Error response:', errorText);
                 }
             }
 
+            console.log('🔍 Article object:', article);
+            console.log('🔍 Article structure:', JSON.stringify(article, null, 2).substring(0, 500));
+            
             const isEdit = mode === 'edit' && article;
             const title = isEdit ? 'Nieuws Bewerken' : 'Nieuw Nieuws Artikel';
             const buttonText = isEdit ? 'Bijwerken' : 'Opslaan';
             
             // Formatteer datum voor input (standaard vandaag)
             const today = new Date().toISOString().split('T')[0];
-            const pubDate = article?.published_at ? new Date(article.published_at).toISOString().split('T')[0] : today;
-            const pubTime = article?.published_at ? new Date(article.published_at).toTimeString().slice(0, 5) : '12:00';
+            const articleDate = article?.created_at || article?.published_at;
+            const pubDate = articleDate ? new Date(articleDate).toISOString().split('T')[0] : today;
+            const pubTime = articleDate ? new Date(articleDate).toTimeString().slice(0, 5) : '12:00';
 
+            console.log('📋 Creating modal overlay...');
             const overlay = document.createElement('div');
             overlay.className = 'modal-overlay';
+            console.log('📝 Building modal HTML...');
             overlay.innerHTML = `
                 <div class="modal-content large">
                     <div class="modal-header">
@@ -1449,9 +1535,22 @@ class HolwertAdmin {
                 </div>
             `;
             
+            console.log('➕ Appending modal to body...');
             document.body.appendChild(overlay);
+            console.log('✅ Modal appended successfully!');
+            console.log('👁️ Modal overlay display:', window.getComputedStyle(overlay).display);
+            console.log('👁️ Modal overlay visibility:', window.getComputedStyle(overlay).visibility);
+            console.log('👁️ Modal overlay opacity:', window.getComputedStyle(overlay).opacity);
+            console.log('👁️ Modal overlay z-index:', window.getComputedStyle(overlay).zIndex);
+            
+            // Force display
+            overlay.style.display = 'flex';
+            overlay.style.visibility = 'visible';
+            overlay.style.opacity = '1';
+            console.log('🔧 Forced modal display to flex');
         } catch (e) {
             console.error('openNewsModal error:', e);
+            console.error('💥 Stack:', e.stack);
             this.showNotification('Fout bij openen nieuws-modal', 'error');
         }
     }
@@ -1462,8 +1561,15 @@ class HolwertAdmin {
     }
 
     async editNews(newsId) {
-        // Roep nieuwe uniforme functie aan
-        await this.openNewsModal(newsId, 'edit');
+        console.log('✏️ editNews called with ID:', newsId);
+        try {
+            // Roep nieuwe uniforme functie aan
+            await this.openNewsModal(newsId, 'edit');
+        } catch (error) {
+            console.error('💥 Error in editNews:', error);
+            console.error('Stack:', error.stack);
+            this.showNotification('Fout bij bewerken nieuws', 'error');
+        }
     }
 
     // Helper functiesvoor image preview
@@ -1494,7 +1600,9 @@ class HolwertAdmin {
                     const canvas = document.createElement('canvas');
                     let width = img.width;
                     let height = img.height;
-                    const maxSize = 1200;
+                    
+                    // Reduceer max size naar 800px voor kleinere bestanden
+                    const maxSize = 800;
                     if (width > height && width > maxSize) {
                         height = (height / width) * maxSize;
                         width = maxSize;
@@ -1502,11 +1610,31 @@ class HolwertAdmin {
                         width = (width / height) * maxSize;
                         height = maxSize;
                     }
+                    
                     canvas.width = width;
                     canvas.height = height;
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(img, 0, 0, width, height);
-                    resolve(canvas.toDataURL('image/jpeg', 0.8));
+                    
+                    // Start met lagere quality (0.6 in plaats van 0.8)
+                    let quality = 0.6;
+                    let compressed = canvas.toDataURL('image/jpeg', quality);
+                    
+                    // Als nog te groot, comprimeer verder
+                    const maxBytes = 3 * 1024 * 1024; // 3MB target
+                    while (compressed.length > maxBytes && quality > 0.3) {
+                        quality -= 0.1;
+                        compressed = canvas.toDataURL('image/jpeg', quality);
+                    }
+                    
+                    console.log('Compressed image:', {
+                        originalSize: file.size,
+                        compressedLength: compressed.length,
+                        quality: quality.toFixed(1),
+                        dimensions: `${Math.round(width)}x${Math.round(height)}`
+                    });
+                    
+                    resolve(compressed);
                 };
                 img.onerror = reject;
                 img.src = e.target.result;
@@ -1530,9 +1658,10 @@ class HolwertAdmin {
                 ? parseInt(organization_id_val) 
                 : null;
             
-            const pubDate = document.getElementById('newsPubDate').value;
-            const pubTime = document.getElementById('newsPubTime').value || '12:00';
-            const published_at = pubDate ? `${pubDate}T${pubTime}:00.000Z` : new Date().toISOString();
+            // Note: Date fields removed - using created_at/updated_at from database
+            // const pubDate = document.getElementById('newsPubDate').value;
+            // const pubTime = document.getElementById('newsPubTime').value || '12:00';
+            // const published_at = pubDate ? `${pubDate}T${pubTime}:00.000Z` : new Date().toISOString();
             
             // Handle image upload
             const uploadedFile = document.getElementById('newsImage')?.files[0];
@@ -1579,7 +1708,7 @@ class HolwertAdmin {
                 content,
                 category,
                 organization_id,
-                published_at,
+                // Note: published_at column doesn't exist in DB, using created_at/updated_at instead
                 is_published: document.getElementById('newsPublished').checked
             };
             
@@ -1590,6 +1719,10 @@ class HolwertAdmin {
 
             const url = actualNewsId ? `${this.apiBaseUrl}/admin/news/${actualNewsId}` : `${this.apiBaseUrl}/news`;
             const method = actualNewsId ? 'PUT' : 'POST';
+
+            console.log('🚀 Sending request:', { url, method, body });
+            console.log('🔍 Body keys:', Object.keys(body));
+            console.log('❌ published_at in body?', 'published_at' in body);
 
             const res = await fetch(url, {
                 method,
@@ -1621,38 +1754,55 @@ class HolwertAdmin {
 
     async viewNews(newsId) {
         try {
+            console.log('🔍 viewNews called with ID:', newsId);
             const response = await fetch(`${this.apiBaseUrl}/admin/news`, {
                 headers: {
                     'Authorization': `Bearer ${this.token}`
                 }
             });
 
+            console.log('📡 Response status:', response.status);
+            
             if (response.ok) {
                 const data = await response.json();
+                console.log('📦 All news:', data.news.length);
                 const article = data.news.find(n => n.id === newsId);
                 
+                console.log('📰 Found article:', article ? 'YES' : 'NO');
+                
                 if (article) {
+                    console.log('🎬 Calling showNewsModal');
                     this.showNewsModal(article);
                 } else {
+                    console.error('❌ Article not found with ID:', newsId);
                     this.showNotification('Nieuws artikel niet gevonden', 'error');
                 }
             } else {
+                console.error('❌ Response not OK:', response.status);
                 this.showNotification('Fout bij laden nieuws artikel', 'error');
             }
         } catch (error) {
-            console.error('Error viewing news:', error);
+            console.error('💥 Error viewing news:', error);
+            console.error('Stack:', error.stack);
             this.showNotification('Fout bij laden nieuws artikel', 'error');
         }
     }
 
     showNewsModal(article) {
+        console.log('🎬 showNewsModal started');
+        console.log('📰 Article:', article);
+        
         // Create modal element
         const modalOverlay = document.createElement('div');
         modalOverlay.className = 'modal-overlay';
+        modalOverlay.style.display = 'flex';
+        
+        console.log('✅ Modal overlay created');
         
         // Close on overlay click
         modalOverlay.addEventListener('click', function(e) {
             if (e.target === modalOverlay) {
+                console.log('🚪 Closing modal (overlay click)');
                 modalOverlay.remove();
             }
         });
@@ -1660,6 +1810,8 @@ class HolwertAdmin {
         // Create modal content
         const modalContent = document.createElement('div');
         modalContent.className = 'modal-content';
+        
+        console.log('✅ Modal content created');
         
         // Prevent content clicks from closing modal
         modalContent.addEventListener('click', function(e) {
@@ -1759,208 +1911,6 @@ class HolwertAdmin {
         document.body.appendChild(modalOverlay);
     }
 
-    async editNews(newsId) {
-        try {
-            const response = await fetch(`${this.apiBaseUrl}/admin/news`, {
-                headers: {
-                    'Authorization': `Bearer ${this.token}`
-                }
-            });
-
-            if (response.ok) {
-                const data = await response.json();
-                const article = data.news.find(n => n.id === newsId);
-                
-                if (article) {
-                    this.showEditNewsModal(article);
-                } else {
-                    this.showNotification('Nieuws artikel niet gevonden', 'error');
-                }
-            } else {
-                this.showNotification('Fout bij laden nieuws artikel', 'error');
-            }
-        } catch (error) {
-            console.error('Error editing news:', error);
-            this.showNotification('Fout bij laden nieuws artikel', 'error');
-        }
-    }
-
-    showEditNewsModal(article) {
-        const categories = ['dorpsnieuws', 'sport', 'cultuur', 'onderwijs', 'zorg', 'overig'];
-        
-        const modalHTML = `
-            <div class="modal-overlay">
-                <div class="modal-content large">
-                    <div class="modal-header">
-                        <h3>Nieuws Bewerken</h3>
-                        <button class="btn-close" onclick="this.closest('.modal-overlay').remove()">
-                            <i class="fas fa-times"></i>
-                        </button>
-                    </div>
-                    <div class="modal-body">
-                        <form id="editNewsForm" class="edit-form">
-                            <div class="form-group">
-                                <label for="editNewsTitle">Titel *</label>
-                                <input type="text" id="editNewsTitle" name="title" value="${article.title}" required>
-                            </div>
-                            
-                            <div class="form-group">
-                                <label for="editNewsExcerpt">Samenvatting</label>
-                                <textarea id="editNewsExcerpt" name="excerpt" rows="3" placeholder="Korte samenvatting van het artikel...">${article.excerpt || ''}</textarea>
-                            </div>
-                            
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label for="editNewsCategory">Categorie</label>
-                                    <select id="editNewsCategory" name="category" onchange="admin.toggleCustomCategory()">
-                                        ${categories.map(cat => `
-                                            <option value="${cat}" ${cat === article.category ? 'selected' : ''}>${cat.charAt(0).toUpperCase() + cat.slice(1)}</option>
-                                        `).join('')}
-                                    </select>
-                                </div>
-                                <div class="form-group" id="customCategoryGroup" style="display: ${article.category === 'overig' ? 'block' : 'none'};">
-                                    <label for="editNewsCustomCategory">Aangepaste Categorie</label>
-                                    <input type="text" id="editNewsCustomCategory" name="custom_category" value="${article.custom_category || ''}" placeholder="Voer eigen categorie in...">
-                                </div>
-                            </div>
-                            
-                            <div class="form-group">
-                                <label>Afbeelding</label>
-                                <div class="profile-image-section">
-                                    <div class="current-image">
-                                        <label>Huidige afbeelding:</label>
-                                        <div class="current-image-preview">
-                                            ${article.image_url && article.image_url !== '' ? 
-                                                `<img src="${article.image_url}" alt="Huidige afbeelding" class="preview-img">` : 
-                                                `<div class="preview-placeholder">
-                                                    <i class="fas fa-image"></i>
-                                                    <span>Geen afbeelding</span>
-                                                </div>`
-                                            }
-                                        </div>
-                                    </div>
-                                    <div class="image-options">
-                                        <div class="option-tabs">
-                                            <button type="button" class="tab-btn active" onclick="admin.switchImageTab('url')">URL</button>
-                                            <button type="button" class="tab-btn" onclick="admin.switchImageTab('upload')">Upload</button>
-                                        </div>
-                                        <div class="tab-content">
-                                            <div id="url-tab" class="tab-pane active">
-                                                <input type="url" id="editNewsImage" name="image_url" value="${article.image_url || ''}" placeholder="https://...">
-                                            </div>
-                                            <div id="upload-tab" class="tab-pane">
-                                                <input type="file" id="newsImageUpload" name="image_file" accept="image/*" onchange="admin.previewUploadedImage(this)">
-                                                <div id="uploadPreview" class="upload-preview" style="display: none;">
-                                                    <img id="uploadedImagePreview" src="" alt="Preview" class="preview-img">
-                                                    <button type="button" class="btn btn-sm btn-secondary" onclick="admin.clearUploadPreview()">Verwijder</button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <div class="form-group">
-                                <label for="editNewsContent">Inhoud *</label>
-                                <textarea id="editNewsContent" name="content" rows="10" required>${article.content}</textarea>
-                            </div>
-                            
-                            <div class="form-group">
-                                <label>
-                                    <input type="checkbox" id="editNewsPublished" name="is_published" ${article.is_published ? 'checked' : ''}>
-                                    Gepubliceerd
-                                </label>
-                            </div>
-                        </form>
-                    </div>
-                    <div class="modal-footer">
-                        <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">Annuleren</button>
-                        <button class="btn btn-primary" onclick="admin.saveNewsChanges(${article.id})">Opslaan</button>
-                    </div>
-                </div>
-            </div>
-        `;
-
-        document.body.insertAdjacentHTML('beforeend', modalHTML);
-    }
-
-    toggleCustomCategory() {
-        const categorySelect = document.getElementById('editNewsCategory');
-        const customGroup = document.getElementById('customCategoryGroup');
-        
-        if (categorySelect.value === 'overig') {
-            customGroup.style.display = 'block';
-        } else {
-            customGroup.style.display = 'none';
-        }
-    }
-
-    async saveNewsChanges(newsId) {
-        const form = document.getElementById('editNewsForm');
-        const formData = new FormData(form);
-        
-        // Handle image upload
-        const uploadedFile = document.getElementById('newsImageUpload').files[0];
-        let imageUrl = formData.get('image_url') || null;
-        
-        if (uploadedFile) {
-            try {
-                const compressedBase64 = await this.compressAndConvertToBase64(uploadedFile);
-                imageUrl = compressedBase64;
-                console.log('Image compressed and converted to base64, length:', compressedBase64.length);
-                
-                if (compressedBase64.length > 4 * 1024 * 1024) {
-                    this.showNotification('Afbeelding is te groot. Kies een kleinere afbeelding.', 'error');
-                    return;
-                }
-            } catch (error) {
-                console.error('Error processing image:', error);
-                this.showNotification('Fout bij verwerken van afbeelding', 'error');
-                return;
-            }
-        }
-
-        const newsData = {
-            title: formData.get('title'),
-            content: formData.get('content'),
-            excerpt: formData.get('excerpt') || null,
-            category: formData.get('category'),
-            custom_category: formData.get('custom_category') || null,
-            image_url: imageUrl,
-            is_published: document.getElementById('editNewsPublished').checked
-        };
-
-        try {
-            const response = await fetch(`${this.apiBaseUrl}/admin/news/${newsId}`, {
-                method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${this.token}`
-                },
-                body: JSON.stringify(newsData)
-            });
-
-            if (response.ok) {
-                this.showNotification('Nieuws artikel bijgewerkt', 'success');
-                document.querySelector('.modal-overlay').remove();
-                this.loadNews();
-            } else {
-                let errorMessage = 'Onbekende fout';
-                try {
-                    const error = await response.json();
-                    console.error('Update error response:', error);
-                    errorMessage = error.message || error.error || 'Onbekende fout';
-                } catch (parseError) {
-                    console.error('Error parsing response:', parseError);
-                    errorMessage = `HTTP ${response.status}: ${response.statusText}`;
-                }
-                this.showNotification(`Fout bij bijwerken: ${errorMessage}`, 'error');
-            }
-        } catch (error) {
-            console.error('Error updating news:', error);
-            this.showNotification('Fout bij bijwerken nieuws artikel', 'error');
-        }
-    }
 
     async deleteNews(newsId, title) {
         if (!confirm(`Weet je zeker dat je "${title}" wilt verwijderen?`)) {
