@@ -1367,7 +1367,7 @@ app.get('/api/admin/news/:id', authenticateToken, async (req, res) => {
 app.put('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, content, excerpt, category, custom_category, organization_id, image_url, image_data, is_published, published_at } = req.body;
+    const { title, content, excerpt, category, custom_category, organization_id, image_url, image_data, is_published } = req.body;
 
     // Validation
     if (!title || !content) {
@@ -1422,15 +1422,16 @@ app.put('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res)
       values.push(is_published);
     }
 
-    if (published_at) {
-      updateFields.push(`published_at = $${paramCount++}`);
-      values.push(published_at);
-    }
+    // Note: published_at column doesn't exist in database, using created_at instead
+    // if (published_at) {
+    //   updateFields.push(`published_at = $${paramCount++}`);
+    //   values.push(published_at);
+    // }
 
     updateFields.push('updated_at = NOW()');
 
     values.push(id);
-    const query = `UPDATE news SET ${updateFields.join(', ')} WHERE id = $${paramCount} RETURNING id, title, content, excerpt, category, custom_category, organization_id, image_url, is_published, published_at, created_at, updated_at`;
+    const query = `UPDATE news SET ${updateFields.join(', ')} WHERE id = $${paramCount} RETURNING id, title, content, excerpt, category, custom_category, organization_id, image_url, is_published, created_at, updated_at`;
 
     const result = await pool.query(query, values);
 
