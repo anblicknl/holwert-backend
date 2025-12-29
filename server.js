@@ -38,7 +38,7 @@ const upload = multer({
 });
 
 // Database connection - PostgreSQL (Neon)
-// Switched to Supabase for better performance and limits
+// Switched to Supabase with transaction pooler for serverless
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: {
