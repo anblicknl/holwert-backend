@@ -359,19 +359,36 @@ app.post('/api/upload/image', authenticateToken, async (req, res) => {
   }
 });
 
-// Get all published news (public)
+// Get all published news (public, with optional bookmark status if authenticated)
 app.get('/api/news', async (req, res) => {
   try {
+    await ensureBookmarksTable();
     const { organization_id } = req.query;
+    
+    // Check if user is authenticated (optional)
+    let userId = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.substring(7);
+      try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        userId = decoded.userId;
+      } catch (e) {
+        // Token invalid, continue without userId
+        console.log('Invalid token in /api/news, continuing without auth');
+      }
+    }
     
     let query = `
       SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt, n.image_url, n.image_data,
              n.created_at, n.updated_at, n.organization_id,
              u.first_name, u.last_name,
              o.name as organization_name, o.logo_url as organization_logo, o.brand_color as organization_brand_color
+             ${userId ? ', CASE WHEN b.user_id IS NOT NULL THEN true ELSE false END as is_bookmarked' : ', false as is_bookmarked'}
       FROM news n
       JOIN users u ON n.author_id = u.id
       LEFT JOIN organizations o ON n.organization_id = o.id
+      ${userId ? `LEFT JOIN bookmarks b ON b.news_id = n.id AND b.user_id = ${userId}` : ''}
       WHERE n.is_published = true
     `;
     
