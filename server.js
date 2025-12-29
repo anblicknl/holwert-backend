@@ -823,18 +823,35 @@ app.get('/api/push/tokens', authenticateToken, async (req, res) => {
   }
 });
 
-// Get single published news (public)
+// Get single published news (public, with optional bookmark status if authenticated)
 app.get('/api/news/:id', async (req, res) => {
   try {
+    await ensureBookmarksTable();
     const { id } = req.params;
+    
+    // Check if user is authenticated (optional)
+    let userId = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.substring(7);
+      try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        userId = decoded.userId;
+      } catch (e) {
+        console.log('Invalid token in /api/news/:id, continuing without auth');
+      }
+    }
+    
     const result = await pool.query(`
       SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt, n.image_url, n.image_data,
              n.created_at, n.updated_at, n.category, n.custom_category, n.is_published,
              u.first_name, u.last_name,
              o.id as organization_id, o.name as organization_name, o.logo_url as organization_logo, o.brand_color as organization_brand_color
+             ${userId ? ', CASE WHEN b.user_id IS NOT NULL THEN true ELSE false END as is_bookmarked' : ', false as is_bookmarked'}
       FROM news n
       JOIN users u ON n.author_id = u.id
       LEFT JOIN organizations o ON n.organization_id = o.id
+      ${userId ? `LEFT JOIN bookmarks b ON b.news_id = n.id AND b.user_id = ${userId}` : ''}
       WHERE n.id = $1 AND n.is_published = true
       LIMIT 1
     `, [id]);
