@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const compression = require('compression');
-const { Pool } = require('pg');
+const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const FormData = require('form-data');
@@ -20,9 +20,6 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' })); // Verhoogd voor afbeelding uploads
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// Routes temporarily disabled due to MySQL/PostgreSQL conflict
-// TODO: Fix database configuration in routes
-
 // Multer configuration for image uploads
 const storage = multer.memoryStorage();
 const upload = multer({
@@ -39,13 +36,17 @@ const upload = multer({
   }
 });
 
-// Database connection - PostgreSQL (Neon)
-// Switched to Supabase with transaction pooler for serverless
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false
-  }
+// Database connection - MySQL
+const pool = mysql.createPool({
+  host: process.env.DB_HOST || process.env.MYSQL_HOST || 'localhost',
+  port: process.env.DB_PORT || process.env.MYSQL_PORT || 3306,
+  user: process.env.DB_USER || process.env.MYSQL_USER || 'root',
+  password: process.env.DB_PASSWORD || process.env.MYSQL_PASSWORD || '',
+  database: process.env.DB_NAME || process.env.MYSQL_DATABASE || 'holwert',
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
+  charset: 'utf8mb4'
 });
 
 // Export pool for use in routes
@@ -54,16 +55,65 @@ module.exports.pool = pool;
 // JWT Secret
 const JWT_SECRET = process.env.JWT_SECRET || 'holwert-secret-key-2024';
 
+// Helper function voor query execution (MySQL compatible)
+// Converteert automatisch PostgreSQL syntax naar MySQL
+async function executeQuery(query, params = []) {
+  // Converteer $1, $2, $3 naar ? voor MySQL
+  let mysqlQuery = query.replace(/\$(\d+)/g, '?');
+  
+  // Converteer ILIKE naar LIKE (case-insensitive)
+  mysqlQuery = mysqlQuery.replace(/ILIKE/gi, 'LIKE');
+  
+  if (params && params.length > 0) {
+    const [result] = await pool.execute(mysqlQuery, params);
+    // Wrap result in PostgreSQL-compatible format
+    return {
+      rows: Array.isArray(result) ? result : [result],
+      rowCount: result.affectedRows || result.length || 0
+    };
+  } else {
+    const [result] = await pool.execute(mysqlQuery);
+    return {
+      rows: Array.isArray(result) ? result : [result],
+      rowCount: result.affectedRows || result.length || 0
+    };
+  }
+}
+
+// Helper voor INSERT queries met LAST_INSERT_ID (MySQL equivalent van RETURNING)
+async function executeInsert(query, params = []) {
+  let mysqlQuery = query.replace(/\$(\d+)/g, '?');
+  mysqlQuery = mysqlQuery.replace(/RETURNING\s+id/gi, '');
+  mysqlQuery = mysqlQuery.replace(/RETURNING\s+\*/gi, '');
+  
+  if (params && params.length > 0) {
+    const [result] = await pool.execute(mysqlQuery, params);
+    const insertId = result.insertId;
+    return {
+      rows: insertId ? [{ id: insertId }] : [],
+      rowCount: result.affectedRows || 0,
+      insertId: insertId
+    };
+  } else {
+    const [result] = await pool.execute(mysqlQuery);
+    return {
+      rows: result.insertId ? [{ id: result.insertId }] : [],
+      rowCount: result.affectedRows || 0,
+      insertId: result.insertId
+    };
+  }
+}
+
 // Test route
 app.get('/', async (req, res) => {
   try {
-    await pool.query('SELECT 1');
+    await executeQuery('SELECT 1');
     const dbHost = process.env.DATABASE_URL?.includes('supabase.co') ? 'Supabase' : 
                    process.env.DATABASE_URL?.includes('neon.tech') ? 'Neon' : 'PostgreSQL';
-    res.json({ 
-      message: 'Holwert Backend is running!',
-      timestamp: new Date().toISOString(),
-      environment: process.env.NODE_ENV || 'development',
+  res.json({ 
+    message: 'Holwert Backend is running!',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development',
       database: `Connected to ${dbHost}`
     });
   } catch (error) {
@@ -85,8 +135,8 @@ app.get('/api/setup-admin', async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
     
     // Check if admin already exists
-    const existingUser = await pool.query(
-      'SELECT id, email, first_name, last_name FROM users WHERE email = $1',
+    const existingUser = await executeQuery(
+      'SELECT id, email, first_name, last_name FROM users WHERE email = ?',
       [email]
     );
     
@@ -94,8 +144,8 @@ app.get('/api/setup-admin', async (req, res) => {
     
     if (existingUser.rows.length > 0) {
       // Update existing admin
-      await pool.query(
-        'UPDATE users SET password = $1, role = $2, is_active = true WHERE email = $3',
+      await executeQuery(
+        'UPDATE users SET password_hash = ?, role = ?, is_active = true WHERE email = ?',
         [hashedPassword, 'admin', email]
       );
       
@@ -123,13 +173,18 @@ app.get('/api/setup-admin', async (req, res) => {
       });
     } else {
       // Create new admin
-      const result = await pool.query(
-        `INSERT INTO users (email, password, first_name, last_name, role, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, email, first_name, last_name`,
+      const result = await executeInsert(
+        `INSERT INTO users (email, password_hash, first_name, last_name, role, is_active)
+         VALUES (?, ?, ?, ?, ?, ?)`,
         [email, hashedPassword, 'Admin', 'Holwert', 'admin', true]
       );
       
-      const user = result.rows[0];
+      // Fetch the created user
+      const userResult = await executeQuery(
+        'SELECT id, email, first_name, last_name FROM users WHERE id = ?',
+        [result.insertId]
+      );
+      const user = userResult.rows[0];
       
       // Generate token
       const newToken = jwt.sign(
@@ -166,13 +221,12 @@ app.get('/api/setup-admin', async (req, res) => {
 app.get('/api/health', async (req, res) => {
   try {
     // Test database connection
-    await pool.query('SELECT 1');
-    const dbHost = process.env.DATABASE_URL?.includes('supabase.co') ? 'Supabase' : 
-                   process.env.DATABASE_URL?.includes('neon.tech') ? 'Neon' : 'PostgreSQL';
-    res.json({ 
-      status: 'OK', 
-      timestamp: new Date().toISOString(),
-      environment: process.env.NODE_ENV || 'development',
+    await executeQuery('SELECT 1');
+    const dbHost = process.env.DB_HOST || process.env.MYSQL_HOST || 'MySQL';
+  res.json({ 
+    status: 'OK', 
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development',
       database: `Connected to ${dbHost}`
     });
   } catch (error) {
@@ -430,18 +484,18 @@ app.get('/api/news', async (req, res) => {
     
     query += ` ORDER BY n.created_at DESC LIMIT 20`;
     
-    const result = await pool.query(query, params);
+    const result = await executeQuery(query, params);
 
     // Use image_url directly - no more base64 processing!
     const processedNews = result.rows.map(article => ({
       ...article,
       // Provide image variants all pointing to the same URL for backward compatibility
       image_variants: {
-        original: article.image_url,
-        full: article.image_url,
-        large: article.image_url,
-        medium: article.image_url,
-        thumbnail: article.image_url
+            original: article.image_url,
+            full: article.image_url,
+            large: article.image_url,
+            medium: article.image_url,
+            thumbnail: article.image_url
       }
     }));
 
@@ -491,7 +545,7 @@ app.get('/api/news/related', async (req, res) => {
     params.push(parseInt(limit));
     query += ` ORDER BY n.created_at DESC LIMIT $${paramCount}`;
 
-    const result = await pool.query(query, params);
+    const result = await executeQuery(query, params);
 
     const items = result.rows.map(article => ({
       ...article,
@@ -507,7 +561,7 @@ app.get('/api/news/related', async (req, res) => {
 // ===== APP BOOKMARKS (server-side, per gebruiker) =====
 async function ensureBookmarksTable() {
   try {
-    await pool.query(`
+    await executeQuery(`
       CREATE TABLE IF NOT EXISTS bookmarks (
         user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         news_id INTEGER NOT NULL REFERENCES news(id) ON DELETE CASCADE,
@@ -528,7 +582,7 @@ app.get('/api/app/bookmarks', authenticateToken, async (req, res) => {
     const { with_news } = req.query;
 
     if (with_news === '1' || with_news === 'true') {
-      const result = await pool.query(`
+      const result = await executeQuery(`
         SELECT n.id, n.title, n.excerpt, n.image_url, n.created_at, b.created_at as bookmarked_at
         FROM bookmarks b
         JOIN news n ON n.id = b.news_id
@@ -538,7 +592,7 @@ app.get('/api/app/bookmarks', authenticateToken, async (req, res) => {
       `, [userId]);
       return res.json({ bookmarks: result.rows });
     } else {
-      const result = await pool.query(`
+      const result = await executeQuery(`
         SELECT news_id, created_at FROM bookmarks WHERE user_id = $1 ORDER BY created_at DESC LIMIT 500
       `, [userId]);
       return res.json({ bookmarks: result.rows });
@@ -555,7 +609,7 @@ app.get('/api/app/bookmarks/:news_id', authenticateToken, async (req, res) => {
     await ensureBookmarksTable();
     const userId = req.user.userId;
     const newsId = parseInt(req.params.news_id);
-    const result = await pool.query(`SELECT 1 FROM bookmarks WHERE user_id = $1 AND news_id = $2`, [userId, newsId]);
+    const result = await executeQuery(`SELECT 1 FROM bookmarks WHERE user_id = $1 AND news_id = $2`, [userId, newsId]);
     res.json({ bookmarked: result.rows.length > 0 });
   } catch (error) {
     console.error('Check bookmark error:', error);
@@ -570,9 +624,9 @@ app.post('/api/app/bookmarks', authenticateToken, async (req, res) => {
     const userId = req.user.userId;
     const { news_id } = req.body;
     if (!news_id) return res.status(400).json({ error: 'news_id is required' });
-    await pool.query(`
+    await executeQuery(`
       INSERT INTO bookmarks (user_id, news_id) VALUES ($1, $2)
-      ON CONFLICT (user_id, news_id) DO NOTHING
+      ON DUPLICATE KEY UPDATE user_id = user_id
     `, [userId, news_id]);
     res.status(201).json({ success: true });
   } catch (error) {
@@ -587,7 +641,7 @@ app.delete('/api/app/bookmarks/:news_id', authenticateToken, async (req, res) =>
     await ensureBookmarksTable();
     const userId = req.user.userId;
     const newsId = parseInt(req.params.news_id);
-    const result = await pool.query(`DELETE FROM bookmarks WHERE user_id = $1 AND news_id = $2`, [userId, newsId]);
+    const result = await executeQuery(`DELETE FROM bookmarks WHERE user_id = $1 AND news_id = $2`, [userId, newsId]);
     res.json({ success: true, removed: result.rowCount > 0 });
   } catch (error) {
     console.error('Remove bookmark error:', error);
@@ -598,7 +652,7 @@ app.delete('/api/app/bookmarks/:news_id', authenticateToken, async (req, res) =>
 // ===== APP FOLLOWS (organizations) =====
 async function ensureFollowsTable() {
   try {
-    await pool.query(`
+    await executeQuery(`
       CREATE TABLE IF NOT EXISTS follows (
         user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
@@ -616,7 +670,7 @@ app.get('/api/app/following', authenticateToken, async (req, res) => {
   try {
     await ensureFollowsTable();
     const userId = req.user.userId;
-    const result = await pool.query(`SELECT organization_id, created_at FROM follows WHERE user_id = $1 ORDER BY created_at DESC`, [userId]);
+    const result = await executeQuery(`SELECT organization_id, created_at FROM follows WHERE user_id = $1 ORDER BY created_at DESC`, [userId]);
     res.json({ following: result.rows });
   } catch (error) {
     console.error('Get following error:', error);
@@ -630,7 +684,7 @@ app.get('/api/app/following/:organization_id', authenticateToken, async (req, re
     await ensureFollowsTable();
     const userId = req.user.userId;
     const orgId = parseInt(req.params.organization_id);
-    const result = await pool.query(`SELECT 1 FROM follows WHERE user_id = $1 AND organization_id = $2`, [userId, orgId]);
+    const result = await executeQuery(`SELECT 1 FROM follows WHERE user_id = $1 AND organization_id = $2`, [userId, orgId]);
     res.json({ following: result.rows.length > 0 });
   } catch (error) {
     console.error('Check following error:', error);
@@ -645,7 +699,7 @@ app.post('/api/app/follow', authenticateToken, async (req, res) => {
     const userId = req.user.userId;
     const { organization_id } = req.body;
     if (!organization_id) return res.status(400).json({ error: 'organization_id is required' });
-    await pool.query(`INSERT INTO follows (user_id, organization_id) VALUES ($1, $2) ON CONFLICT (user_id, organization_id) DO NOTHING`, [userId, organization_id]);
+    await executeQuery(`INSERT INTO follows (user_id, organization_id) VALUES (?, ?) ON DUPLICATE KEY UPDATE user_id = user_id`, [userId, organization_id]);
     res.status(201).json({ success: true });
   } catch (error) {
     console.error('Follow error:', error);
@@ -659,7 +713,7 @@ app.delete('/api/app/follow/:organization_id', authenticateToken, async (req, re
     await ensureFollowsTable();
     const userId = req.user.userId;
     const orgId = parseInt(req.params.organization_id);
-    const result = await pool.query(`DELETE FROM follows WHERE user_id = $1 AND organization_id = $2`, [userId, orgId]);
+    const result = await executeQuery(`DELETE FROM follows WHERE user_id = $1 AND organization_id = $2`, [userId, orgId]);
     res.json({ success: true, removed: result.rowCount > 0 });
   } catch (error) {
     console.error('Unfollow error:', error);
@@ -672,7 +726,7 @@ app.get('/api/organizations/:id/followers/count', async (req, res) => {
   try {
     await ensureFollowsTable();
     const orgId = parseInt(req.params.id);
-    const result = await pool.query(`SELECT COUNT(*)::int AS count FROM follows WHERE organization_id = $1`, [orgId]);
+    const result = await executeQuery(`SELECT COUNT(*)::int AS count FROM follows WHERE organization_id = $1`, [orgId]);
     const count = (result.rows[0] && result.rows[0].count) || 0;
     res.json({ count });
   } catch (error) {
@@ -694,14 +748,14 @@ app.post('/api/push/token', authenticateToken, async (req, res) => {
     }
     
     // Check if token already exists
-    const existingToken = await pool.query(
+    const existingToken = await executeQuery(
       'SELECT id FROM push_tokens WHERE token = $1',
       [token]
     );
     
     if (existingToken.rows.length > 0) {
       // Update existing token
-      await pool.query(
+      await executeQuery(
         `UPDATE push_tokens 
          SET user_id = $1, 
              device_type = $2, 
@@ -718,7 +772,7 @@ app.post('/api/push/token', authenticateToken, async (req, res) => {
       res.json({ success: true, message: 'Push token updated' });
     } else {
       // Insert new token
-      await pool.query(
+      await executeQuery(
         `INSERT INTO push_tokens (user_id, token, device_type, device_name, notification_preferences)
          VALUES ($1, $2, $3, $4, $5)`,
         [userId, token, device_type, device_name, notification_preferences ? JSON.stringify(notification_preferences) : null]
@@ -743,7 +797,7 @@ app.put('/api/push/preferences', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Notification preferences are required' });
     }
     
-    await pool.query(
+    await executeQuery(
       `UPDATE push_tokens 
        SET notification_preferences = $1, updated_at = CURRENT_TIMESTAMP
        WHERE user_id = $2`,
@@ -763,7 +817,7 @@ app.delete('/api/push/token/:token', authenticateToken, async (req, res) => {
     const userId = req.user.userId;
     const { token } = req.params;
     
-    const result = await pool.query(
+    const result = await executeQuery(
       'DELETE FROM push_tokens WHERE token = $1 AND user_id = $2',
       [token, userId]
     );
@@ -785,7 +839,7 @@ app.post('/api/push/deactivate', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.userId;
     
-    await pool.query(
+    await executeQuery(
       'UPDATE push_tokens SET is_active = false, updated_at = CURRENT_TIMESTAMP WHERE user_id = $1',
       [userId]
     );
@@ -803,7 +857,7 @@ app.get('/api/push/tokens', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.userId;
     
-    const result = await pool.query(
+    const result = await executeQuery(
       `SELECT id, device_type, device_name, notification_preferences, is_active, 
               last_used_at, created_at, updated_at
        FROM push_tokens 
@@ -838,7 +892,7 @@ app.get('/api/news/:id', async (req, res) => {
       }
     }
     
-    const result = await pool.query(`
+    const result = await executeQuery(`
       SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt, n.image_url,
              n.created_at, n.updated_at, n.category, n.custom_category, n.is_published,
              u.first_name, u.last_name,
@@ -860,12 +914,12 @@ app.get('/api/news/:id', async (req, res) => {
 
     // Use image_url directly - no more base64 processing!
     const imageVariants = {
-      original: article.image_url,
-      full: article.image_url,
-      large: article.image_url,
-      medium: article.image_url,
-      thumbnail: article.image_url
-    };
+          original: article.image_url,
+          full: article.image_url,
+          large: article.image_url,
+          medium: article.image_url,
+          thumbnail: article.image_url
+        };
     
     res.json({
       article: {
@@ -897,7 +951,7 @@ app.post('/api/news', authenticateToken, async (req, res) => {
 
     // Check if user is associated with an approved organization
     if (organization_id) {
-      const orgResult = await pool.query(
+      const orgResult = await executeQuery(
         'SELECT is_approved FROM organizations WHERE id = $1',
         [organization_id]
       );
@@ -917,7 +971,7 @@ app.post('/api/news', authenticateToken, async (req, res) => {
     }
 
     // Insert into news table
-    const result = await pool.query(
+    const result = await executeQuery(
       'INSERT INTO news (title, content, excerpt, author_id, organization_id, image_url, image_data, category, custom_category, is_published) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id, title, COALESCE(content, \'\') as content, excerpt, category, custom_category, image_url, is_published, created_at',
       [title, content, excerpt || null, authorId, organization_id || null, image_url || null, req.body.image_data || null, finalCategory, finalCustomCategory, isPublished]
     );
@@ -928,7 +982,7 @@ app.post('/api/news', authenticateToken, async (req, res) => {
     if (isPublished && organization_id) {
       try {
         // Get organization name
-        const orgResult = await pool.query(
+        const orgResult = await executeQuery(
           'SELECT name FROM organizations WHERE id = $1',
           [organization_id]
         );
@@ -988,7 +1042,7 @@ app.put('/api/news/:id', authenticateToken, async (req, res) => {
     const userId = req.user.userId;
 
     // Check if article exists and user has permission
-    const existingArticle = await pool.query(
+    const existingArticle = await executeQuery(
       'SELECT id, author_id, is_published FROM news WHERE id = $1',
       [id]
     );
@@ -1024,7 +1078,7 @@ app.put('/api/news/:id', authenticateToken, async (req, res) => {
     }
 
     // Update article
-    const result = await pool.query(
+    const result = await executeQuery(
       'UPDATE news SET title = $1, content = $2, excerpt = $3, organization_id = $4, image_url = $5, image_data = $6, category = $7, custom_category = $8, updated_at = NOW() WHERE id = $9 RETURNING id, title, COALESCE(content, \'\') as content, excerpt, category, custom_category, image_url, image_data, is_published, created_at, updated_at',
       [title, content, excerpt || null, organization_id || null, image_url || null, image_data || null, finalCategory, finalCustomCategory, id]
     );
@@ -1058,7 +1112,7 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     // Find user by email
-    const userResult = await pool.query(
+    const userResult = await executeQuery(
       'SELECT id, email, password, first_name, last_name, role, is_active FROM users WHERE email = $1',
       [email]
     );
@@ -1141,10 +1195,10 @@ app.get('/api/auth/verify', authenticateToken, (req, res) => {
 app.get('/api/admin/stats', authenticateToken, async (req, res) => {
   try {
     const [usersResult, orgsResult, newsResult, eventsResult] = await Promise.all([
-      pool.query('SELECT COUNT(*) as count FROM users'),
-      pool.query('SELECT COUNT(*) as count FROM organizations'),
-      pool.query('SELECT COUNT(*) as count FROM news'),
-      pool.query('SELECT COUNT(*) as count FROM events')
+      executeQuery('SELECT COUNT(*) as count FROM users'),
+      executeQuery('SELECT COUNT(*) as count FROM organizations'),
+      executeQuery('SELECT COUNT(*) as count FROM news'),
+      executeQuery('SELECT COUNT(*) as count FROM events')
     ]);
     res.json({
       users: parseInt(usersResult.rows[0].count) || 0,
@@ -1162,9 +1216,9 @@ app.get('/api/admin/stats', authenticateToken, async (req, res) => {
 app.get('/api/admin/moderation/count', authenticateToken, async (req, res) => {
   try {
     const [orgsResult, newsResult, eventsResult] = await Promise.all([
-      pool.query('SELECT COUNT(*) as count FROM organizations WHERE is_approved = false'),
-      pool.query("SELECT COUNT(*) as count FROM news WHERE status = 'pending'"),
-      pool.query("SELECT COUNT(*) as count FROM events WHERE status = 'pending'")
+      executeQuery('SELECT COUNT(*) as count FROM organizations WHERE is_approved = false'),
+      executeQuery("SELECT COUNT(*) as count FROM news WHERE status = 'pending'"),
+      executeQuery("SELECT COUNT(*) as count FROM events WHERE status = 'pending'")
     ]);
     
     const totalCount = 
@@ -1183,7 +1237,7 @@ app.get('/api/admin/moderation/count', authenticateToken, async (req, res) => {
 app.get('/api/admin/pending', authenticateToken, async (req, res) => {
   try {
     const [orgsResult, newsResult, eventsResult] = await Promise.all([
-      pool.query(`
+      executeQuery(`
         SELECT id, name, description, contact_email, is_approved, created_at, 
                'organization' as type
         FROM organizations 
@@ -1191,7 +1245,7 @@ app.get('/api/admin/pending', authenticateToken, async (req, res) => {
         ORDER BY created_at DESC 
         LIMIT 10
       `),
-      pool.query(`
+      executeQuery(`
         SELECT n.id, n.title as name, n.excerpt as description, n.status, n.created_at,
                'news' as type, u.first_name, u.last_name
         FROM news n
@@ -1200,7 +1254,7 @@ app.get('/api/admin/pending', authenticateToken, async (req, res) => {
         ORDER BY n.created_at DESC
         LIMIT 10
       `),
-      pool.query(`
+      executeQuery(`
         SELECT e.id, e.title as name, e.description, e.status, e.created_at,
                'event' as type, u.first_name, u.last_name
         FROM events e
@@ -1258,7 +1312,7 @@ app.get('/api/admin/news', authenticateToken, async (req, res) => {
     query += ` OFFSET $${paramCount}`;
     params.push(parseInt(offset));
 
-    const result = await pool.query(query, params);
+    const result = await executeQuery(query, params);
 
     // Get total count
     let countQuery = 'SELECT COUNT(*) as total FROM news n WHERE 1=1';
@@ -1274,7 +1328,7 @@ app.get('/api/admin/news', authenticateToken, async (req, res) => {
       countQuery += ` AND n.category = $${countParams.length}`;
     }
 
-    const countResult = await pool.query(countQuery, countParams);
+    const countResult = await executeQuery(countQuery, countParams);
 
     res.json({
       news: result.rows,
@@ -1300,7 +1354,7 @@ app.get('/api/admin/news/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
 
-    const result = await pool.query(`
+    const result = await executeQuery(`
       SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt, n.image_url, n.organization_id,
              n.created_at, n.updated_at, n.category, n.custom_category, n.is_published,
              u.first_name, u.last_name, o.name as organization_name, o.logo_url as organization_logo
@@ -1320,12 +1374,12 @@ app.get('/api/admin/news/:id', authenticateToken, async (req, res) => {
 
     // Use image_url directly - no more base64 processing!
     const imageVariants = {
-      original: article.image_url,
-      full: article.image_url,
-      large: article.image_url,
-      medium: article.image_url,
-      thumbnail: article.image_url
-    };
+          original: article.image_url,
+          full: article.image_url,
+          large: article.image_url,
+          medium: article.image_url,
+          thumbnail: article.image_url
+        };
 
     res.json({
       article: {
@@ -1413,7 +1467,7 @@ app.put('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res)
     values.push(id);
     const query = `UPDATE news SET ${updateFields.join(', ')} WHERE id = $${paramCount} RETURNING id, title, content, excerpt, category, custom_category, organization_id, image_url, is_published, created_at, updated_at`;
 
-    const result = await pool.query(query, values);
+    const result = await executeQuery(query, values);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Article not found' });
@@ -1437,7 +1491,7 @@ app.put('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res)
 app.delete('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await pool.query('DELETE FROM news WHERE id = $1', [id]);
+    const result = await executeQuery('DELETE FROM news WHERE id = $1', [id]);
     if (!result.rowCount) {
       return res.status(404).json({ error: 'Article not found' });
     }
@@ -1467,7 +1521,7 @@ app.get('/api/admin/organizations/:id', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Invalid organization ID' });
     }
     
-    const result = await pool.query(
+    const result = await executeQuery(
       `SELECT id, name, category, description, bio, is_approved, website, email, phone, whatsapp, address, 
               facebook, instagram, twitter, linkedin, brand_color, logo_url, created_at, updated_at
        FROM organizations 
@@ -1523,7 +1577,7 @@ app.get('/api/admin/organizations', authenticateToken, async (req, res) => {
     query += ` OFFSET $${paramCount}`;
     params.push(parseInt(offset));
 
-    const result = await pool.query(query, params);
+    const result = await executeQuery(query, params);
 
     // Get total count
     let countQuery = 'SELECT COUNT(*) as total FROM organizations o WHERE 1=1';
@@ -1536,7 +1590,7 @@ app.get('/api/admin/organizations', authenticateToken, async (req, res) => {
       countQuery += ` AND o.is_approved = $${countParams.length}`;
     }
 
-    const countResult = await pool.query(countQuery, countParams);
+    const countResult = await executeQuery(countQuery, countParams);
 
     res.json({
       organizations: result.rows,
@@ -1571,7 +1625,7 @@ app.post('/api/admin/organizations', authenticateToken, requireAdmin, async (req
       website, contact_email, contact_phone, brand_color, logo_url
     } = req.body;
     if (!name) return res.status(400).json({ error: 'name is required' });
-    const result = await pool.query(
+    const result = await executeQuery(
       `INSERT INTO organizations (name, category, description, is_approved, website, contact_email, contact_phone, brand_color, logo_url)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING id, name, category, description, is_approved, website, contact_email, contact_phone, brand_color, logo_url, created_at`,
@@ -1611,7 +1665,7 @@ app.put('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (
     if (logo_url !== undefined) sets.push(`logo_url = ${push(logo_url)}`);
     if (!sets.length) return res.status(400).json({ error: 'No fields to update' });
     params.push(id);
-    const result = await pool.query(
+    const result = await executeQuery(
       `UPDATE organizations SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${params.length}
        RETURNING id, name, category, description, bio, is_approved, website, email, phone, whatsapp, address, 
                  facebook, instagram, twitter, linkedin, brand_color, logo_url, created_at, updated_at`,
@@ -1629,7 +1683,7 @@ app.put('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (
 app.post('/api/admin/organizations/:id/approve', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await pool.query('UPDATE organizations SET is_approved = true WHERE id = $1', [id]);
+    const result = await executeQuery('UPDATE organizations SET is_approved = true WHERE id = $1', [id]);
     if (!result.rowCount) return res.status(404).json({ error: 'Organization not found' });
     res.json({ message: 'Organization approved successfully' });
   } catch (error) {
@@ -1642,7 +1696,7 @@ app.post('/api/admin/organizations/:id/approve', authenticateToken, requireAdmin
 app.post('/api/admin/organizations/:id/reject', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await pool.query('UPDATE organizations SET is_approved = false WHERE id = $1', [id]);
+    const result = await executeQuery('UPDATE organizations SET is_approved = false WHERE id = $1', [id]);
     if (!result.rowCount) return res.status(404).json({ error: 'Organization not found' });
     res.json({ message: 'Organization rejected successfully' });
   } catch (error) {
@@ -1655,7 +1709,7 @@ app.post('/api/admin/organizations/:id/reject', authenticateToken, requireAdmin,
 app.delete('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await pool.query('DELETE FROM organizations WHERE id = $1', [id]);
+    const result = await executeQuery('DELETE FROM organizations WHERE id = $1', [id]);
     if (!result.rowCount) return res.status(404).json({ error: 'Organization not found' });
     res.json({ success: true });
   } catch (error) {
@@ -1721,7 +1775,7 @@ app.post('/api/migrate-events', async (req, res) => {
 app.get('/events', async (req, res) => {
   try {
     // Check if events table exists first
-    const tableCheck = await pool.query(`
+    const tableCheck = await executeQuery(`
       SELECT EXISTS (
         SELECT FROM information_schema.tables 
         WHERE table_schema = 'public' 
@@ -1774,7 +1828,7 @@ app.get('/events', async (req, res) => {
     query += ` OFFSET $${paramCount}`;
     params.push(parseInt(offset));
 
-    const result = await pool.query(query, params);
+    const result = await executeQuery(query, params);
 
     // Get total count
     let countQuery = 'SELECT COUNT(*) as total FROM events e WHERE e.event_date >= NOW()';
@@ -1783,12 +1837,12 @@ app.get('/events', async (req, res) => {
     if (organization_id) {
       const orgId = parseInt(organization_id);
       if (!isNaN(orgId)) {
-        countQuery += ` AND e.organization_id = $1`;
+      countQuery += ` AND e.organization_id = $1`;
         countParams.push(orgId);
       }
     }
     
-    const countResult = await pool.query(countQuery, countParams);
+    const countResult = await executeQuery(countQuery, countParams);
 
     res.json({
       events: result.rows,
@@ -1820,7 +1874,7 @@ app.get('/events', async (req, res) => {
 app.get('/events/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await pool.query(`
+    const result = await executeQuery(`
       SELECT e.*, o.name as organization_name, o.brand_color as organization_brand_color, o.logo_url as organization_logo
       FROM events e
       LEFT JOIN organizations o ON e.organization_id = o.id
@@ -1839,7 +1893,7 @@ app.get('/events/:id', async (req, res) => {
 app.get('/api/events', async (req, res) => {
   try {
     // Check if events table exists first
-    const tableCheck = await pool.query(`
+    const tableCheck = await executeQuery(`
       SELECT EXISTS (
         SELECT FROM information_schema.tables 
         WHERE table_schema = 'public' 
@@ -1891,18 +1945,18 @@ app.get('/api/events', async (req, res) => {
     query += ` OFFSET $${paramCount}`;
     params.push(parseInt(offset));
 
-    const result = await pool.query(query, params);
+    const result = await executeQuery(query, params);
 
     let countQuery = 'SELECT COUNT(*) as total FROM events e WHERE e.event_date >= NOW()';
     const countParams = [];
     if (organization_id) {
       const orgId = parseInt(organization_id);
       if (!isNaN(orgId)) {
-        countQuery += ` AND e.organization_id = $1`;
+      countQuery += ` AND e.organization_id = $1`;
         countParams.push(orgId);
-      }
     }
-    const countResult = await pool.query(countQuery, countParams);
+    }
+    const countResult = await executeQuery(countQuery, countParams);
 
     res.json({
       events: result.rows,
@@ -1933,7 +1987,7 @@ app.get('/api/events', async (req, res) => {
 app.get('/api/events/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await pool.query(`
+    const result = await executeQuery(`
       SELECT e.*, o.name as organization_name, o.brand_color as organization_brand_color, o.logo_url as organization_logo
       FROM events e
       LEFT JOIN organizations o ON e.organization_id = o.id
@@ -1978,7 +2032,7 @@ app.get('/api/admin/events', authenticateToken, async (req, res) => {
     query += ` OFFSET $${paramCount}`;
     params.push(parseInt(offset));
 
-    const result = await pool.query(query, params);
+    const result = await executeQuery(query, params);
 
     // Get total count
     let countQuery = 'SELECT COUNT(*) as total FROM events e WHERE 1=1';
@@ -1989,7 +2043,7 @@ app.get('/api/admin/events', authenticateToken, async (req, res) => {
       countQuery += ` AND e.status = $${countParams.length}`;
     }
 
-    const countResult = await pool.query(countQuery, countParams);
+    const countResult = await executeQuery(countQuery, countParams);
 
     res.json({
       events: result.rows,
@@ -2016,7 +2070,7 @@ app.post('/api/admin/events', authenticateToken, requireAdmin, async (req, res) 
   try {
     const { title, description, event_date, end_date, location, organization_id, status = 'scheduled' } = req.body;
     if (!title || !event_date) return res.status(400).json({ error: 'title and event_date are required' });
-    const result = await pool.query(
+    const result = await executeQuery(
       `INSERT INTO events (title, description, event_date, end_date, location, organization_id, status, organizer_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING id, title, description, event_date, end_date, location, organization_id, status, created_at`,
@@ -2029,7 +2083,7 @@ app.post('/api/admin/events', authenticateToken, requireAdmin, async (req, res) 
     if (status === 'scheduled' && organization_id) {
       try {
         // Get organization name
-        const orgResult = await pool.query(
+        const orgResult = await executeQuery(
           'SELECT name FROM organizations WHERE id = $1',
           [organization_id]
         );
@@ -2088,7 +2142,7 @@ app.put('/api/admin/events/:id', authenticateToken, requireAdmin, async (req, re
     if (status !== undefined) sets.push(`status = ${push(status)}`);
     if (!sets.length) return res.status(400).json({ error: 'No fields to update' });
     params.push(id);
-    const result = await pool.query(
+    const result = await executeQuery(
       `UPDATE events SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${params.length}
        RETURNING id, title, description, event_date, end_date, location, organization_id, status, created_at, updated_at`,
       params
@@ -2105,7 +2159,7 @@ app.put('/api/admin/events/:id', authenticateToken, requireAdmin, async (req, re
 app.delete('/api/admin/events/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await pool.query('DELETE FROM events WHERE id = $1', [id]);
+    const result = await executeQuery('DELETE FROM events WHERE id = $1', [id]);
     if (!result.rowCount) return res.status(404).json({ error: 'Event not found' });
     res.json({ success: true });
   } catch (error) {
@@ -2127,7 +2181,7 @@ app.get('/api/admin/found-lost', authenticateToken, requireAdmin, async (req, re
       query += ` AND status = $1`; 
     }
     query += ' ORDER BY created_at DESC LIMIT 200';
-    const result = await pool.query(query, params);
+    const result = await executeQuery(query, params);
     res.json({ items: result.rows });
   } catch (error) {
     console.error('List found-lost error:', error);
@@ -2139,7 +2193,7 @@ app.get('/api/admin/found-lost', authenticateToken, requireAdmin, async (req, re
 app.post('/api/admin/found-lost/:id/approve', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await pool.query(
+    const result = await executeQuery(
       `UPDATE found_lost SET status = 'approved', rejection_reason = NULL, revision_deadline = NULL, updated_at = NOW() WHERE id = $1 RETURNING *`,
       [id]
     );
@@ -2157,14 +2211,14 @@ app.post('/api/admin/found-lost/:id/reject', authenticateToken, requireAdmin, as
     const { id } = req.params;
     const { reason, needs_revision = true } = req.body || {};
     if (needs_revision) {
-      const result = await pool.query(
+      const result = await executeQuery(
         `UPDATE found_lost SET status = 'needs_revision', rejection_reason = $1, revision_deadline = NOW() + INTERVAL '3 days', updated_at = NOW() WHERE id = $2 RETURNING *`,
         [reason || 'Aanpassingen vereist', id]
       );
       if (!result.rows.length) return res.status(404).json({ error: 'Item not found' });
       return res.json({ item: result.rows[0] });
     } else {
-      const result = await pool.query(
+      const result = await executeQuery(
         `UPDATE found_lost SET status = 'rejected', rejection_reason = $1, revision_deadline = NULL, updated_at = NOW() WHERE id = $2 RETURNING *`,
         [reason || 'Afgewezen', id]
       );
@@ -2205,7 +2259,7 @@ app.get('/api/admin/users', authenticateToken, async (req, res) => {
     query += ` OFFSET $${paramCount}`;
     params.push(parseInt(offset));
 
-    const result = await pool.query(query, params);
+    const result = await executeQuery(query, params);
 
     // Get total count
     let countQuery = 'SELECT COUNT(*) as total FROM users u WHERE 1=1';
@@ -2216,7 +2270,7 @@ app.get('/api/admin/users', authenticateToken, async (req, res) => {
       countQuery += ` AND u.role = $${countParams.length}`;
     }
 
-    const countResult = await pool.query(countQuery, countParams);
+    const countResult = await executeQuery(countQuery, countParams);
 
     res.json({
       users: result.rows,
@@ -2245,7 +2299,7 @@ app.post('/api/admin/users', authenticateToken, requireAdmin, async (req, res) =
       return res.status(400).json({ error: 'first_name, last_name, email, password are required' });
     }
     const hashed = await bcrypt.hash(password, 10);
-    const result = await pool.query(
+    const result = await executeQuery(
       `INSERT INTO users (first_name, last_name, email, password, role, is_active)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id, first_name, last_name, email, role, is_active, created_at`,
@@ -2278,7 +2332,7 @@ app.put('/api/admin/users/:id', authenticateToken, requireAdmin, async (req, res
     }
     if (!sets.length) return res.status(400).json({ error: 'No fields to update' });
     params.push(id);
-    const result = await pool.query(
+    const result = await executeQuery(
       `UPDATE users SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${params.length}
        RETURNING id, first_name, last_name, email, role, is_active, created_at, updated_at`,
       params
@@ -2296,7 +2350,7 @@ app.put('/api/admin/users/:id', authenticateToken, requireAdmin, async (req, res
 app.delete('/api/admin/users/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await pool.query('DELETE FROM users WHERE id = $1', [id]);
+    const result = await executeQuery('DELETE FROM users WHERE id = $1', [id]);
     if (!result.rowCount) return res.status(404).json({ error: 'User not found' });
     res.json({ success: true });
   } catch (error) {
@@ -2321,23 +2375,23 @@ app.get('/api/organizations', async (req, res) => {
       brand_color,
       category
     ` : `
-      id,
-      name,
-      description,
-      bio,
-      email,
-      phone,
-      whatsapp,
-      address,
-      facebook,
-      instagram,
-      twitter,
-      linkedin,
-      website,
-      logo_url,
-      brand_color,
-      category,
-      created_at
+        id,
+        name,
+        description,
+        bio,
+        email,
+        phone,
+        whatsapp,
+        address,
+        facebook,
+        instagram,
+        twitter,
+        linkedin,
+        website,
+        logo_url,
+        brand_color,
+        category,
+        created_at
     `;
 
     let query = `
@@ -2368,25 +2422,25 @@ app.get('/api/organizations', async (req, res) => {
     query += ` OFFSET $${paramCount}`;
     params.push(parseInt(offset));
 
-    const result = await pool.query(query, params);
+    const result = await executeQuery(query, params);
 
     // Get total count (only if not minimal, to save time)
     let total = result.rows.length;
     if (minimal !== 'true') {
-      let countQuery = 'SELECT COUNT(*) as total FROM organizations WHERE is_approved = true';
-      const countParams = [];
-      
-      if (category) {
-        countParams.push(category);
-        countQuery += ` AND category = $${countParams.length}`;
-      }
+    let countQuery = 'SELECT COUNT(*) as total FROM organizations WHERE is_approved = true';
+    const countParams = [];
+    
+    if (category) {
+      countParams.push(category);
+      countQuery += ` AND category = $${countParams.length}`;
+    }
 
-      if (search) {
-        countParams.push(`%${search}%`);
-        countQuery += ` AND (name ILIKE $${countParams.length} OR description ILIKE $${countParams.length})`;
-      }
+    if (search) {
+      countParams.push(`%${search}%`);
+      countQuery += ` AND (name ILIKE $${countParams.length} OR description ILIKE $${countParams.length})`;
+    }
 
-      const countResult = await pool.query(countQuery, countParams);
+    const countResult = await executeQuery(countQuery, countParams);
       total = parseInt(countResult.rows[0].total);
     }
 
@@ -2884,7 +2938,7 @@ async function sendNotificationToUsers(userIds, notification, notificationType) 
     }
     
     // Get active push tokens for these users with matching notification preferences
-    const result = await pool.query(
+    const result = await executeQuery(
       `SELECT pt.id, pt.user_id, pt.token, pt.notification_preferences
        FROM push_tokens pt
        WHERE pt.user_id = ANY($1)
@@ -2906,7 +2960,7 @@ async function sendNotificationToUsers(userIds, notification, notificationType) 
     // Log to notification history
     if (sendResult.success) {
       for (const row of result.rows) {
-        await pool.query(
+        await executeQuery(
           `INSERT INTO notification_history 
            (user_id, push_token_id, notification_type, title, body, data, status)
            VALUES ($1, $2, $3, $4, $5, $6, $7)`,
@@ -2940,7 +2994,7 @@ async function sendNotificationToFollowers(organizationId, notification, notific
   try {
     // Get all followers of this organization
     await ensureFollowsTable();
-    const followersResult = await pool.query(
+    const followersResult = await executeQuery(
       'SELECT user_id FROM follows WHERE organization_id = $1',
       [organizationId]
     );
@@ -2966,7 +3020,7 @@ async function initializePushNotificationsTables() {
     console.log('📦 Initializing push notifications tables...');
     
     // Create push_tokens table
-    await pool.query(`
+    await executeQuery(`
       CREATE TABLE IF NOT EXISTS push_tokens (
         id SERIAL PRIMARY KEY,
         user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
@@ -2987,14 +3041,14 @@ async function initializePushNotificationsTables() {
     `);
     
     // Create indexes
-    await pool.query(`
+    await executeQuery(`
       CREATE INDEX IF NOT EXISTS idx_push_tokens_user_id ON push_tokens(user_id);
       CREATE INDEX IF NOT EXISTS idx_push_tokens_token ON push_tokens(token);
       CREATE INDEX IF NOT EXISTS idx_push_tokens_active ON push_tokens(is_active);
     `);
     
     // Create notification_history table
-    await pool.query(`
+    await executeQuery(`
       CREATE TABLE IF NOT EXISTS notification_history (
         id SERIAL PRIMARY KEY,
         user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
@@ -3011,7 +3065,7 @@ async function initializePushNotificationsTables() {
     `);
     
     // Create indexes for notification_history
-    await pool.query(`
+    await executeQuery(`
       CREATE INDEX IF NOT EXISTS idx_notification_history_user_id ON notification_history(user_id);
       CREATE INDEX IF NOT EXISTS idx_notification_history_type ON notification_history(notification_type);
       CREATE INDEX IF NOT EXISTS idx_notification_history_sent_at ON notification_history(sent_at);
