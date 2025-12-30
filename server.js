@@ -1718,10 +1718,30 @@ app.post('/api/migrate-events', async (req, res) => {
 // Get all events (public)
 app.get('/events', async (req, res) => {
   try {
+    // Check if events table exists first
+    const tableCheck = await pool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = 'events'
+      );
+    `);
+    
+    if (!tableCheck.rows[0].exists) {
+      console.log('[GET /events] Events table does not exist, returning empty array');
+      return res.json({
+        events: [],
+        pagination: {
+          page: 1,
+          limit: 20,
+          total: 0,
+          pages: 0
+        }
+      });
+    }
+
     const { page = 1, limit = 20, organization_id } = req.query;
     const offset = (page - 1) * limit;
-
-    console.log(`[GET /events] Request - page: ${page}, limit: ${limit}, organization_id: ${organization_id}`);
 
     let query = `
       SELECT e.*, o.name as organization_name, o.brand_color as organization_brand_color, o.logo_url as organization_logo
@@ -1752,9 +1772,7 @@ app.get('/events', async (req, res) => {
     query += ` OFFSET $${paramCount}`;
     params.push(parseInt(offset));
 
-    console.log(`[GET /events] Executing query with params:`, params);
     const result = await pool.query(query, params);
-    console.log(`[GET /events] Query result: ${result.rows.length} events found`);
 
     // Get total count
     let countQuery = 'SELECT COUNT(*) as total FROM events e WHERE e.event_date >= NOW()';
@@ -1783,10 +1801,15 @@ app.get('/events', async (req, res) => {
   } catch (error) {
     console.error('[GET /events] Error:', error);
     console.error('[GET /events] Error stack:', error.stack);
-    res.status(500).json({
-      error: 'Failed to get events',
-      message: error.message,
-      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    // Return empty array instead of error to prevent breaking the app
+    res.json({
+      events: [],
+      pagination: {
+        page: 1,
+        limit: 20,
+        total: 0,
+        pages: 0
+      }
     });
   }
 });
@@ -1813,10 +1836,30 @@ app.get('/events/:id', async (req, res) => {
 // Alias route for mobile app expecting /api/events
 app.get('/api/events', async (req, res) => {
   try {
+    // Check if events table exists first
+    const tableCheck = await pool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = 'events'
+      );
+    `);
+    
+    if (!tableCheck.rows[0].exists) {
+      console.log('[GET /api/events] Events table does not exist, returning empty array');
+      return res.json({
+        events: [],
+        pagination: {
+          page: 1,
+          limit: 20,
+          total: 0,
+          pages: 0
+        }
+      });
+    }
+
     const { page = 1, limit = 20, organization_id } = req.query;
     const offset = (page - 1) * limit;
-
-    console.log(`[GET /api/events] Request - page: ${page}, limit: ${limit}, organization_id: ${organization_id}`);
 
     let query = `
       SELECT e.*, o.name as organization_name, o.brand_color as organization_brand_color, o.logo_url as organization_logo
@@ -1846,9 +1889,7 @@ app.get('/api/events', async (req, res) => {
     query += ` OFFSET $${paramCount}`;
     params.push(parseInt(offset));
 
-    console.log(`[GET /api/events] Executing query with params:`, params);
     const result = await pool.query(query, params);
-    console.log(`[GET /api/events] Query result: ${result.rows.length} events found`);
 
     let countQuery = 'SELECT COUNT(*) as total FROM events e WHERE e.event_date >= NOW()';
     const countParams = [];
@@ -1873,10 +1914,15 @@ app.get('/api/events', async (req, res) => {
   } catch (error) {
     console.error('[GET /api/events] Error:', error);
     console.error('[GET /api/events] Error stack:', error.stack);
-    res.status(500).json({ 
-      error: 'Failed to get events', 
-      message: error.message,
-      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    // Return empty array instead of error to prevent breaking the app
+    res.json({
+      events: [],
+      pagination: {
+        page: 1,
+        limit: 20,
+        total: 0,
+        pages: 0
+      }
     });
   }
 });
