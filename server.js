@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const compression = require('compression');
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -14,6 +15,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Middleware
+app.use(compression()); // Compress responses for faster transfer
 app.use(cors());
 app.use(express.json({ limit: '50mb' })); // Verhoogd voor afbeelding uploads
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -2307,28 +2309,39 @@ app.delete('/api/admin/users/:id', authenticateToken, requireAdmin, async (req, 
 // ===== PUBLIC ORGANIZATIONS ENDPOINT =====
 app.get('/api/organizations', async (req, res) => {
   try {
-    const { page = 1, limit = 20, category, search } = req.query;
+    const { page = 1, limit = 20, category, search, minimal = false } = req.query;
     const offset = (page - 1) * limit;
 
+    // For list view, only get essential fields (much faster)
+    const fields = minimal === 'true' ? `
+      id,
+      name,
+      description,
+      logo_url,
+      brand_color,
+      category
+    ` : `
+      id,
+      name,
+      description,
+      bio,
+      email,
+      phone,
+      whatsapp,
+      address,
+      facebook,
+      instagram,
+      twitter,
+      linkedin,
+      website,
+      logo_url,
+      brand_color,
+      category,
+      created_at
+    `;
+
     let query = `
-      SELECT 
-        id,
-        name,
-        description,
-        bio,
-        email,
-        phone,
-        whatsapp,
-        address,
-        facebook,
-        instagram,
-        twitter,
-        linkedin,
-        website,
-        logo_url,
-        brand_color,
-        category,
-        created_at
+      SELECT ${fields}
       FROM organizations
       WHERE is_approved = true
     `;
@@ -2357,29 +2370,33 @@ app.get('/api/organizations', async (req, res) => {
 
     const result = await pool.query(query, params);
 
-    // Get total count
-    let countQuery = 'SELECT COUNT(*) as total FROM organizations WHERE is_approved = true';
-    const countParams = [];
-    
-    if (category) {
-      countParams.push(category);
-      countQuery += ` AND category = $${countParams.length}`;
-    }
+    // Get total count (only if not minimal, to save time)
+    let total = result.rows.length;
+    if (minimal !== 'true') {
+      let countQuery = 'SELECT COUNT(*) as total FROM organizations WHERE is_approved = true';
+      const countParams = [];
+      
+      if (category) {
+        countParams.push(category);
+        countQuery += ` AND category = $${countParams.length}`;
+      }
 
-    if (search) {
-      countParams.push(`%${search}%`);
-      countQuery += ` AND (name ILIKE $${countParams.length} OR description ILIKE $${countParams.length})`;
-    }
+      if (search) {
+        countParams.push(`%${search}%`);
+        countQuery += ` AND (name ILIKE $${countParams.length} OR description ILIKE $${countParams.length})`;
+      }
 
-    const countResult = await pool.query(countQuery, countParams);
+      const countResult = await pool.query(countQuery, countParams);
+      total = parseInt(countResult.rows[0].total);
+    }
 
     res.json({
       organizations: result.rows,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
-        total: parseInt(countResult.rows[0].total),
-        pages: Math.ceil(countResult.rows[0].total / limit)
+        total: total,
+        pages: Math.ceil(total / limit)
       }
     });
 
