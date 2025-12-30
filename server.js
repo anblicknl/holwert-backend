@@ -66,8 +66,45 @@ module.exports.pool = pool;
 // JWT Secret
 const JWT_SECRET = process.env.JWT_SECRET || 'holwert-secret-key-2024';
 
+// PHP Proxy URL (fallback als direct MySQL niet werkt)
+const PHP_PROXY_URL = process.env.PHP_PROXY_URL || 'https://holwert.appenvloed.com/admin/db-proxy.php';
+const PHP_PROXY_API_KEY = process.env.PHP_PROXY_API_KEY || 'holwert-db-proxy-2026-secure-key-change-in-production';
+
+// Helper om query via PHP proxy uit te voeren
+async function executeQueryViaProxy(query, params = [], action = 'execute') {
+  try {
+    const response = await axios.post(PHP_PROXY_URL, {
+      action: action,
+      query: query,
+      params: params
+    }, {
+      headers: {
+        'X-API-Key': PHP_PROXY_API_KEY,
+        'Content-Type': 'application/json'
+      },
+      timeout: 10000
+    });
+
+    if (action === 'insert') {
+      return {
+        rows: response.data.insertId ? [{ id: response.data.insertId }] : [],
+        rowCount: response.data.affectedRows || 0,
+        insertId: response.data.insertId
+      };
+    }
+
+    return {
+      rows: response.data.rows || [],
+      rowCount: response.data.rowCount || response.data.affectedRows || 0
+    };
+  } catch (error) {
+    console.error('[PHP Proxy] Error:', error.message);
+    throw error;
+  }
+}
+
 // Helper function voor query execution (MySQL compatible)
-// Converteert automatisch PostgreSQL syntax naar MySQL
+// Probeert eerst direct MySQL, fallback naar PHP proxy
 async function executeQuery(query, params = []) {
   // Converteer $1, $2, $3 naar ? voor MySQL
   let mysqlQuery = query.replace(/\$(\d+)/g, '?');
@@ -75,19 +112,28 @@ async function executeQuery(query, params = []) {
   // Converteer ILIKE naar LIKE (case-insensitive)
   mysqlQuery = mysqlQuery.replace(/ILIKE/gi, 'LIKE');
   
-  if (params && params.length > 0) {
-    const [result] = await pool.execute(mysqlQuery, params);
-    // Wrap result in PostgreSQL-compatible format
-    return {
-      rows: Array.isArray(result) ? result : [result],
-      rowCount: result.affectedRows || result.length || 0
-    };
-  } else {
-    const [result] = await pool.execute(mysqlQuery);
-    return {
-      rows: Array.isArray(result) ? result : [result],
-      rowCount: result.affectedRows || result.length || 0
-    };
+  try {
+    // Probeer direct MySQL
+    if (params && params.length > 0) {
+      const [result] = await pool.execute(mysqlQuery, params);
+      return {
+        rows: Array.isArray(result) ? result : [result],
+        rowCount: result.affectedRows || result.length || 0
+      };
+    } else {
+      const [result] = await pool.execute(mysqlQuery);
+      return {
+        rows: Array.isArray(result) ? result : [result],
+        rowCount: result.affectedRows || result.length || 0
+      };
+    }
+  } catch (error) {
+    // Als direct MySQL faalt, gebruik PHP proxy
+    if (error.code === 'ETIMEDOUT' || error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+      console.log('[MySQL] Direct connection failed, using PHP proxy...');
+      return await executeQueryViaProxy(mysqlQuery, params, 'execute');
+    }
+    throw error;
   }
 }
 
@@ -97,21 +143,31 @@ async function executeInsert(query, params = []) {
   mysqlQuery = mysqlQuery.replace(/RETURNING\s+id/gi, '');
   mysqlQuery = mysqlQuery.replace(/RETURNING\s+\*/gi, '');
   
-  if (params && params.length > 0) {
-    const [result] = await pool.execute(mysqlQuery, params);
-    const insertId = result.insertId;
-    return {
-      rows: insertId ? [{ id: insertId }] : [],
-      rowCount: result.affectedRows || 0,
-      insertId: insertId
-    };
-  } else {
-    const [result] = await pool.execute(mysqlQuery);
-    return {
-      rows: result.insertId ? [{ id: result.insertId }] : [],
-      rowCount: result.affectedRows || 0,
-      insertId: result.insertId
-    };
+  try {
+    // Probeer direct MySQL
+    if (params && params.length > 0) {
+      const [result] = await pool.execute(mysqlQuery, params);
+      const insertId = result.insertId;
+      return {
+        rows: insertId ? [{ id: insertId }] : [],
+        rowCount: result.affectedRows || 0,
+        insertId: insertId
+      };
+    } else {
+      const [result] = await pool.execute(mysqlQuery);
+      return {
+        rows: result.insertId ? [{ id: result.insertId }] : [],
+        rowCount: result.affectedRows || 0,
+        insertId: result.insertId
+      };
+    }
+  } catch (error) {
+    // Als direct MySQL faalt, gebruik PHP proxy
+    if (error.code === 'ETIMEDOUT' || error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+      console.log('[MySQL] Direct connection failed, using PHP proxy for INSERT...');
+      return await executeQueryViaProxy(mysqlQuery, params, 'insert');
+    }
+    throw error;
   }
 }
 
