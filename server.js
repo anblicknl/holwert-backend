@@ -2504,6 +2504,288 @@ app.get('/api/migrate-organizations', async (req, res) => {
   }
 });
 
+// MySQL Database Setup Endpoint (voor server-side setup)
+app.post('/api/setup-mysql-database', async (req, res) => {
+  try {
+    const mysql = require('mysql2/promise');
+    
+    // Database credentials (van environment variables of request body)
+    const dbConfig = {
+      host: req.body.host || process.env.DB_HOST || process.env.MYSQL_HOST || 'localhost',
+      port: req.body.port || process.env.DB_PORT || process.env.MYSQL_PORT || 3306,
+      user: req.body.user || process.env.DB_USER || process.env.MYSQL_USER || 'db_holwert',
+      password: req.body.password || process.env.DB_PASSWORD || process.env.MYSQL_PASSWORD || 'h0lwert.2026',
+      database: req.body.database || process.env.DB_NAME || process.env.MYSQL_DATABASE || 'appenvlo_holwert',
+      multipleStatements: true,
+      charset: 'utf8mb4'
+    };
+
+    console.log('[MySQL Setup] Starting database setup...');
+    console.log('[MySQL Setup] Database:', dbConfig.database);
+    console.log('[MySQL Setup] Host:', `${dbConfig.host}:${dbConfig.port}`);
+
+    const connection = await mysql.createConnection(dbConfig);
+    console.log('[MySQL Setup] Connected to database');
+
+    const results = {
+      created: [],
+      skipped: [],
+      errors: []
+    };
+
+    // Helper functies
+    const executeQuery = async (query, params = []) => {
+      try {
+        const [result] = await connection.execute(query, params);
+        return result;
+      } catch (error) {
+        throw error;
+      }
+    };
+
+    const tableExists = async (tableName) => {
+      try {
+        const [result] = await connection.execute(
+          `SELECT COUNT(*) as count FROM information_schema.tables 
+           WHERE table_schema = ? AND table_name = ?`,
+          [dbConfig.database, tableName]
+        );
+        return result[0].count > 0;
+      } catch (error) {
+        return false;
+      }
+    };
+
+    // Users tabel
+    if (!(await tableExists('users'))) {
+      await executeQuery(`
+        CREATE TABLE users (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          email VARCHAR(255) UNIQUE NOT NULL,
+          password_hash VARCHAR(255) NOT NULL,
+          first_name VARCHAR(100),
+          last_name VARCHAR(100),
+          role VARCHAR(20) DEFAULT 'user',
+          is_active BOOLEAN DEFAULT true,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          INDEX idx_users_email (email),
+          INDEX idx_users_role (role),
+          INDEX idx_users_active (is_active)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `);
+      results.created.push('users');
+    } else {
+      results.skipped.push('users');
+    }
+
+    // Organizations tabel
+    if (!(await tableExists('organizations'))) {
+      await executeQuery(`
+        CREATE TABLE organizations (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          name VARCHAR(255) NOT NULL,
+          category VARCHAR(50),
+          description TEXT,
+          bio TEXT,
+          website VARCHAR(255),
+          email VARCHAR(255),
+          phone VARCHAR(20),
+          whatsapp VARCHAR(20),
+          address TEXT,
+          facebook VARCHAR(255),
+          instagram VARCHAR(255),
+          twitter VARCHAR(255),
+          linkedin VARCHAR(255),
+          brand_color VARCHAR(7),
+          logo_url TEXT,
+          is_approved BOOLEAN DEFAULT false,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          INDEX idx_organizations_name (name),
+          INDEX idx_organizations_category (category),
+          INDEX idx_organizations_approved (is_approved)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `);
+      results.created.push('organizations');
+    } else {
+      results.skipped.push('organizations');
+    }
+
+    // News tabel
+    if (!(await tableExists('news'))) {
+      await executeQuery(`
+        CREATE TABLE news (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          title VARCHAR(255) NOT NULL,
+          content TEXT NOT NULL,
+          excerpt TEXT,
+          image_url TEXT,
+          category VARCHAR(50),
+          custom_category VARCHAR(100),
+          author_id INT NOT NULL,
+          organization_id INT,
+          is_published BOOLEAN DEFAULT false,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          FOREIGN KEY (author_id) REFERENCES users(id) ON DELETE CASCADE,
+          FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
+          INDEX idx_news_author (author_id),
+          INDEX idx_news_organization (organization_id),
+          INDEX idx_news_published (is_published),
+          INDEX idx_news_created (created_at DESC),
+          INDEX idx_news_category (category)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `);
+      results.created.push('news');
+    } else {
+      results.skipped.push('news');
+    }
+
+    // Events tabel
+    if (!(await tableExists('events'))) {
+      await executeQuery(`
+        CREATE TABLE events (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          title VARCHAR(255) NOT NULL,
+          description TEXT,
+          event_date DATETIME NOT NULL,
+          event_end_date DATETIME,
+          location VARCHAR(255),
+          location_details TEXT,
+          organizer_id INT NOT NULL,
+          organization_id INT,
+          category VARCHAR(50) DEFAULT 'evenement',
+          price DECIMAL(10,2) DEFAULT 0.00,
+          max_attendees INT,
+          image_url TEXT,
+          status VARCHAR(20) DEFAULT 'scheduled',
+          published_at DATETIME,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          FOREIGN KEY (organizer_id) REFERENCES users(id) ON DELETE CASCADE,
+          FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
+          INDEX idx_events_organizer (organizer_id),
+          INDEX idx_events_organization (organization_id),
+          INDEX idx_events_date (event_date),
+          INDEX idx_events_status (status)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `);
+      results.created.push('events');
+    } else {
+      results.skipped.push('events');
+    }
+
+    // Bookmarks tabel
+    if (!(await tableExists('bookmarks'))) {
+      await executeQuery(`
+        CREATE TABLE bookmarks (
+          user_id INT NOT NULL,
+          news_id INT NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (user_id, news_id),
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+          FOREIGN KEY (news_id) REFERENCES news(id) ON DELETE CASCADE,
+          INDEX idx_bookmarks_user (user_id),
+          INDEX idx_bookmarks_news (news_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `);
+      results.created.push('bookmarks');
+    } else {
+      results.skipped.push('bookmarks');
+    }
+
+    // Follows tabel
+    if (!(await tableExists('follows'))) {
+      await executeQuery(`
+        CREATE TABLE follows (
+          user_id INT NOT NULL,
+          organization_id INT NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (user_id, organization_id),
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+          FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+          INDEX idx_follows_user (user_id),
+          INDEX idx_follows_organization (organization_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `);
+      results.created.push('follows');
+    } else {
+      results.skipped.push('follows');
+    }
+
+    // Push tokens tabel
+    if (!(await tableExists('push_tokens'))) {
+      await executeQuery(`
+        CREATE TABLE push_tokens (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          user_id INT,
+          token VARCHAR(255) UNIQUE NOT NULL,
+          device_type VARCHAR(50),
+          device_name VARCHAR(255),
+          notification_preferences JSON DEFAULT ('{"news":true,"agenda":true,"organizations":true,"weather":true}'),
+          is_active BOOLEAN DEFAULT true,
+          last_used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+          INDEX idx_push_tokens_user_id (user_id),
+          INDEX idx_push_tokens_token (token),
+          INDEX idx_push_tokens_active (is_active)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `);
+      results.created.push('push_tokens');
+    } else {
+      results.skipped.push('push_tokens');
+    }
+
+    // Notification history tabel
+    if (!(await tableExists('notification_history'))) {
+      await executeQuery(`
+        CREATE TABLE notification_history (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          user_id INT,
+          push_token_id INT,
+          notification_type VARCHAR(50),
+          title VARCHAR(255),
+          body TEXT,
+          data JSON,
+          status VARCHAR(50),
+          error_message TEXT,
+          sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          delivered_at TIMESTAMP,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+          FOREIGN KEY (push_token_id) REFERENCES push_tokens(id) ON DELETE SET NULL,
+          INDEX idx_notification_history_user_id (user_id),
+          INDEX idx_notification_history_type (notification_type),
+          INDEX idx_notification_history_sent_at (sent_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `);
+      results.created.push('notification_history');
+    } else {
+      results.skipped.push('notification_history');
+    }
+
+    await connection.end();
+    console.log('[MySQL Setup] Database setup completed');
+
+    res.json({
+      success: true,
+      message: 'Database setup completed successfully',
+      results: results
+    });
+
+  } catch (error) {
+    console.error('[MySQL Setup] Error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Database setup failed',
+      message: error.message,
+      code: error.code
+    });
+  }
+});
+
 // 404 handler
 app.use('*', (req, res) => {
   res.status(404).json({ error: 'Route not found' });
