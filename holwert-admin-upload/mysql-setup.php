@@ -273,6 +273,90 @@ try {
         echo "</ul>";
     }
     
+    // Haal database/server informatie op voor Vercel configuratie
+    echo "<hr style='margin: 30px 0; border: 1px solid #ddd;'>";
+    echo "<h2>📋 Database Connectie Informatie voor Vercel</h2>";
+    echo "<div style='background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;'>";
+    
+    // MySQL server informatie
+    $serverInfo = $pdo->query("SELECT VERSION() as version, DATABASE() as database_name, USER() as user, @@hostname as hostname")->fetch();
+    $hostInfo = $pdo->query("SELECT @@hostname as hostname, @@port as port")->fetch();
+    
+    // Server hostname/IP
+    $serverHostname = gethostname();
+    $serverIP = $_SERVER['SERVER_ADDR'] ?? 'Niet beschikbaar';
+    
+    echo "<h3>🔌 Database Server Informatie:</h3>";
+    echo "<table style='width: 100%; border-collapse: collapse; margin: 15px 0;'>";
+    echo "<tr><td style='padding: 8px; border-bottom: 1px solid #ddd;'><strong>MySQL Versie:</strong></td><td style='padding: 8px; border-bottom: 1px solid #ddd;'>" . htmlspecialchars($serverInfo['version']) . "</td></tr>";
+    echo "<tr><td style='padding: 8px; border-bottom: 1px solid #ddd;'><strong>Database Naam:</strong></td><td style='padding: 8px; border-bottom: 1px solid #ddd;'>" . htmlspecialchars($serverInfo['database_name']) . "</td></tr>";
+    echo "<tr><td style='padding: 8px; border-bottom: 1px solid #ddd;'><strong>MySQL Hostname:</strong></td><td style='padding: 8px; border-bottom: 1px solid #ddd;'>" . htmlspecialchars($hostInfo['hostname']) . "</td></tr>";
+    echo "<tr><td style='padding: 8px; border-bottom: 1px solid #ddd;'><strong>MySQL Poort:</strong></td><td style='padding: 8px; border-bottom: 1px solid #ddd;'>" . htmlspecialchars($hostInfo['port']) . "</td></tr>";
+    echo "<tr><td style='padding: 8px; border-bottom: 1px solid #ddd;'><strong>Web Server Hostname:</strong></td><td style='padding: 8px; border-bottom: 1px solid #ddd;'>" . htmlspecialchars($serverHostname) . "</td></tr>";
+    echo "<tr><td style='padding: 8px; border-bottom: 1px solid #ddd;'><strong>Web Server IP:</strong></td><td style='padding: 8px; border-bottom: 1px solid #ddd;'>" . htmlspecialchars($serverIP) . "</td></tr>";
+    echo "<tr><td style='padding: 8px;'><strong>Database Gebruiker:</strong></td><td style='padding: 8px;'>" . htmlspecialchars($db_user) . "</td></tr>";
+    echo "</table>";
+    
+    // Test externe toegankelijkheid
+    echo "<h3>🌐 Externe Toegankelijkheid Test:</h3>";
+    $domain = $_SERVER['HTTP_HOST'] ?? 'Niet beschikbaar';
+    echo "<p><strong>Huidige Domain:</strong> " . htmlspecialchars($domain) . "</p>";
+    
+    // Mogelijke hostnames voor MySQL
+    $possibleHosts = [
+        'localhost',
+        $serverHostname,
+        str_replace('www.', '', $domain),
+        'mysql.' . str_replace('www.', '', $domain),
+        $serverIP
+    ];
+    
+    echo "<p><strong>Mogelijke MySQL Hostnames voor Vercel:</strong></p>";
+    echo "<ul>";
+    foreach (array_unique($possibleHosts) as $host) {
+        if ($host && $host !== 'Niet beschikbaar') {
+            echo "<li><code>" . htmlspecialchars($host) . "</code></li>";
+        }
+    }
+    echo "</ul>";
+    
+    echo "<p style='color: #856404; background: #fff3cd; padding: 10px; border-radius: 4px; margin: 10px 0;'>";
+    echo "⚠️ <strong>Let op:</strong> Als MySQL alleen lokaal toegankelijk is, moet je mogelijk je hosting provider vragen om externe toegang in te schakelen, of de backend op deze server draaien in plaats van Vercel.";
+    echo "</p>";
+    
+    // Vercel Environment Variables
+    echo "<h3>⚙️ Vercel Environment Variables:</h3>";
+    echo "<p>Voeg deze toe in Vercel Dashboard → Project → Settings → Environment Variables:</p>";
+    echo "<div style='background: #f8f9fa; padding: 15px; border-radius: 4px; font-family: monospace; margin: 10px 0;'>";
+    echo "<strong>DB_HOST</strong> = " . htmlspecialchars($possibleHosts[1] ?? 'localhost') . "<br>";
+    echo "<strong>DB_PORT</strong> = 3306<br>";
+    echo "<strong>DB_USER</strong> = " . htmlspecialchars($db_user) . "<br>";
+    echo "<strong>DB_PASSWORD</strong> = " . htmlspecialchars($db_password) . "<br>";
+    echo "<strong>DB_NAME</strong> = " . htmlspecialchars($db_name) . "<br>";
+    echo "</div>";
+    
+    // Connection string
+    echo "<h3>🔗 Connection String (alternatief):</h3>";
+    $connectionString = "mysql://" . urlencode($db_user) . ":" . urlencode($db_password) . "@" . 
+                       ($possibleHosts[1] ?? 'localhost') . ":3306/" . $db_name;
+    echo "<div style='background: #f8f9fa; padding: 15px; border-radius: 4px; font-family: monospace; margin: 10px 0; word-break: break-all;'>";
+    echo htmlspecialchars($connectionString);
+    echo "</div>";
+    echo "<p style='font-size: 12px; color: #666;'>Gebruik dit als <strong>DATABASE_URL</strong> in Vercel (als alternatief voor individuele variabelen)</p>";
+    
+    echo "</div>";
+    
+    echo "<hr style='margin: 30px 0; border: 1px solid #ddd;'>";
+    echo "<h2>📝 Volgende Stappen:</h2>";
+    echo "<ol style='line-height: 2;'>";
+    echo "<li>Kopieer de bovenstaande database connectie informatie</li>";
+    echo "<li>Ga naar Vercel Dashboard → Project → Settings → Environment Variables</li>";
+    echo "<li>Voeg de environment variables toe (probeer eerst de MySQL hostname, als dat niet werkt probeer dan de andere opties)</li>";
+    echo "<li>Update server.js om MySQL te gebruiken (ik help je hierbij)</li>";
+    echo "<li>Redeploy de backend op Vercel</li>";
+    echo "<li>Test de API endpoints</li>";
+    echo "</ol>";
+    
 } catch (PDOException $e) {
     echo "<h2>❌ Fout</h2>";
     echo "<p><strong>Error:</strong> " . htmlspecialchars($e->getMessage()) . "</p>";
