@@ -1446,6 +1446,46 @@ app.delete('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, r
   }
 });
 
+// Get single organization (admin) - MUST BE BEFORE /api/admin/organizations (without :id)
+app.get('/api/admin/organizations/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log(`[GET /api/admin/organizations/:id] Request for organization ID: ${id}, user:`, req.user);
+    
+    // Check admin privileges
+    const roleRaw = req.user && req.user.role;
+    const role = typeof roleRaw === 'string' ? roleRaw.toLowerCase() : undefined;
+    const allowed = ['admin', 'superadmin', 'editor', 'user'];
+    if (!role || !allowed.includes(role)) {
+      console.log(`[GET /api/admin/organizations/:id] Access denied for role: ${role}`);
+      return res.status(403).json({ error: 'Admin privileges required' });
+    }
+    
+    if (!id || isNaN(parseInt(id))) {
+      return res.status(400).json({ error: 'Invalid organization ID' });
+    }
+    
+    const result = await pool.query(
+      `SELECT id, name, category, description, bio, is_approved, website, email, phone, whatsapp, address, 
+              facebook, instagram, twitter, linkedin, brand_color, logo_url, created_at, updated_at
+       FROM organizations 
+       WHERE id = $1`,
+      [id]
+    );
+    
+    if (!result.rows.length) {
+      console.log(`[GET /api/admin/organizations/:id] Organization ${id} not found in database`);
+      return res.status(404).json({ error: 'Organization not found' });
+    }
+    
+    console.log(`[GET /api/admin/organizations/:id] Successfully retrieved organization ${id}`);
+    res.json({ organization: result.rows[0] });
+  } catch (error) {
+    console.error('[GET /api/admin/organizations/:id] Error:', error);
+    res.status(500).json({ error: 'Failed to get organization', message: error.message });
+  }
+});
+
 // Get all organizations (admin)
 app.get('/api/admin/organizations', authenticateToken, async (req, res) => {
   try {
