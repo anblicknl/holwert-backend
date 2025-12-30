@@ -1721,6 +1721,8 @@ app.get('/events', async (req, res) => {
     const { page = 1, limit = 20, organization_id } = req.query;
     const offset = (page - 1) * limit;
 
+    console.log(`[GET /events] Request - page: ${page}, limit: ${limit}, organization_id: ${organization_id}`);
+
     let query = `
       SELECT e.*, o.name as organization_name, o.brand_color as organization_brand_color, o.logo_url as organization_logo
       FROM events e
@@ -1733,9 +1735,13 @@ app.get('/events', async (req, res) => {
     // Filter by organization_id if provided
     let paramCount = 0;
     if (organization_id) {
+      const orgId = parseInt(organization_id);
+      if (isNaN(orgId)) {
+        return res.status(400).json({ error: 'Invalid organization_id' });
+      }
       paramCount++;
       query += ` AND e.organization_id = $${paramCount}`;
-      params.push(parseInt(organization_id));
+      params.push(orgId);
     }
     
     paramCount++;
@@ -1746,15 +1752,20 @@ app.get('/events', async (req, res) => {
     query += ` OFFSET $${paramCount}`;
     params.push(parseInt(offset));
 
+    console.log(`[GET /events] Executing query with params:`, params);
     const result = await pool.query(query, params);
+    console.log(`[GET /events] Query result: ${result.rows.length} events found`);
 
     // Get total count
     let countQuery = 'SELECT COUNT(*) as total FROM events e WHERE e.event_date >= NOW()';
     const countParams = [];
     
     if (organization_id) {
-      countQuery += ` AND e.organization_id = $1`;
-      countParams.push(parseInt(organization_id));
+      const orgId = parseInt(organization_id);
+      if (!isNaN(orgId)) {
+        countQuery += ` AND e.organization_id = $1`;
+        countParams.push(orgId);
+      }
     }
     
     const countResult = await pool.query(countQuery, countParams);
@@ -1770,10 +1781,12 @@ app.get('/events', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Get events error:', error);
+    console.error('[GET /events] Error:', error);
+    console.error('[GET /events] Error stack:', error.stack);
     res.status(500).json({
       error: 'Failed to get events',
-      message: error.message
+      message: error.message,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 });
@@ -1803,6 +1816,8 @@ app.get('/api/events', async (req, res) => {
     const { page = 1, limit = 20, organization_id } = req.query;
     const offset = (page - 1) * limit;
 
+    console.log(`[GET /api/events] Request - page: ${page}, limit: ${limit}, organization_id: ${organization_id}`);
+
     let query = `
       SELECT e.*, o.name as organization_name, o.brand_color as organization_brand_color, o.logo_url as organization_logo
       FROM events e
@@ -1814,9 +1829,13 @@ app.get('/api/events', async (req, res) => {
     
     let paramCount = 0;
     if (organization_id) {
+      const orgId = parseInt(organization_id);
+      if (isNaN(orgId)) {
+        return res.status(400).json({ error: 'Invalid organization_id' });
+      }
       paramCount++;
       query += ` AND e.organization_id = $${paramCount}`;
-      params.push(parseInt(organization_id));
+      params.push(orgId);
     }
     
     paramCount++;
@@ -1827,13 +1846,18 @@ app.get('/api/events', async (req, res) => {
     query += ` OFFSET $${paramCount}`;
     params.push(parseInt(offset));
 
+    console.log(`[GET /api/events] Executing query with params:`, params);
     const result = await pool.query(query, params);
+    console.log(`[GET /api/events] Query result: ${result.rows.length} events found`);
 
     let countQuery = 'SELECT COUNT(*) as total FROM events e WHERE e.event_date >= NOW()';
     const countParams = [];
     if (organization_id) {
-      countQuery += ` AND e.organization_id = $1`;
-      countParams.push(parseInt(organization_id));
+      const orgId = parseInt(organization_id);
+      if (!isNaN(orgId)) {
+        countQuery += ` AND e.organization_id = $1`;
+        countParams.push(orgId);
+      }
     }
     const countResult = await pool.query(countQuery, countParams);
 
@@ -1847,8 +1871,13 @@ app.get('/api/events', async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Get events (alias) error:', error);
-    res.status(500).json({ error: 'Failed to get events', message: error.message });
+    console.error('[GET /api/events] Error:', error);
+    console.error('[GET /api/events] Error stack:', error.stack);
+    res.status(500).json({ 
+      error: 'Failed to get events', 
+      message: error.message,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 });
 
