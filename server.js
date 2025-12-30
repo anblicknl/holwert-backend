@@ -37,7 +37,7 @@ const upload = multer({
 });
 
 // Database connection - MySQL
-const pool = mysql.createPool({
+const dbConfig = {
   host: process.env.DB_HOST || process.env.MYSQL_HOST || 'localhost',
   port: process.env.DB_PORT || process.env.MYSQL_PORT || 3306,
   user: process.env.DB_USER || process.env.MYSQL_USER || 'root',
@@ -47,7 +47,18 @@ const pool = mysql.createPool({
   connectionLimit: 10,
   queueLimit: 0,
   charset: 'utf8mb4'
+};
+
+// Log database config (zonder password)
+console.log('[MySQL] Database config:', {
+  host: dbConfig.host,
+  port: dbConfig.port,
+  user: dbConfig.user,
+  database: dbConfig.database,
+  hasPassword: !!dbConfig.password
 });
+
+const pool = mysql.createPool(dbConfig);
 
 // Export pool for use in routes
 module.exports.pool = pool;
@@ -222,18 +233,33 @@ app.get('/api/health', async (req, res) => {
   try {
     // Test database connection
     await executeQuery('SELECT 1');
-    const dbHost = process.env.DB_HOST || process.env.MYSQL_HOST || 'MySQL';
-  res.json({ 
-    status: 'OK', 
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development',
-      database: `Connected to ${dbHost}`
+    const dbHost = process.env.DB_HOST || process.env.MYSQL_HOST || 'localhost';
+    const dbName = process.env.DB_NAME || process.env.MYSQL_DATABASE || 'holwert';
+    
+    res.json({ 
+      status: 'OK', 
+      timestamp: new Date().toISOString(),
+      environment: process.env.NODE_ENV || 'development',
+      database: `Connected to MySQL (${dbHost}/${dbName})`
     });
   } catch (error) {
+    const dbHost = process.env.DB_HOST || process.env.MYSQL_HOST || 'localhost (NOT SET!)';
+    const dbUser = process.env.DB_USER || process.env.MYSQL_USER || 'NOT SET';
+    const dbName = process.env.DB_NAME || process.env.MYSQL_DATABASE || 'NOT SET';
+    
     res.status(500).json({
       status: 'ERROR',
+      timestamp: new Date().toISOString(),
+      environment: process.env.NODE_ENV || 'development',
       database: 'Connection failed',
-      error: error.message
+      error: error.message,
+      config: {
+        host: dbHost,
+        user: dbUser,
+        database: dbName,
+        hasPassword: !!(process.env.DB_PASSWORD || process.env.MYSQL_PASSWORD)
+      },
+      hint: 'Check Vercel environment variables: DB_HOST, DB_USER, DB_PASSWORD, DB_NAME'
     });
   }
 });
