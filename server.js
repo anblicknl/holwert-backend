@@ -1319,20 +1319,24 @@ app.get('/api/auth/verify', authenticateToken, (req, res) => {
 
 // ===== ADMIN ENDPOINTS =====
 
-// Get admin dashboard statistics
+// Get admin dashboard statistics - OPTIMIZED: Single query instead of 4 separate queries
 app.get('/api/admin/stats', authenticateToken, async (req, res) => {
   try {
-    const [usersResult, orgsResult, newsResult, eventsResult] = await Promise.all([
-      executeQuery('SELECT COUNT(*) as count FROM users'),
-      executeQuery('SELECT COUNT(*) as count FROM organizations'),
-      executeQuery('SELECT COUNT(*) as count FROM news'),
-      executeQuery('SELECT COUNT(*) as count FROM events')
-    ]);
+    // Single query to get all counts at once - MUCH faster!
+    const result = await executeQuery(`
+      SELECT 
+        (SELECT COUNT(*) FROM users) as users_count,
+        (SELECT COUNT(*) FROM organizations) as organizations_count,
+        (SELECT COUNT(*) FROM news) as news_count,
+        (SELECT COUNT(*) FROM events) as events_count
+    `);
+    
+    const row = result.rows[0] || {};
     res.json({
-      users: parseInt(usersResult.rows[0].count) || 0,
-      organizations: parseInt(orgsResult.rows[0].count) || 0,
-      news: parseInt(newsResult.rows[0].count) || 0,
-      events: parseInt(eventsResult.rows[0].count) || 0
+      users: parseInt(row.users_count) || 0,
+      organizations: parseInt(row.organizations_count) || 0,
+      news: parseInt(row.news_count) || 0,
+      events: parseInt(row.events_count) || 0
     });
   } catch (error) {
     console.error('Get admin stats error:', error);
@@ -1340,41 +1344,38 @@ app.get('/api/admin/stats', authenticateToken, async (req, res) => {
   }
 });
 
-// Get moderation count (admin)
+// Get moderation count (admin) - OPTIMIZED: Single query
 app.get('/api/admin/moderation/count', authenticateToken, async (req, res) => {
   try {
-    let orgsCount = 0;
-    let newsCount = 0;
-    let eventsCount = 0;
+    // Single query to get all pending counts at once
+    const result = await executeQuery(`
+      SELECT 
+        (SELECT COUNT(*) FROM organizations WHERE is_approved = false) as orgs_count,
+        (SELECT COUNT(*) FROM news WHERE is_published = false) as news_count,
+        (SELECT COUNT(*) FROM events WHERE is_published = false) as events_count
+    `);
     
-    try {
-      const orgsResult = await executeQuery('SELECT COUNT(*) as count FROM organizations WHERE is_approved = false');
-      orgsCount = parseInt(orgsResult.rows[0]?.count || 0);
-    } catch (e) {
-      console.warn('Error counting organizations:', e.message);
-    }
+    const row = result.rows[0] || {};
+    const totalCount = (parseInt(row.orgs_count) || 0) + 
+                      (parseInt(row.news_count) || 0) + 
+                      (parseInt(row.events_count) || 0);
     
-    try {
-      const newsResult = await executeQuery("SELECT COUNT(*) as count FROM news WHERE is_published = false");
-      newsCount = parseInt(newsResult.rows[0]?.count || 0);
-    } catch (e) {
-      console.warn('Error counting news:', e.message);
-    }
-    
-    try {
-      // Check if events table exists first
-      const eventsResult = await executeQuery("SELECT COUNT(*) as count FROM events WHERE is_published = false");
-      eventsCount = parseInt(eventsResult.rows[0]?.count || 0);
-    } catch (e) {
-      // Events table might not exist, that's OK
-      console.warn('Error counting events (table might not exist):', e.message);
-    }
-    
-    const totalCount = orgsCount + newsCount + eventsCount;
     res.json({ count: totalCount });
   } catch (error) {
-    console.error('Get moderation count error:', error);
-    res.status(500).json({ error: 'Failed to get moderation count', message: error.message });
+    // If events table doesn't exist, try without it
+    try {
+      const result = await executeQuery(`
+        SELECT 
+          (SELECT COUNT(*) FROM organizations WHERE is_approved = false) as orgs_count,
+          (SELECT COUNT(*) FROM news WHERE is_published = false) as news_count
+      `);
+      const row = result.rows[0] || {};
+      const totalCount = (parseInt(row.orgs_count) || 0) + (parseInt(row.news_count) || 0);
+      res.json({ count: totalCount });
+    } catch (e) {
+      console.error('Get moderation count error:', error);
+      res.status(500).json({ error: 'Failed to get moderation count', message: error.message });
+    }
   }
 });
 
