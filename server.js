@@ -1731,17 +1731,50 @@ app.get('/api/admin/organizations', authenticateToken, async (req, res) => {
 app.post('/api/admin/organizations', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const {
-      name, category, description, is_approved = true, // Superadmin created - automatically approved
-      website, contact_email, contact_phone, brand_color, logo_url
+      name, category, description, bio, is_approved = true,
+      website, email, phone, whatsapp, address,
+      facebook, instagram, twitter, linkedin,
+      brand_color, logo_url
     } = req.body;
+    
     if (!name) return res.status(400).json({ error: 'name is required' });
-    const result = await executeQuery(
-      `INSERT INTO organizations (name, category, description, is_approved, website, contact_email, contact_phone, brand_color, logo_url)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-       RETURNING id, name, category, description, is_approved, website, contact_email, contact_phone, brand_color, logo_url, created_at`,
-      [name, category || null, description || null, is_approved, website || null, contact_email || null, contact_phone || null, brand_color || null, logo_url || null]
+    
+    const result = await executeInsert(
+      `INSERT INTO organizations (
+        name, category, description, bio, is_approved,
+        website, email, phone, whatsapp, address,
+        facebook, instagram, twitter, linkedin,
+        brand_color, logo_url, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [
+        name,
+        category || null,
+        description || null,
+        bio || null,
+        is_approved !== false,
+        website || null,
+        email || null,
+        phone || null,
+        whatsapp || null,
+        address || null,
+        facebook || null,
+        instagram || null,
+        twitter || null,
+        linkedin || null,
+        brand_color || null,
+        logo_url || null
+      ]
     );
-    res.status(201).json({ organization: result.rows[0] });
+    
+    // Fetch the created organization
+    const orgResult = await executeQuery(
+      `SELECT id, name, category, description, bio, is_approved, website, email, phone, whatsapp, address,
+              facebook, instagram, twitter, linkedin, brand_color, logo_url, created_at, updated_at
+       FROM organizations WHERE id = ?`,
+      [result.insertId]
+    );
+    
+    res.status(201).json({ organization: orgResult.rows[0] });
   } catch (error) {
     console.error('Create organization error:', error);
     res.status(500).json({ error: 'Failed to create organization', message: error.message });
