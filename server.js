@@ -74,6 +74,9 @@ const PHP_PROXY_API_KEY = process.env.PHP_PROXY_API_KEY || 'holwert-db-proxy-202
 async function executeQueryViaProxy(query, params = [], action = 'execute') {
   try {
     console.log(`[PHP Proxy] Executing ${action} query via proxy...`);
+    console.log(`[PHP Proxy] Query: ${query.substring(0, 100)}...`);
+    console.log(`[PHP Proxy] Params count: ${params.length}`);
+    
     const response = await axios.post(PHP_PROXY_URL, {
       action: action,
       query: query,
@@ -86,15 +89,26 @@ async function executeQueryViaProxy(query, params = [], action = 'execute') {
       timeout: 15000 // 15 seconden timeout
     });
 
-    if (!response.data.success && response.data.error) {
-      throw new Error(`PHP Proxy error: ${response.data.error}`);
+    console.log(`[PHP Proxy] Response status: ${response.status}`);
+    console.log(`[PHP Proxy] Response data:`, JSON.stringify(response.data).substring(0, 200));
+
+    // Check for error in response
+    if (response.data.error) {
+      throw new Error(`PHP Proxy error: ${response.data.error} - ${response.data.message || ''}`);
     }
 
     if (action === 'insert') {
+      const insertId = response.data.insertId ? parseInt(response.data.insertId) : null;
+      console.log(`[PHP Proxy] Insert result - insertId: ${insertId}, affectedRows: ${response.data.affectedRows}`);
+      
+      if (!insertId) {
+        throw new Error('PHP Proxy returned null insertId for INSERT query');
+      }
+      
       return {
-        rows: response.data.insertId ? [{ id: response.data.insertId }] : [],
+        rows: [{ id: insertId }],
         rowCount: response.data.affectedRows || 0,
-        insertId: response.data.insertId
+        insertId: insertId
       };
     }
 
@@ -112,7 +126,8 @@ async function executeQueryViaProxy(query, params = [], action = 'execute') {
   } catch (error) {
     console.error('[PHP Proxy] Error:', error.message);
     if (error.response) {
-      console.error('[PHP Proxy] Response:', error.response.data);
+      console.error('[PHP Proxy] Response status:', error.response.status);
+      console.error('[PHP Proxy] Response data:', error.response.data);
     }
     throw error;
   }
@@ -1802,13 +1817,19 @@ app.post('/api/admin/organizations', authenticateToken, requireAdmin, async (req
       ]
     );
     
-    console.log('[POST /api/admin/organizations] Insert result:', { insertId: result.insertId, rowCount: result.rowCount });
+    console.log('[POST /api/admin/organizations] Insert result:', { 
+      insertId: result.insertId, 
+      rowCount: result.rowCount,
+      hasRows: !!result.rows && result.rows.length > 0
+    });
     
     if (!result.insertId) {
-      throw new Error('Failed to get insert ID from database');
+      console.error('[POST /api/admin/organizations] No insertId returned from executeInsert');
+      throw new Error('Failed to get insert ID from database. Insert may have failed.');
     }
     
     // Fetch the created organization
+    console.log('[POST /api/admin/organizations] Fetching created organization with id:', result.insertId);
     const orgResult = await executeQuery(
       `SELECT id, name, category, description, bio, is_approved, website, email, phone, whatsapp, address,
               facebook, instagram, twitter, linkedin, brand_color, logo_url, created_at, updated_at
@@ -1816,8 +1837,14 @@ app.post('/api/admin/organizations', authenticateToken, requireAdmin, async (req
       [result.insertId]
     );
     
+    console.log('[POST /api/admin/organizations] Fetch result:', { 
+      rowCount: orgResult.rowCount,
+      hasRows: !!orgResult.rows && orgResult.rows.length > 0
+    });
+    
     if (!orgResult.rows || orgResult.rows.length === 0) {
-      throw new Error(`Failed to fetch created organization with id ${result.insertId}`);
+      console.error('[POST /api/admin/organizations] Organization not found after insert. InsertId was:', result.insertId);
+      throw new Error(`Failed to fetch created organization with id ${result.insertId}. Organization may not have been created.`);
     }
     
     console.log('[POST /api/admin/organizations] Successfully created organization:', orgResult.rows[0].id);
