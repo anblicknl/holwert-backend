@@ -1951,7 +1951,7 @@ app.put('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (
             facebook, instagram, twitter, linkedin, brand_color, logo_url } = req.body;
     const sets = [];
     const params = [];
-    const push = (v) => { params.push(v); return `$${params.length}`; };
+    const push = (v) => { params.push(v); return '?'; }; // MySQL uses ? instead of $1, $2, etc.
     if (name !== undefined) sets.push(`name = ${push(name)}`);
     if (category !== undefined) sets.push(`category = ${push(category)}`);
     if (description !== undefined) sets.push(`description = ${push(description)}`);
@@ -1970,12 +1970,21 @@ app.put('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (
     if (logo_url !== undefined) sets.push(`logo_url = ${push(logo_url)}`);
     if (!sets.length) return res.status(400).json({ error: 'No fields to update' });
     params.push(id);
-    const result = await executeQuery(
-      `UPDATE organizations SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${params.length}
-       RETURNING id, name, category, description, bio, is_approved, website, email, phone, whatsapp, address, 
-                 facebook, instagram, twitter, linkedin, brand_color, logo_url, created_at, updated_at`,
+    
+    // MySQL UPDATE query (no RETURNING clause)
+    await executeQuery(
+      `UPDATE organizations SET ${sets.join(', ')}, updated_at = NOW() WHERE id = ?`,
       params
     );
+    
+    // Fetch the updated organization
+    const result = await executeQuery(
+      `SELECT id, name, category, description, bio, is_approved, website, email, phone, whatsapp, address, 
+              facebook, instagram, twitter, linkedin, brand_color, logo_url, created_at, updated_at
+       FROM organizations WHERE id = ?`,
+      [id]
+    );
+    
     if (!result.rows.length) return res.status(404).json({ error: 'Organization not found' });
     
     // Invalidate cache
@@ -1994,8 +2003,14 @@ app.put('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (
 app.post('/api/admin/organizations/:id/approve', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await executeQuery('UPDATE organizations SET is_approved = true WHERE id = $1', [id]);
+    const result = await executeQuery('UPDATE organizations SET is_approved = true WHERE id = ?', [id]);
     if (!result.rowCount) return res.status(404).json({ error: 'Organization not found' });
+    
+    // Invalidate cache
+    invalidateCache('/api/admin/organizations');
+    invalidateCache('/api/admin/stats');
+    invalidateCache('/api/admin/moderation/count');
+    
     res.json({ message: 'Organization approved successfully' });
   } catch (error) {
     console.error('Approve organization error:', error);
@@ -2007,8 +2022,14 @@ app.post('/api/admin/organizations/:id/approve', authenticateToken, requireAdmin
 app.post('/api/admin/organizations/:id/reject', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await executeQuery('UPDATE organizations SET is_approved = false WHERE id = $1', [id]);
+    const result = await executeQuery('UPDATE organizations SET is_approved = false WHERE id = ?', [id]);
     if (!result.rowCount) return res.status(404).json({ error: 'Organization not found' });
+    
+    // Invalidate cache
+    invalidateCache('/api/admin/organizations');
+    invalidateCache('/api/admin/stats');
+    invalidateCache('/api/admin/moderation/count');
+    
     res.json({ message: 'Organization rejected successfully' });
   } catch (error) {
     console.error('Reject organization error:', error);
