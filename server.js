@@ -14,6 +14,54 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Simple in-memory cache for read queries (performance optimization)
+const cache = new Map();
+const CACHE_TTL = {
+  stats: 30 * 1000, // 30 seconden voor stats
+  moderation: 20 * 1000, // 20 seconden voor moderation count
+  organizations: 10 * 1000, // 10 seconden voor organizations list
+  default: 5 * 1000 // 5 seconden default
+};
+
+function getCacheKey(endpoint, params = {}) {
+  return `${endpoint}:${JSON.stringify(params)}`;
+}
+
+function getCached(key) {
+  const cached = cache.get(key);
+  if (cached && cached.expires > Date.now()) {
+    return cached.data;
+  }
+  cache.delete(key);
+  return null;
+}
+
+function setCache(key, data, ttl = CACHE_TTL.default) {
+  cache.set(key, {
+    data,
+    expires: Date.now() + ttl
+  });
+}
+
+function invalidateCache(pattern) {
+  // Invalidate all cache entries that match the pattern
+  for (const key of cache.keys()) {
+    if (key.includes(pattern)) {
+      cache.delete(key);
+    }
+  }
+}
+
+// Cleanup old cache entries every minute
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, value] of cache.entries()) {
+    if (value.expires <= now) {
+      cache.delete(key);
+    }
+  }
+}, 60000);
+
 // Middleware
 app.use(compression()); // Compress responses for faster transfer
 app.use(cors());
@@ -1319,9 +1367,18 @@ app.get('/api/auth/verify', authenticateToken, (req, res) => {
 
 // ===== ADMIN ENDPOINTS =====
 
-// Get admin dashboard statistics - OPTIMIZED: Single query instead of 4 separate queries
+// Get admin dashboard statistics - OPTIMIZED: Single query + caching
 app.get('/api/admin/stats', authenticateToken, async (req, res) => {
   try {
+    const cacheKey = getCacheKey('/api/admin/stats');
+    const cached = getCached(cacheKey);
+    
+    if (cached) {
+      console.log('[Stats] Returning cached data');
+      return res.json(cached);
+    }
+    
+    console.log('[Stats] Fetching fresh data from database');
     // Single query to get all counts at once - MUCH faster!
     const result = await executeQuery(`
       SELECT 
@@ -1332,21 +1389,34 @@ app.get('/api/admin/stats', authenticateToken, async (req, res) => {
     `);
     
     const row = result.rows[0] || {};
-    res.json({
+    const stats = {
       users: parseInt(row.users_count) || 0,
       organizations: parseInt(row.organizations_count) || 0,
       news: parseInt(row.news_count) || 0,
       events: parseInt(row.events_count) || 0
-    });
+    };
+    
+    // Cache for 30 seconds
+    setCache(cacheKey, stats, CACHE_TTL.stats);
+    res.json(stats);
   } catch (error) {
     console.error('Get admin stats error:', error);
     res.status(500).json({ error: 'Failed to get stats', message: error.message });
   }
 });
 
-// Get moderation count (admin) - OPTIMIZED: Single query
+// Get moderation count (admin) - OPTIMIZED: Single query + caching
 app.get('/api/admin/moderation/count', authenticateToken, async (req, res) => {
   try {
+    const cacheKey = getCacheKey('/api/admin/moderation/count');
+    const cached = getCached(cacheKey);
+    
+    if (cached) {
+      console.log('[Moderation Count] Returning cached data');
+      return res.json(cached);
+    }
+    
+    console.log('[Moderation Count] Fetching fresh data from database');
     // Single query to get all pending counts at once
     const result = await executeQuery(`
       SELECT 
@@ -1360,7 +1430,9 @@ app.get('/api/admin/moderation/count', authenticateToken, async (req, res) => {
                       (parseInt(row.news_count) || 0) + 
                       (parseInt(row.events_count) || 0);
     
-    res.json({ count: totalCount });
+    const response = { count: totalCount };
+    setCache(cacheKey, response, CACHE_TTL.moderation);
+    res.json(response);
   } catch (error) {
     // If events table doesn't exist, try without it
     try {
@@ -1371,7 +1443,9 @@ app.get('/api/admin/moderation/count', authenticateToken, async (req, res) => {
       `);
       const row = result.rows[0] || {};
       const totalCount = (parseInt(row.orgs_count) || 0) + (parseInt(row.news_count) || 0);
-      res.json({ count: totalCount });
+      const response = { count: totalCount };
+      setCache(getCacheKey('/api/admin/moderation/count'), response, CACHE_TTL.moderation);
+      res.json(response);
     } catch (e) {
       console.error('Get moderation count error:', error);
       res.status(500).json({ error: 'Failed to get moderation count', message: error.message });
@@ -1705,11 +1779,22 @@ app.get('/api/admin/organizations/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Get all organizations (admin)
+// Get all organizations (admin) - OPTIMIZED: Caching + combined queries
 app.get('/api/admin/organizations', authenticateToken, async (req, res) => {
   try {
     const { page = 1, limit = 20, status } = req.query;
     const offset = (page - 1) * limit;
+    
+    // Check cache
+    const cacheKey = getCacheKey('/api/admin/organizations', { page, limit, status });
+    const cached = getCached(cacheKey);
+    
+    if (cached) {
+      console.log('[Organizations] Returning cached data');
+      return res.json(cached);
+    }
+    
+    console.log('[Organizations] Fetching fresh data from database');
 
     let query = `
       SELECT 
@@ -1729,33 +1814,22 @@ app.get('/api/admin/organizations', authenticateToken, async (req, res) => {
       // Convert status string to boolean: 'pending' = false, 'approved' = true
       const isApproved = status === 'approved';
       params.push(isApproved);
-      query += ` AND o.is_approved = $${paramCount}`;
+      query += ` AND o.is_approved = ?`;
     }
 
-    paramCount++;
-    query += ` ORDER BY o.created_at DESC LIMIT $${paramCount}`;
-    params.push(parseInt(limit));
-    
-    paramCount++;
-    query += ` OFFSET $${paramCount}`;
-    params.push(parseInt(offset));
+    query += ` ORDER BY o.created_at DESC LIMIT ? OFFSET ?`;
+    params.push(parseInt(limit), parseInt(offset));
 
-    const result = await executeQuery(query, params);
+    // Get data and count in parallel (but still only 2 queries instead of sequential)
+    const [result, countResult] = await Promise.all([
+      executeQuery(query, params),
+      executeQuery(
+        `SELECT COUNT(*) as total FROM organizations o WHERE 1=1${status ? ` AND o.is_approved = ?` : ''}`,
+        status ? [status === 'approved'] : []
+      )
+    ]);
 
-    // Get total count
-    let countQuery = 'SELECT COUNT(*) as total FROM organizations o WHERE 1=1';
-    const countParams = [];
-    
-    if (status) {
-      // Convert status string to boolean: 'pending' = false, 'approved' = true
-      const isApproved = status === 'approved';
-      countParams.push(isApproved);
-      countQuery += ` AND o.is_approved = $${countParams.length}`;
-    }
-
-    const countResult = await executeQuery(countQuery, countParams);
-
-    res.json({
+    const response = {
       organizations: result.rows,
       pagination: {
         page: parseInt(page),
@@ -1763,7 +1837,11 @@ app.get('/api/admin/organizations', authenticateToken, async (req, res) => {
         total: parseInt(countResult.rows[0].total),
         pages: Math.ceil(countResult.rows[0].total / limit)
       }
-    });
+    };
+    
+    // Cache for 10 seconds
+    setCache(cacheKey, response, CACHE_TTL.organizations);
+    res.json(response);
 
   } catch (error) {
     console.error('Get admin organizations error:', error);
@@ -1852,6 +1930,12 @@ app.post('/api/admin/organizations', authenticateToken, requireAdmin, async (req
     }
     
     console.log('[POST /api/admin/organizations] Successfully created organization:', orgResult.rows[0].id);
+    
+    // Invalidate cache
+    invalidateCache('/api/admin/organizations');
+    invalidateCache('/api/admin/stats');
+    invalidateCache('/api/admin/moderation/count');
+    
     res.status(201).json({ organization: orgResult.rows[0] });
   } catch (error) {
     console.error('Create organization error:', error);
@@ -1893,6 +1977,12 @@ app.put('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (
       params
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Organization not found' });
+    
+    // Invalidate cache
+    invalidateCache('/api/admin/organizations');
+    invalidateCache('/api/admin/stats');
+    invalidateCache('/api/admin/moderation/count');
+    
     res.json({ organization: result.rows[0] });
   } catch (error) {
     console.error('Update organization error:', error);
@@ -1930,8 +2020,14 @@ app.post('/api/admin/organizations/:id/reject', authenticateToken, requireAdmin,
 app.delete('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await executeQuery('DELETE FROM organizations WHERE id = $1', [id]);
+    const result = await executeQuery('DELETE FROM organizations WHERE id = ?', [id]);
     if (!result.rowCount) return res.status(404).json({ error: 'Organization not found' });
+    
+    // Invalidate cache
+    invalidateCache('/api/admin/organizations');
+    invalidateCache('/api/admin/stats');
+    invalidateCache('/api/admin/moderation/count');
+    
     res.json({ success: true });
   } catch (error) {
     if (error.code === '23503') return res.status(409).json({ error: 'Cannot delete organization in use' });
