@@ -46,7 +46,10 @@ const dbConfig = {
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
-  charset: 'utf8mb4'
+  charset: 'utf8mb4',
+  connectTimeout: 5000, // 5 seconden timeout voor connectie
+  acquireTimeout: 5000, // 5 seconden timeout voor het krijgen van een connectie
+  timeout: 10000 // 10 seconden timeout voor queries
 };
 
 // Log database config (zonder password)
@@ -86,7 +89,7 @@ async function executeQueryViaProxy(query, params = [], action = 'execute') {
         'X-API-Key': PHP_PROXY_API_KEY,
         'Content-Type': 'application/json'
       },
-      timeout: 15000 // 15 seconden timeout
+      timeout: 10000 // 10 seconden timeout (verlaagd voor snellere failures)
     });
 
     console.log(`[PHP Proxy] Response status: ${response.status}`);
