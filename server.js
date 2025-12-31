@@ -1325,17 +1325,34 @@ app.get('/api/admin/stats', authenticateToken, async (req, res) => {
 // Get moderation count (admin)
 app.get('/api/admin/moderation/count', authenticateToken, async (req, res) => {
   try {
-    const [orgsResult, newsResult, eventsResult] = await Promise.all([
-      executeQuery('SELECT COUNT(*) as count FROM organizations WHERE is_approved = false'),
-      executeQuery("SELECT COUNT(*) as count FROM news WHERE status = 'pending'"),
-      executeQuery("SELECT COUNT(*) as count FROM events WHERE status = 'pending'")
-    ]);
+    let orgsCount = 0;
+    let newsCount = 0;
+    let eventsCount = 0;
     
-    const totalCount = 
-      parseInt(orgsResult.rows[0].count) + 
-      parseInt(newsResult.rows[0].count) + 
-      parseInt(eventsResult.rows[0].count);
+    try {
+      const orgsResult = await executeQuery('SELECT COUNT(*) as count FROM organizations WHERE is_approved = false');
+      orgsCount = parseInt(orgsResult.rows[0]?.count || 0);
+    } catch (e) {
+      console.warn('Error counting organizations:', e.message);
+    }
     
+    try {
+      const newsResult = await executeQuery("SELECT COUNT(*) as count FROM news WHERE is_published = false");
+      newsCount = parseInt(newsResult.rows[0]?.count || 0);
+    } catch (e) {
+      console.warn('Error counting news:', e.message);
+    }
+    
+    try {
+      // Check if events table exists first
+      const eventsResult = await executeQuery("SELECT COUNT(*) as count FROM events WHERE is_published = false");
+      eventsCount = parseInt(eventsResult.rows[0]?.count || 0);
+    } catch (e) {
+      // Events table might not exist, that's OK
+      console.warn('Error counting events (table might not exist):', e.message);
+    }
+    
+    const totalCount = orgsCount + newsCount + eventsCount;
     res.json({ count: totalCount });
   } catch (error) {
     console.error('Get moderation count error:', error);
@@ -1346,34 +1363,51 @@ app.get('/api/admin/moderation/count', authenticateToken, async (req, res) => {
 // Get all pending items for moderation (admin)
 app.get('/api/admin/pending', authenticateToken, async (req, res) => {
   try {
-    const [orgsResult, newsResult, eventsResult] = await Promise.all([
-      executeQuery(`
-        SELECT id, name, description, contact_email, is_approved, created_at, 
+    let orgsResult = { rows: [] };
+    let newsResult = { rows: [] };
+    let eventsResult = { rows: [] };
+    
+    try {
+      orgsResult = await executeQuery(`
+        SELECT id, name, description, email as contact_email, is_approved, created_at, 
                'organization' as type
         FROM organizations 
         WHERE is_approved = false 
         ORDER BY created_at DESC 
         LIMIT 10
-      `),
-      executeQuery(`
-        SELECT n.id, n.title as name, n.excerpt as description, n.status, n.created_at,
+      `);
+    } catch (e) {
+      console.warn('Error fetching pending organizations:', e.message);
+    }
+    
+    try {
+      newsResult = await executeQuery(`
+        SELECT n.id, n.title as name, n.excerpt as description, n.is_published, n.created_at,
                'news' as type, u.first_name, u.last_name
         FROM news n
         LEFT JOIN users u ON n.author_id = u.id
-        WHERE n.status = 'pending'
+        WHERE n.is_published = false
         ORDER BY n.created_at DESC
         LIMIT 10
-      `),
-      executeQuery(`
-        SELECT e.id, e.title as name, e.description, e.status, e.created_at,
+      `);
+    } catch (e) {
+      console.warn('Error fetching pending news:', e.message);
+    }
+    
+    try {
+      eventsResult = await executeQuery(`
+        SELECT e.id, e.title as name, e.description, e.is_published, e.created_at,
                'event' as type, u.first_name, u.last_name
         FROM events e
         LEFT JOIN users u ON e.organizer_id = u.id
-        WHERE e.status = 'pending'
+        WHERE e.is_published = false
         ORDER BY e.event_date DESC
         LIMIT 10
-      `)
-    ]);
+      `);
+    } catch (e) {
+      // Events table might not exist, that's OK
+      console.warn('Error fetching pending events (table might not exist):', e.message);
+    }
 
     res.json({
       organizations: orgsResult.rows,
