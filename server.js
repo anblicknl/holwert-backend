@@ -73,6 +73,7 @@ const PHP_PROXY_API_KEY = process.env.PHP_PROXY_API_KEY || 'holwert-db-proxy-202
 // Helper om query via PHP proxy uit te voeren
 async function executeQueryViaProxy(query, params = [], action = 'execute') {
   try {
+    console.log(`[PHP Proxy] Executing ${action} query via proxy...`);
     const response = await axios.post(PHP_PROXY_URL, {
       action: action,
       query: query,
@@ -82,8 +83,12 @@ async function executeQueryViaProxy(query, params = [], action = 'execute') {
         'X-API-Key': PHP_PROXY_API_KEY,
         'Content-Type': 'application/json'
       },
-      timeout: 10000
+      timeout: 15000 // 15 seconden timeout
     });
+
+    if (!response.data.success && response.data.error) {
+      throw new Error(`PHP Proxy error: ${response.data.error}`);
+    }
 
     if (action === 'insert') {
       return {
@@ -93,12 +98,22 @@ async function executeQueryViaProxy(query, params = [], action = 'execute') {
       };
     }
 
+    if (action === 'update' || action === 'delete') {
+      return {
+        rows: [],
+        rowCount: response.data.affectedRows || 0
+      };
+    }
+
     return {
       rows: response.data.rows || [],
       rowCount: response.data.rowCount || response.data.affectedRows || 0
     };
   } catch (error) {
     console.error('[PHP Proxy] Error:', error.message);
+    if (error.response) {
+      console.error('[PHP Proxy] Response:', error.response.data);
+    }
     throw error;
   }
 }
@@ -131,7 +146,20 @@ async function executeQuery(query, params = []) {
     // Als direct MySQL faalt, gebruik PHP proxy
     if (error.code === 'ETIMEDOUT' || error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
       console.log('[MySQL] Direct connection failed, using PHP proxy...');
-      return await executeQueryViaProxy(mysqlQuery, params, 'execute');
+      
+      // Detect query type voor juiste action
+      const queryUpper = mysqlQuery.trim().toUpperCase();
+      let proxyAction = 'execute'; // default voor SELECT
+      
+      if (queryUpper.startsWith('INSERT')) {
+        proxyAction = 'insert';
+      } else if (queryUpper.startsWith('UPDATE')) {
+        proxyAction = 'update';
+      } else if (queryUpper.startsWith('DELETE')) {
+        proxyAction = 'delete';
+      }
+      
+      return await executeQueryViaProxy(mysqlQuery, params, proxyAction);
     }
     throw error;
   }

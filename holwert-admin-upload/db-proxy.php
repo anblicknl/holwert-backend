@@ -78,43 +78,112 @@ if (!in_array($action, $allowedActions)) {
     exit;
 }
 
+// Security: Check voor gevaarlijke queries (basic protection)
+$dangerousKeywords = ['DROP', 'TRUNCATE', 'ALTER', 'CREATE TABLE', 'DELETE FROM', 'UPDATE'];
+$queryUpper = strtoupper($query);
+foreach ($dangerousKeywords as $keyword) {
+    if (strpos($queryUpper, $keyword) !== false && $action !== 'delete' && $action !== 'update') {
+        // Allow DELETE and UPDATE via proper actions, but block DROP/TRUNCATE/ALTER
+        if (in_array($keyword, ['DROP', 'TRUNCATE', 'ALTER', 'CREATE TABLE'])) {
+            http_response_code(403);
+            echo json_encode(['error' => 'Forbidden - Dangerous query detected']);
+            exit;
+        }
+    }
+}
+
 try {
     switch ($action) {
         case 'health':
             $pdo->query('SELECT 1');
-            echo json_encode(['status' => 'OK', 'database' => 'MySQL connected']);
+            echo json_encode([
+                'status' => 'OK', 
+                'database' => 'MySQL connected',
+                'timestamp' => date('c')
+            ]);
             break;
 
         case 'execute':
             // Voor SELECT queries
+            if (empty($query)) {
+                throw new Exception('Query is required');
+            }
+            
             $stmt = $pdo->prepare($query);
             $stmt->execute($params);
             $results = $stmt->fetchAll();
-            echo json_encode(['rows' => $results, 'rowCount' => count($results)]);
+            
+            echo json_encode([
+                'rows' => $results, 
+                'rowCount' => count($results),
+                'success' => true
+            ]);
             break;
 
         case 'insert':
             // Voor INSERT queries - retourneert insertId
+            if (empty($query)) {
+                throw new Exception('Query is required');
+            }
+            
             $stmt = $pdo->prepare($query);
             $stmt->execute($params);
             $insertId = $pdo->lastInsertId();
-            echo json_encode(['insertId' => $insertId, 'affectedRows' => $stmt->rowCount()]);
+            
+            echo json_encode([
+                'insertId' => $insertId ? intval($insertId) : null, 
+                'affectedRows' => $stmt->rowCount(),
+                'success' => true
+            ]);
             break;
 
         case 'update':
-        case 'delete':
-            // Voor UPDATE/DELETE queries
+            // Voor UPDATE queries
+            if (empty($query)) {
+                throw new Exception('Query is required');
+            }
+            
             $stmt = $pdo->prepare($query);
             $stmt->execute($params);
-            echo json_encode(['affectedRows' => $stmt->rowCount()]);
+            
+            echo json_encode([
+                'affectedRows' => $stmt->rowCount(),
+                'success' => true
+            ]);
+            break;
+
+        case 'delete':
+            // Voor DELETE queries
+            if (empty($query)) {
+                throw new Exception('Query is required');
+            }
+            
+            $stmt = $pdo->prepare($query);
+            $stmt->execute($params);
+            
+            echo json_encode([
+                'affectedRows' => $stmt->rowCount(),
+                'success' => true
+            ]);
             break;
 
         default:
             http_response_code(400);
-            echo json_encode(['error' => 'Unknown action']);
+            echo json_encode(['error' => 'Unknown action', 'success' => false]);
     }
 } catch (PDOException $e) {
     http_response_code(500);
-    echo json_encode(['error' => 'Database error', 'message' => $e->getMessage()]);
+    echo json_encode([
+        'error' => 'Database error', 
+        'message' => $e->getMessage(),
+        'code' => $e->getCode(),
+        'success' => false
+    ]);
+} catch (Exception $e) {
+    http_response_code(400);
+    echo json_encode([
+        'error' => $e->getMessage(),
+        'success' => false
+    ]);
 }
 
