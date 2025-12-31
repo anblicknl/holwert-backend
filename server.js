@@ -1773,6 +1773,8 @@ app.post('/api/admin/organizations', authenticateToken, requireAdmin, async (req
     
     if (!name) return res.status(400).json({ error: 'name is required' });
     
+    console.log('[POST /api/admin/organizations] Creating organization:', { name, category, hasLogo: !!logo_url });
+    
     const result = await executeInsert(
       `INSERT INTO organizations (
         name, category, description, bio, is_approved,
@@ -1800,6 +1802,12 @@ app.post('/api/admin/organizations', authenticateToken, requireAdmin, async (req
       ]
     );
     
+    console.log('[POST /api/admin/organizations] Insert result:', { insertId: result.insertId, rowCount: result.rowCount });
+    
+    if (!result.insertId) {
+      throw new Error('Failed to get insert ID from database');
+    }
+    
     // Fetch the created organization
     const orgResult = await executeQuery(
       `SELECT id, name, category, description, bio, is_approved, website, email, phone, whatsapp, address,
@@ -1808,6 +1816,11 @@ app.post('/api/admin/organizations', authenticateToken, requireAdmin, async (req
       [result.insertId]
     );
     
+    if (!orgResult.rows || orgResult.rows.length === 0) {
+      throw new Error(`Failed to fetch created organization with id ${result.insertId}`);
+    }
+    
+    console.log('[POST /api/admin/organizations] Successfully created organization:', orgResult.rows[0].id);
     res.status(201).json({ organization: orgResult.rows[0] });
   } catch (error) {
     console.error('Create organization error:', error);
