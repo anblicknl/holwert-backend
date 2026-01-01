@@ -2698,6 +2698,37 @@ app.delete('/api/admin/users/:id', authenticateToken, requireAdmin, async (req, 
   }
 });
 
+// ===== PUBLIC ORGANIZATIONS DETAIL ENDPOINT =====
+app.get('/api/organizations/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id || isNaN(parseInt(id))) {
+      return res.status(400).json({ error: 'Invalid organization ID' });
+    }
+
+    const result = await executeQuery(
+      `SELECT 
+        id, name, category, description, bio,
+        website, email, phone, whatsapp, address,
+        facebook, instagram, twitter, linkedin,
+        brand_color, logo_url, is_approved,
+        created_at, updated_at
+       FROM organizations
+       WHERE id = ? AND is_approved = true`,
+      [id]
+    );
+
+    if (!result.rows || result.rows.length === 0) {
+      return res.status(404).json({ error: 'Organization not found' });
+    }
+
+    res.json({ organization: result.rows[0] });
+  } catch (error) {
+    console.error('Error fetching organization detail:', error);
+    res.status(500).json({ error: 'Failed to fetch organization detail', message: error.message });
+  }
+});
+
 // ===== PUBLIC ORGANIZATIONS ENDPOINT =====
 app.get('/api/organizations', async (req, res) => {
   try {
