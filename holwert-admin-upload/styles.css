@@ -46,6 +46,32 @@ body {
     font-weight: 500;
 }
 
+.login-header {
+    text-align: center;
+    margin-bottom: 2rem;
+}
+
+.logo-icon {
+    width: 64px;
+    height: 64px;
+    margin: 0 auto 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.logo-icon img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.login-header h1 {
+    font-size: 1.5rem;
+    color: #333;
+    margin: 0;
+}
+
 /* Main App Layout */
 #mainScreen {
     display: grid !important;
@@ -69,6 +95,18 @@ body {
     justify-content: space-between;
     padding: 0 2rem;
     height: 60px;
+}
+
+.header-left {
+    display: flex;
+    align-items: center;
+}
+
+.header-left img {
+    height: 32px;
+    margin-right: 12px;
+    vertical-align: middle;
+    object-fit: contain;
 }
 
 .header-left h1 {
@@ -630,6 +668,19 @@ input, select, textarea {
     border: 1px solid #e1e5e9;
     display: block;
     margin: 0 auto;
+}
+
+/* Organization preview logo - smaller size */
+.preview-content .preview-image img {
+    max-width: 120px;
+    max-height: 120px;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    border-radius: 8px;
+    border: 1px solid #e1e5e9;
+    display: block;
+    margin: 0 auto 1rem;
 }
 
 .image-preview,

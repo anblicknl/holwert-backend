@@ -50,6 +50,20 @@ class HolwertAdmin {
             });
         }
 
+        // Add Event button (forceert modal direct, ook als fetch traag is)
+        const addEventBtn = document.getElementById('addEventBtn');
+        if (addEventBtn) {
+            addEventBtn.addEventListener('click', async () => {
+                console.log('[Events] Nieuw event klik');
+                try {
+                    await this.openEventEditor(null);
+                } catch (e) {
+                    console.error('[Events] Fout bij openen event-modal:', e);
+                    this.showNotification('Fout bij openen event-modal: ' + (e?.message || e), 'error');
+                }
+            });
+        }
+
         // Navigation
         const navLinks = document.querySelectorAll('.nav-item');
         navLinks.forEach(link => {
@@ -304,6 +318,8 @@ class HolwertAdmin {
     showSection(sectionName) {
         console.log('=== SHOW SECTION ===');
         console.log('Section name:', sectionName);
+        // Skip pending load als we naar events gaan (scheelt wachttijd)
+        this.skipPending = sectionName === 'events';
         
         // Update navigation
         document.querySelectorAll('.nav-item').forEach(link => {
@@ -373,8 +389,10 @@ class HolwertAdmin {
             console.log('API Base URL:', this.apiBaseUrl);
             console.log('Token:', this.token);
             
-            // Load dashboard statistics from original admin routes
-            // Load stats from single endpoint
+            // Show loader
+            this.showLoader('dashboard', 'Dashboard laden...');
+            
+            // Load dashboard statistics from single endpoint
             const statsRes = await fetch(`${this.apiBaseUrl}/admin/stats`, {
                     headers: { 'Authorization': `Bearer ${this.token}` }
             });
@@ -423,15 +441,19 @@ class HolwertAdmin {
                 console.error('Error response:', errorText);
             }
 
-            // Load pending content
-            this.loadPendingContent();
+            // Pending niet meer laden (scheelt traagheid/spinner); recent activity mag blijven
+            console.log('[Dashboard] Pending load overgeslagen (skipPending=true)');
             this.loadRecentActivity();
             
             // Load notification counts
             this.loadNotificationCounts();
+            
+            // Hide loader
+            this.hideLoader('dashboard');
 
         } catch (error) {
             console.error('Error loading dashboard:', error);
+            this.hideLoader('dashboard');
         }
     }
 
@@ -732,6 +754,7 @@ class HolwertAdmin {
     async loadUsers() {
         try {
             console.log('Loading users...');
+            this.showLoader('usersContent', 'Gebruikers laden...');
             const response = await fetch(`${this.apiBaseUrl}/admin/users`, {
                 headers: {
                     'Authorization': `Bearer ${this.token}`
@@ -747,8 +770,10 @@ class HolwertAdmin {
                 const error = await response.json();
                 console.error('Error:', error);
             }
+            this.hideLoader('usersContent');
         } catch (error) {
             console.error('Error loading users:', error);
+            this.hideLoader('usersContent');
         }
     }
 
@@ -884,12 +909,15 @@ class HolwertAdmin {
                 <td>${org.category || 'Geen categorie'}</td>
                 <td>${org.user_count || 0}</td>
                 <td>
-                    <span class="status-badge ${org.is_active ? 'status-published' : 'status-draft'}">
-                        ${org.is_active ? 'Actief' : 'Inactief'}
+                    <span class="status-badge ${org.is_approved ? 'status-published' : 'status-draft'}">
+                        ${org.is_approved ? 'Goedgekeurd' : 'Niet goedgekeurd'}
                     </span>
                 </td>
                 <td>
                     <div class="action-buttons">
+                        <button class="btn-icon btn-view" onclick="admin.viewOrganization(${org.id})" title="Bekijken">
+                            <i class="fas fa-eye"></i>
+                        </button>
                         <button class="btn-icon btn-edit" onclick="admin.editOrganization(${org.id})" title="Bewerken">
                             <i class="fas fa-edit"></i>
                         </button>
@@ -907,9 +935,15 @@ class HolwertAdmin {
             console.log('Loading organizations from:', `${this.apiBaseUrl}/admin/organizations`);
             console.log('Token exists:', !!this.token);
             
-            const response = await fetch(`${this.apiBaseUrl}/admin/organizations`, {
+            // Show loader
+            this.showLoader('organizationsTableBody', 'Organisaties laden...');
+            
+            // Add cache-busting timestamp to ensure fresh data
+            const timestamp = new Date().getTime();
+            const response = await fetch(`${this.apiBaseUrl}/admin/organizations?t=${timestamp}`, {
                 headers: {
-                    'Authorization': `Bearer ${this.token}`
+                    'Authorization': `Bearer ${this.token}`,
+                    'Cache-Control': 'no-cache'
                 }
             });
 
@@ -930,6 +964,9 @@ class HolwertAdmin {
                         container.innerHTML = '<tr><td colspan="5" class="empty-message">Geen organisaties gevonden</td></tr>';
                     }
                 }
+                
+                // Hide loader
+                this.hideLoader('organizationsTableBody');
             } else {
                 const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
                 console.error('Failed to load organizations:', response.status, errorData);
@@ -947,6 +984,9 @@ class HolwertAdmin {
                 if (container) {
                     container.innerHTML = `<tr><td colspan="5" class="empty-message">Fout: ${errorData.message || errorData.error || response.statusText}</td></tr>`;
                 }
+                
+                // Hide loader
+                this.hideLoader('organizationsTableBody');
             }
         } catch (error) {
             console.error('Error loading organizations:', error);
@@ -956,24 +996,777 @@ class HolwertAdmin {
             if (container) {
                 container.innerHTML = `<tr><td colspan="5" class="empty-message">Fout: ${error.message}</td></tr>`;
             }
+            
+            // Hide loader
+            this.hideLoader('organizationsTableBody');
         }
     }
 
     showCreateOrganizationModal() {
-        this.showNotification('Organisatie aanmaken functie is nog niet geïmplementeerd', 'info');
-        // TODO: Implementeer create organization modal (zoals bij nieuws/events)
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.style.display = 'flex';
+        overlay.innerHTML = `
+            <div class="modal-content large">
+                <div class="modal-header">
+                    <h3>Nieuwe Organisatie</h3>
+                    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <form id="organizationForm" class="event-form">
+                        <div class="form-group">
+                            <label for="orgName">Naam *</label>
+                            <input type="text" id="orgName" name="name" placeholder="Naam van de organisatie" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="orgCategory">Categorie</label>
+                            <select id="orgCategory" name="category">
+                                <option value="gemeente">Gemeente</option>
+                                <option value="natuur">Natuur</option>
+                                <option value="cultuur">Cultuur</option>
+                                <option value="sport">Sport</option>
+                                <option value="onderwijs">Onderwijs</option>
+                                <option value="overig">Overig</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="orgDescription">Beschrijving</label>
+                            <textarea id="orgDescription" name="description" rows="4" placeholder="Korte beschrijving..."></textarea>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="orgEmail">Email</label>
+                                <input type="email" id="orgEmail" name="contact_email" placeholder="contact@organisatie.nl">
+                            </div>
+                            <div class="form-group">
+                                <label for="orgPhone">Telefoon</label>
+                                <input type="tel" id="orgPhone" name="contact_phone" placeholder="0123-456789">
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="orgWebsite">Website</label>
+                            <input type="url" id="orgWebsite" name="website" placeholder="https://...">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="orgBrandColor">Brand Kleur</label>
+                            <input type="color" id="orgBrandColor" name="brand_color" value="#3B82F6">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="orgLogo">Logo</label>
+                            <input type="file" id="orgLogo" accept="image/*" class="file-input" onchange="admin.previewOrgImage(this)">
+                            <small class="form-hint">Vierkante afbeelding werkt het best (bijv. 512x512px)</small>
+                            <div id="orgImagePreview" class="image-preview" style="display: none;">
+                                <img id="orgImagePreviewImg" src="" alt="Preview">
+                                <button type="button" class="btn-remove-image" onclick="admin.clearOrgImage()">
+                                    <i class="fas fa-times"></i> Verwijder
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="orgApproved" name="is_approved" checked>
+                                <span>Direct goedkeuren</span>
+                            </label>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">
+                        Annuleren
+                    </button>
+                    <button class="btn btn-primary" onclick="admin.saveOrganization()">
+                        Opslaan
+                    </button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
     }
 
-    editOrganization(id) {
-        this.showNotification('Organisatie bewerken functie is nog niet geïmplementeerd', 'info');
-        // TODO: Implementeer edit organization modal
+    async saveOrganization() {
+        // Disable save button to prevent double clicks
+        const buttonStates = this.disableSaveButton('Opslaan...');
+        
+        try {
+            const name = document.getElementById('orgName').value.trim();
+            const category = document.getElementById('orgCategory').value;
+            const description = document.getElementById('orgDescription').value.trim();
+            const bio = document.getElementById('orgBio')?.value.trim();
+            const email = document.getElementById('orgEmail').value.trim();
+            const phone = document.getElementById('orgPhone').value.trim();
+            const whatsapp = document.getElementById('orgWhatsapp')?.value.trim();
+            const address = document.getElementById('orgAddress')?.value.trim();
+            const website = document.getElementById('orgWebsite').value.trim();
+            const facebook = document.getElementById('orgFacebook')?.value.trim();
+            const instagram = document.getElementById('orgInstagram')?.value.trim();
+            const twitter = document.getElementById('orgTwitter')?.value.trim();
+            const linkedin = document.getElementById('orgLinkedin')?.value.trim();
+            const brand_color = document.getElementById('orgBrandColor').value;
+            const is_approved = document.getElementById('orgApproved').checked;
+
+            if (!name) {
+                this.showNotification('Naam is verplicht', 'error');
+                return;
+            }
+
+            // Handle logo upload
+            const uploadedFile = document.getElementById('orgLogo')?.files[0];
+            let logoUrl = null;
+
+            if (uploadedFile) {
+                try {
+                    // Show loader during image compression
+                    this.showLoader(null, 'Logo verwerken...');
+                    const compressedBase64 = await this.compressOrgImage(uploadedFile);
+                    logoUrl = compressedBase64;
+                    console.log('Logo compressed, length:', compressedBase64.length);
+
+                    if (compressedBase64.length > 4 * 1024 * 1024) {
+                        this.hideLoader();
+                        this.enableSaveButton(buttonStates);
+                        this.showNotification('Logo is te groot. Kies een kleinere afbeelding.', 'error');
+                        return;
+                    }
+                } catch (error) {
+                    console.error('Error processing logo:', error);
+                    this.hideLoader();
+                    this.enableSaveButton(buttonStates);
+                    this.showNotification('Fout bij verwerken van logo', 'error');
+                    return;
+                }
+            }
+
+            const body = {
+                name,
+                category: category || null,
+                description: description || null,
+                bio: bio || null,
+                email: email || null,
+                phone: phone || null,
+                whatsapp: whatsapp || null,
+                address: address || null,
+                website: website || null,
+                facebook: facebook || null,
+                instagram: instagram || null,
+                twitter: twitter || null,
+                linkedin: linkedin || null,
+                brand_color,
+                logo_url: logoUrl,
+                is_approved
+            };
+
+            console.log('[saveOrganization] Sending POST request to:', `${this.apiBaseUrl}/admin/organizations`);
+            console.log('[saveOrganization] Request body:', JSON.stringify(body).substring(0, 200));
+            
+            // Show loader (or update if already showing from logo compression)
+            this.showLoader(null, 'Organisatie opslaan...');
+            
+            const res = await fetch(`${this.apiBaseUrl}/admin/organizations`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.token}`
+                },
+                body: JSON.stringify(body)
+            });
+
+            console.log('[saveOrganization] Response status:', res.status);
+            console.log('[saveOrganization] Response ok:', res.ok);
+            
+            // Parse response once
+            const responseData = await res.json();
+            console.log('[saveOrganization] Response data:', responseData);
+            
+            if (!res.ok) {
+                console.error('[saveOrganization] Error response:', responseData);
+                this.hideLoader();
+                this.enableSaveButton(buttonStates);
+                this.showNotification(`Opslaan mislukt: ${responseData.error || responseData.message || 'Onbekende fout'}`, 'error');
+                return;
+            }
+
+            console.log('[saveOrganization] Success! Organization created:', responseData.organization?.id);
+            
+            this.hideLoader();
+            this.showNotification('Organisatie succesvol aangemaakt', 'success');
+            
+            // Close modal after short delay
+            setTimeout(() => {
+                document.querySelector('.modal-overlay')?.remove();
+            }, 500);
+            
+            // Reload organizations list immediately to show the new organization
+            console.log('[saveOrganization] Reloading organizations list...');
+            await this.loadOrganizations();
+            console.log('[saveOrganization] Organizations list reloaded');
+        } catch (e) {
+            console.error('saveOrganization error:', e);
+            this.hideLoader();
+            this.enableSaveButton(buttonStates);
+            this.showNotification(`Fout bij opslaan: ${e.message}`, 'error');
+        }
     }
 
-    deleteOrganization(id) {
-        this.showNotification('Organisatie verwijderen functie is nog niet geïmplementeerd', 'info');
-        // TODO: Implementeer delete organization
+    async viewOrganization(id) {
+        try {
+            console.log('👁️ viewOrganization called with ID:', id);
+            this.showLoader(null, 'Organisatie laden...');
+            const res = await fetch(`${this.apiBaseUrl}/admin/organizations/${id}`, {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+
+            console.log('Response status:', res.status, res.ok);
+
+            if (!res.ok) {
+                const errorData = await res.json().catch(() => ({ error: 'Unknown error' }));
+                console.error('Failed to load organization:', errorData);
+                this.hideLoader();
+                this.showNotification(`Kon organisatie niet laden: ${errorData.error || errorData.message || res.statusText}`, 'error');
+                return;
+            }
+
+            const data = await res.json();
+            console.log('Organization data received:', data);
+            const org = data.organization || data;
+            this.hideLoader();
+
+            // Verwijder eventuele bestaande modals om stacking te voorkomen
+            document.querySelectorAll('.modal-overlay').forEach(el => el.remove());
+
+            const overlay = document.createElement('div');
+            overlay.className = 'modal-overlay';
+            // Forceer zichtbaarheid en positionering (soms stond hij onzichtbaar)
+            Object.assign(overlay.style, {
+                position: 'fixed',
+                inset: '0',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'rgba(0,0,0,0.35)',
+                zIndex: '9999'
+            });
+            overlay.style.display = 'flex';
+            overlay.innerHTML = `
+                <div class="modal-content large">
+                    <div class="modal-header">
+                        <h3>Organisatie Details</h3>
+                        <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="preview-content">
+                            ${org.logo_url ? `<div class="preview-image"><img src="${org.logo_url}" alt="${org.name}"></div>` : ''}
+                            <h2>${org.name || '-'}</h2>
+                            <p><strong>Categorie:</strong> ${org.category || '-'}</p>
+                            ${org.description ? `<p><strong>Beschrijving:</strong> ${org.description}</p>` : ''}
+                            ${org.bio ? `<p><strong>Bio:</strong> ${org.bio}</p>` : ''}
+                            ${org.email ? `<p><strong>Email:</strong> <a href="mailto:${org.email}">${org.email}</a></p>` : ''}
+                            ${org.phone ? `<p><strong>Telefoon:</strong> <a href="tel:${org.phone}">${org.phone}</a></p>` : ''}
+                            ${org.whatsapp ? `<p><strong>WhatsApp:</strong> <a href="https://wa.me/${org.whatsapp.replace(/\D/g, '')}">${org.whatsapp}</a></p>` : ''}
+                            ${org.website ? `<p><strong>Website:</strong> <a href="${org.website}" target="_blank">${org.website}</a></p>` : ''}
+                            ${org.address ? `<p><strong>Adres:</strong> ${org.address}</p>` : ''}
+                            ${org.facebook || org.instagram || org.twitter || org.linkedin ? `
+                                <p><strong>Social Media:</strong><br>
+                                ${org.facebook ? `<a href="${org.facebook}" target="_blank"><i class="fab fa-facebook"></i> Facebook</a><br>` : ''}
+                                ${org.instagram ? `<a href="${org.instagram}" target="_blank"><i class="fab fa-instagram"></i> Instagram</a><br>` : ''}
+                                ${org.twitter ? `<a href="${org.twitter}" target="_blank"><i class="fab fa-twitter"></i> Twitter</a><br>` : ''}
+                                ${org.linkedin ? `<a href="${org.linkedin}" target="_blank"><i class="fab fa-linkedin"></i> LinkedIn</a>` : ''}
+                                </p>
+                            ` : ''}
+                            <p><strong>Brand Kleur:</strong> <span style="display:inline-block;width:20px;height:20px;background:${org.brand_color || '#3B82F6'};border:1px solid #ccc;border-radius:3px;"></span> ${org.brand_color || '#3B82F6'}</p>
+                            <p><strong>Status:</strong> ${org.is_approved ? '<span class="status-badge status-published">Goedgekeurd</span>' : '<span class="status-badge status-draft">Niet goedgekeurd</span>'}</p>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">
+                            Sluiten
+                        </button>
+                        <button class="btn btn-primary" onclick="this.closest('.modal-overlay').remove(); admin.editOrganization(${id})">
+                            Bewerken
+                        </button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+            console.log('[Events] Modal overlay added to DOM, mode:', mode);
+
+            // (Nieuw) Laad organisaties asynchroon zodra modal er is, zodat dropdown gevuld wordt
+            if (mode !== 'view') {
+                try {
+                    // Gebruik proxy endpoint voor snelheid
+                    const orgRes = await fetch(`https://holwert.appenvloed.com/admin/db-proxy.php`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-API-Key': 'holwert-db-proxy-2026-secure-key-change-in-production'
+                        },
+                        body: JSON.stringify({
+                            action: 'execute',
+                            query: 'SELECT id, name FROM organizations ORDER BY name ASC'
+                        })
+                    });
+                    if (orgRes.ok) {
+                        const orgData = await orgRes.json();
+                        organizations = orgData.rows || [];
+                        console.log('Organizations loaded (proxy, async):', organizations.length);
+                        const orgSelect = overlay.querySelector('#evOrg');
+                        if (orgSelect) {
+                            const opts = ['<option value="">Geen organisatie</option>'].concat(
+                                organizations.map(org => `<option value="${org.id}">${org.name || `Organisatie ${org.id}`}</option>`)
+                            );
+                            orgSelect.innerHTML = opts.join('');
+                            // Re-select eerdere keuze
+                            if (initial.organization_id) {
+                                orgSelect.value = initial.organization_id;
+                            }
+                        }
+                    } else {
+                        const errorText = await orgRes.text();
+                        console.warn('Failed to load organizations via proxy:', orgRes.status, errorText);
+                        this.showNotification('Organisaties konden niet worden geladen. Je kunt nog steeds een event aanmaken.', 'warning');
+                    }
+                } catch (err) {
+                    console.warn('Error loading organizations (proxy, async, continuing anyway):', err);
+                }
+            }
+        } catch (e) {
+            console.error('viewOrganization error:', e);
+            this.hideLoader();
+            this.showNotification('Fout bij laden organisatie', 'error');
+        }
     }
 
+    async editOrganization(id) {
+        try {
+            // Fetch organization details
+            this.showLoader(null, 'Organisatiegegevens laden...');
+            const res = await fetch(`${this.apiBaseUrl}/admin/organizations/${id}`, {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+
+            if (!res.ok) {
+                this.hideLoader();
+                this.showNotification('Kon organisatie niet laden', 'error');
+                return;
+            }
+
+            const data = await res.json();
+            const org = data.organization || data;
+
+            const overlay = document.createElement('div');
+            overlay.className = 'modal-overlay';
+            overlay.style.display = 'flex';
+            overlay.innerHTML = `
+                <div class="modal-content large">
+                    <div class="modal-header">
+                        <h3>Organisatie Bewerken</h3>
+                        <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    <div class="modal-body">
+                        <form id="organizationForm" class="event-form">
+                            <div class="form-group">
+                                <label for="orgName">Naam *</label>
+                                <input type="text" id="orgName" name="name" value="${org.name || ''}" required>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="orgCategory">Categorie</label>
+                                <select id="orgCategory" name="category">
+                                    ${['gemeente', 'natuur', 'cultuur', 'sport', 'onderwijs', 'zorg', 'overig'].map(cat => `
+                                        <option value="${cat}" ${cat === (org.category || 'overig') ? 'selected' : ''}>${cat.charAt(0).toUpperCase() + cat.slice(1)}</option>
+                                    `).join('')}
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="orgDescription">Korte Beschrijving</label>
+                                <textarea id="orgDescription" name="description" rows="3" placeholder="Korte beschrijving van de organisatie">${org.description || ''}</textarea>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="orgBio">Volledige Beschrijving (Bio)</label>
+                                <textarea id="orgBio" name="bio" rows="5" placeholder="Uitgebreide beschrijving of missie">${org.bio || ''}</textarea>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="orgWebsite">Website URL</label>
+                                <input type="url" id="orgWebsite" name="website" value="${org.website || ''}" placeholder="https://www.voorbeeld.nl">
+                            </div>
+
+                            <div class="form-group">
+                                <label for="orgEmail">Contact E-mail</label>
+                                <input type="email" id="orgEmail" name="email" value="${org.email || ''}" placeholder="info@voorbeeld.nl">
+                            </div>
+
+                            <div class="form-group">
+                                <label for="orgPhone">Telefoonnummer</label>
+                                <input type="tel" id="orgPhone" name="phone" value="${org.phone || ''}" placeholder="+31 6 12345678">
+                            </div>
+
+                            <div class="form-group">
+                                <label for="orgWhatsapp">WhatsApp Nummer</label>
+                                <input type="tel" id="orgWhatsapp" name="whatsapp" value="${org.whatsapp || ''}" placeholder="+31 6 12345678">
+                            </div>
+
+                            <div class="form-group">
+                                <label for="orgAddress">Adres</label>
+                                <input type="text" id="orgAddress" name="address" value="${org.address || ''}" placeholder="Straatnaam 123, 1234 AB Plaats">
+                            </div>
+
+                            <div class="form-group">
+                                <label for="orgFacebook">Facebook URL</label>
+                                <input type="url" id="orgFacebook" name="facebook" value="${org.facebook || ''}" placeholder="https://facebook.com/voorbeeld">
+                            </div>
+
+                            <div class="form-group">
+                                <label for="orgInstagram">Instagram URL</label>
+                                <input type="url" id="orgInstagram" name="instagram" value="${org.instagram || ''}" placeholder="https://instagram.com/voorbeeld">
+                            </div>
+
+                            <div class="form-group">
+                                <label for="orgTwitter">Twitter URL</label>
+                                <input type="url" id="orgTwitter" name="twitter" value="${org.twitter || ''}" placeholder="https://twitter.com/voorbeeld">
+                            </div>
+
+                            <div class="form-group">
+                                <label for="orgLinkedin">LinkedIn URL</label>
+                                <input type="url" id="orgLinkedin" name="linkedin" value="${org.linkedin || ''}" placeholder="https://linkedin.com/company/voorbeeld">
+                            </div>
+
+                            <div class="form-group">
+                                <label for="orgBrandColor">Merk Kleur (Hex)</label>
+                                <input type="color" id="orgBrandColor" name="brand_color" value="${org.brand_color || '#3B82F6'}">
+                            </div>
+
+                            <div class="form-group">
+                                <label for="orgLogo">Logo</label>
+                                <input type="file" id="orgLogo" accept="image/*" class="file-input" onchange="admin.previewOrgImage(this)">
+                                <small class="form-hint">Of laat leeg om huidige logo te behouden</small>
+                                <div id="orgImagePreview" class="image-preview" style="display: ${org.logo_url ? 'block' : 'none'};">
+                                    <img id="orgImagePreviewImg" src="${org.logo_url || ''}" alt="Logo Preview">
+                                    <button type="button" class="btn-remove-image" onclick="admin.clearOrgImage()">
+                                        <i class="fas fa-times"></i> Verwijder
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="orgApproved" name="is_approved" ${org.is_approved !== false ? 'checked' : ''}>
+                                    <span>Goedgekeurd (toon in app)</span>
+                                </label>
+                                <small class="form-hint">Uitvinken om als concept op te slaan</small>
+                            </div>
+                        </form>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">
+                            Annuleren
+                        </button>
+                        <button class="btn btn-primary" onclick="admin.updateOrganization(${id})">
+                            Bijwerken
+                        </button>
+                    </div>
+                </div>
+            `;
+            this.hideLoader();
+            document.body.appendChild(overlay);
+        } catch (e) {
+            console.error('editOrganization error:', e);
+            this.hideLoader();
+            this.showNotification('Fout bij laden organisatie', 'error');
+        }
+    }
+
+    async updateOrganization(id) {
+        // Disable save button to prevent double clicks
+        const buttonStates = this.disableSaveButton('Bijwerken...');
+        
+        try {
+            const name = document.getElementById('orgName').value.trim();
+            const category = document.getElementById('orgCategory').value;
+            const description = document.getElementById('orgDescription').value.trim();
+            const bio = document.getElementById('orgBio')?.value.trim();
+            const email = document.getElementById('orgEmail').value.trim();
+            const phone = document.getElementById('orgPhone').value.trim();
+            const whatsapp = document.getElementById('orgWhatsapp')?.value.trim();
+            const address = document.getElementById('orgAddress')?.value.trim();
+            const website = document.getElementById('orgWebsite').value.trim();
+            const facebook = document.getElementById('orgFacebook')?.value.trim();
+            const instagram = document.getElementById('orgInstagram')?.value.trim();
+            const twitter = document.getElementById('orgTwitter')?.value.trim();
+            const linkedin = document.getElementById('orgLinkedin')?.value.trim();
+            const brand_color = document.getElementById('orgBrandColor').value;
+            const is_approved = document.getElementById('orgApproved').checked;
+
+            if (!name) {
+                this.enableSaveButton(buttonStates);
+                this.showNotification('Naam is verplicht', 'error');
+                return;
+            }
+
+            // Handle logo upload
+            const uploadedFile = document.getElementById('orgLogo')?.files[0];
+            let logoUrl = undefined; // undefined = keep existing
+
+            if (uploadedFile) {
+                try {
+                    // Show loader during image compression
+                    this.showLoader(null, 'Logo verwerken...');
+                    const compressedBase64 = await this.compressOrgImage(uploadedFile);
+                    logoUrl = compressedBase64;
+                    console.log('Logo compressed, length:', compressedBase64.length);
+
+                    if (compressedBase64.length > 4 * 1024 * 1024) {
+                        this.hideLoader();
+                        this.enableSaveButton(buttonStates);
+                        this.showNotification('Logo is te groot. Kies een kleinere afbeelding.', 'error');
+                        return;
+                    }
+                } catch (error) {
+                    console.error('Error processing logo:', error);
+                    this.hideLoader();
+                    this.enableSaveButton(buttonStates);
+                    this.showNotification('Fout bij verwerken van logo', 'error');
+                    return;
+                }
+            }
+
+            const body = {
+                name,
+                category: category || null,
+                description: description || null,
+                bio: bio || null,
+                email: email || null,
+                phone: phone || null,
+                whatsapp: whatsapp || null,
+                address: address || null,
+                website: website || null,
+                facebook: facebook || null,
+                instagram: instagram || null,
+                twitter: twitter || null,
+                linkedin: linkedin || null,
+                brand_color,
+                is_approved
+            };
+
+            // Only add logo_url if defined (not undefined)
+            if (logoUrl !== undefined) {
+                body.logo_url = logoUrl;
+            }
+
+            // Show loader during update (or update if already showing from logo compression)
+            this.showLoader(null, 'Organisatie bijwerken...');
+
+            const res = await fetch(`${this.apiBaseUrl}/admin/organizations/${id}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.token}`
+                },
+                body: JSON.stringify(body)
+            });
+
+            if (!res.ok) {
+                const error = await res.json();
+                this.hideLoader();
+                this.enableSaveButton(buttonStates);
+                this.showNotification(`Bijwerken mislukt: ${error.error || error.message}`, 'error');
+                return;
+            }
+
+            this.hideLoader();
+            this.enableSaveButton(buttonStates);
+            this.showNotification('Organisatie succesvol bijgewerkt', 'success');
+            setTimeout(() => {
+                document.querySelector('.modal-overlay')?.remove();
+            }, 500);
+            this.loadOrganizations();
+        } catch (e) {
+            console.error('updateOrganization error:', e);
+            this.enableSaveButton(buttonStates);
+            this.showNotification(`Fout bij bijwerken: ${e.message}`, 'error');
+        }
+    }
+
+    async deleteOrganization(id, name) {
+        if (!confirm(`Weet je zeker dat je "${name}" wilt verwijderen?\n\nDit kan niet ongedaan worden gemaakt.`)) {
+            return;
+        }
+
+        try {
+            this.showLoader(null, 'Organisatie verwijderen...');
+            const res = await fetch(`${this.apiBaseUrl}/admin/organizations/${id}`, {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `Bearer ${this.token}`
+                }
+            });
+
+            if (!res.ok) {
+                const error = await res.json();
+                this.hideLoader();
+                this.showNotification(`Verwijderen mislukt: ${error.error || error.message}`, 'error');
+                return;
+            }
+
+            this.hideLoader();
+            this.showNotification('Organisatie succesvol verwijderd', 'success');
+            this.loadOrganizations();
+        } catch (e) {
+            console.error('deleteOrganization error:', e);
+            this.showNotification(`Fout bij verwijderen: ${e.message}`, 'error');
+        }
+    }
+
+
+    // Button state management
+    disableSaveButton(buttonText = 'Opslaan...') {
+        // Find all save buttons in the current modal
+        const modal = document.querySelector('.modal-overlay');
+        if (!modal) return null;
+        
+        const saveButtons = modal.querySelectorAll('button.btn-primary');
+        const originalStates = [];
+        
+        saveButtons.forEach(btn => {
+            // Only disable if button text contains "Opslaan" or "Bijwerken"
+            const btnText = btn.textContent.trim();
+            if (btnText.includes('Opslaan') || btnText.includes('Bijwerken')) {
+                originalStates.push({
+                    button: btn,
+                    originalText: btnText,
+                    originalDisabled: btn.disabled
+                });
+                btn.disabled = true;
+                btn.style.opacity = '0.6';
+                btn.style.cursor = 'not-allowed';
+                btn.textContent = buttonText;
+            }
+        });
+        
+        return originalStates; // Return so we can restore later
+    }
+
+    enableSaveButton(originalStates) {
+        if (!originalStates) return;
+        
+        originalStates.forEach(state => {
+            state.button.disabled = state.originalDisabled;
+            state.button.style.opacity = '';
+            state.button.style.cursor = '';
+            state.button.textContent = state.originalText;
+        });
+    }
+
+    // Loader system
+    showLoader(containerId = null, message = 'Laden...') {
+        // Remove existing loader if any
+        this.hideLoader(containerId);
+        
+        const loader = document.createElement('div');
+        loader.className = 'loader-overlay';
+        loader.id = containerId ? `loader-${containerId}` : 'global-loader';
+        loader.innerHTML = `
+            <div class="loader-content">
+                <div class="spinner"></div>
+                <p class="loader-message">${message}</p>
+            </div>
+        `;
+        
+        // Add styles if not already present
+        if (!document.getElementById('loader-styles')) {
+            const style = document.createElement('style');
+            style.id = 'loader-styles';
+            style.textContent = `
+                .loader-overlay {
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    bottom: 0;
+                    background: rgba(255, 255, 255, 0.9);
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    z-index: 10000;
+                    backdrop-filter: blur(4px);
+                }
+                .loader-content {
+                    text-align: center;
+                }
+                .spinner {
+                    border: 4px solid #f3f3f3;
+                    border-top: 4px solid #3B82F6;
+                    border-radius: 50%;
+                    width: 50px;
+                    height: 50px;
+                    animation: spin 1s linear infinite;
+                    margin: 0 auto 1rem;
+                }
+                @keyframes spin {
+                    0% { transform: rotate(0deg); }
+                    100% { transform: rotate(360deg); }
+                }
+                .loader-message {
+                    color: #334;
+                    font-size: 16px;
+                    margin: 0;
+                }
+                .section-loader {
+                    position: relative;
+                    min-height: 200px;
+                }
+                .section-loader::after {
+                    content: '';
+                    position: absolute;
+                    top: 50%;
+                    left: 50%;
+                    transform: translate(-50%, -50%);
+                    border: 3px solid #f3f3f3;
+                    border-top: 3px solid #3B82F6;
+                    border-radius: 50%;
+                    width: 40px;
+                    height: 40px;
+                    animation: spin 1s linear infinite;
+                }
+            `;
+            document.head.appendChild(style);
+        }
+        
+        // Append to container or body
+        if (containerId) {
+            const container = document.getElementById(containerId);
+            if (container) {
+                container.style.position = 'relative';
+                container.appendChild(loader);
+            } else {
+                document.body.appendChild(loader);
+            }
+        } else {
+            document.body.appendChild(loader);
+        }
+    }
+
+    hideLoader(containerId = null) {
+        const loaderId = containerId ? `loader-${containerId}` : 'global-loader';
+        const loader = document.getElementById(loaderId);
+        if (loader) {
+            loader.remove();
+        }
+    }
 
     // Notification system
     showNotification(message, type = 'info') {
@@ -990,7 +1783,7 @@ class HolwertAdmin {
         // Add to page
         document.body.appendChild(notification);
 
-        // Auto remove after 5 seconds
+        // Auto Remove after 5 seconds
         setTimeout(() => {
             if (notification.parentElement) {
                 notification.remove();
@@ -1003,101 +1796,108 @@ class HolwertAdmin {
         const container = document.getElementById('pendingContent');
         if (!container) return;
 
+        let timeoutId;
         try {
             console.log('Loading pending content...');
+            this.showLoader('pendingContent', 'Wachtende content laden...');
+            
+            // Add timeout to prevent hanging (30s i.v.m. proxy-latency)
+            const controller = new AbortController();
+            timeoutId = setTimeout(() => controller.abort(), 30000); // 30 seconden timeout
+            
             const response = await fetch(`${this.apiBaseUrl}/admin/pending`, {
-                headers: { 'Authorization': `Bearer ${this.token}` }
+                headers: { 'Authorization': `Bearer ${this.token}` },
+                signal: controller.signal
             });
+            
+            clearTimeout(timeoutId);
 
-            if (response.ok) {
-                const data = await response.json();
-                console.log('Pending content loaded:', data);
-                
-                // Combine all pending items
-                const allPending = [];
-                
-                // Add pending users
-                if (data.users && data.users.length > 0) {
-                    data.users.forEach(user => {
-                        allPending.push({
-                            type: 'user',
-                            id: user.id,
-                            title: `${user.first_name} ${user.last_name}`,
-                            meta: `${user.email} • ${this.formatDate(user.created_at)}`,
-                            icon: 'user-plus'
-                        });
+            if (!response.ok) {
+                console.error('Failed to load pending content:', response.status);
+                const errorText = await response.text().catch(() => 'Unknown error');
+                console.error('Error response:', errorText);
+                container.innerHTML = '<p class="text-muted">Fout bij laden wachtende content</p>';
+                return;
+            }
+
+            const data = await response.json();
+            console.log('Pending content loaded:', data);
+            
+            // Combine all pending items
+            const allPending = [];
+            
+            // Note: Backend doesn't return users, only organizations, news, and events
+            if (data.organizations && data.organizations.length > 0) {
+                data.organizations.forEach(org => {
+                    allPending.push({
+                        type: 'organization',
+                        id: org.id,
+                        title: org.name,
+                        meta: `${org.contact_email || 'Geen email'} • ${this.formatDate(org.created_at)}`,
+                        icon: 'building'
                     });
-                }
-                
-                // Add pending organizations
-                if (data.organizations && data.organizations.length > 0) {
-                    data.organizations.forEach(org => {
-                        allPending.push({
-                            type: 'organization',
-                            id: org.id,
-                            title: org.name,
-                            meta: `${org.contact_email || 'Geen email'} • ${this.formatDate(org.created_at)}`,
-                            icon: 'building'
-                        });
+                });
+            }
+            
+            if (data.news && data.news.length > 0) {
+                data.news.forEach(news => {
+                    allPending.push({
+                        type: 'news',
+                        id: news.id,
+                        title: news.title,
+                        meta: `Nieuws • ${this.formatDate(news.published_at || news.created_at)}`,
+                        icon: 'newspaper'
                     });
-                }
-                
-                // Add pending news
-                if (data.news && data.news.length > 0) {
-                    data.news.forEach(news => {
-                        allPending.push({
-                            type: 'news',
-                            id: news.id,
-                            title: news.title,
-                            meta: `Nieuws • ${this.formatDate(news.created_at)}`,
-                            icon: 'newspaper'
-                        });
+                });
+            }
+            
+            if (data.events && data.events.length > 0) {
+                data.events.forEach(event => {
+                    allPending.push({
+                        type: 'event',
+                        id: event.id,
+                        title: event.title,
+                        meta: `Evenement • ${this.formatDate(event.created_at)}`,
+                        icon: 'calendar'
                     });
-                }
-                
-                // Add pending events
-                if (data.events && data.events.length > 0) {
-                    data.events.forEach(event => {
-                        allPending.push({
-                            type: 'event',
-                            id: event.id,
-                            title: event.title,
-                            meta: `Evenement • ${this.formatDate(event.created_at)}`,
-                            icon: 'calendar'
-                        });
-                    });
-                }
-                
-                if (allPending.length === 0) {
-                    container.innerHTML = '<p class="text-muted">Geen wachtende content</p>';
-                } else {
-                    container.innerHTML = allPending.map(item => `
-            <div class="pending-item">
-                <div class="content-icon">
-                                <i class="fas fa-${item.icon}"></i>
-                </div>
-                <div class="content-info">
-                                <div class="content-title">${item.title}</div>
-                                <div class="content-meta">${item.meta}</div>
-                </div>
-                <div class="content-actions">
-                                <button class="btn-icon btn-approve" onclick="admin.approveContent('${item.type}', ${item.id})" title="Goedkeuren">
-                                    <i class="fas fa-check"></i>
-                    </button>
-                                <button class="btn-icon btn-reject" onclick="admin.rejectContent('${item.type}', ${item.id})" title="Afwijzen">
-                                    <i class="fas fa-times"></i>
-                    </button>
-                </div>
-            </div>
-                    `).join('');
-                }
+                });
+            }
+            
+            if (allPending.length === 0) {
+                container.innerHTML = '<p class="text-muted">Geen wachtende content</p>';
             } else {
-                console.log('Failed to load pending content:', response.status);
-                container.innerHTML = '<p class="text-muted">Geen content wacht op goedkeuring</p>';
+                container.innerHTML = allPending.map(item => `
+        <div class="pending-item">
+            <div class="content-icon">
+                            <i class="fas fa-${item.icon}"></i>
+            </div>
+            <div class="content-info">
+                            <div class="content-title">${item.title}</div>
+                            <div class="content-meta">${item.meta}</div>
+            </div>
+            <div class="content-actions">
+                            <button class="btn-icon btn-approve" onclick="admin.approveContent('${item.type}', ${item.id})" title="Goedkeuren">
+                                <i class="fas fa-check"></i>
+                </button>
+                            <button class="btn-icon btn-reject" onclick="admin.rejectContent('${item.type}', ${item.id})" title="Afwijzen">
+                                <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </div>
+                `).join('');
             }
         } catch (error) {
-            console.log('Error loading pending content:', error.message);
-            container.innerHTML = '<p class="text-muted">Geen content wacht op goedkeuring</p>';
+            console.error('Error loading pending content:', error);
+            if (error.name === 'AbortError') {
+                console.error('Request timeout - took longer than 30 seconds');
+                container.innerHTML = '<p class="text-muted">Timeout: Laden duurt te lang. Probeer opnieuw.</p>';
+            } else {
+                container.innerHTML = '<p class="text-muted">Fout bij laden wachtende content: ' + error.message + '</p>';
+            }
+        } finally {
+            if (timeoutId) clearTimeout(timeoutId);
+            // Always hide loader, even if something went wrong
+            this.hideLoader('pendingContent');
         }
     }
 
@@ -1108,6 +1908,7 @@ class HolwertAdmin {
 
         try {
             console.log('Loading recent activity...');
+            this.showLoader('recentActivity', 'Recente activiteit laden...');
             const response = await fetch(`${this.apiBaseUrl}/admin/pending`, {
                 headers: { 'Authorization': `Bearer ${this.token}` }
             });
@@ -1156,13 +1957,16 @@ class HolwertAdmin {
             </div>
                     `).join('');
                 }
+                this.hideLoader('recentActivity');
             } else {
                 console.log('Failed to load recent activity:', response.status);
                 container.innerHTML = '<p class="text-muted">Geen recente activiteit</p>';
+                this.hideLoader('recentActivity');
             }
         } catch (error) {
             console.log('Error loading recent activity:', error.message);
             container.innerHTML = '<p class="text-muted">Geen recente activiteit</p>';
+            this.hideLoader('recentActivity');
         }
     }
 
@@ -1170,6 +1974,10 @@ class HolwertAdmin {
     async loadNews() {
         try {
             console.log('🔄 Loading news from:', `${this.apiBaseUrl}/admin/news`);
+            const newsContainer = document.getElementById('newsContent') || document.getElementById('newsTableBody');
+            const containerId = newsContainer ? newsContainer.id : null;
+            this.showLoader(containerId, 'Nieuws laden...');
+            
             const response = await fetch(`${this.apiBaseUrl}/admin/news`, {
                 headers: {
                     'Authorization': `Bearer ${this.token}`
@@ -1189,10 +1997,13 @@ class HolwertAdmin {
                 console.error('❌ Failed to load news:', response.status, errorText);
                 this.displayNews([]);
             }
+            this.hideLoader(containerId);
         } catch (error) {
             console.error('💥 Error loading news:', error);
             console.error('Error details:', error.message, error.stack);
             this.displayNews([]);
+            const newsContainer = document.getElementById('newsContent') || document.getElementById('newsTableBody');
+            this.hideLoader(newsContainer ? newsContainer.id : null);
         }
     }
 
@@ -1292,7 +2103,7 @@ class HolwertAdmin {
                                     </span>
                                 </td>
                                 <td>
-                                    <small>${new Date(article.created_at).toLocaleDateString('nl-NL')}</small>
+                                    <small>${new Date(article.published_at || article.created_at).toLocaleDateString('nl-NL')}</small>
                                 </td>
                                 <td>
                                     <div class="action-buttons">
@@ -1644,10 +2455,107 @@ class HolwertAdmin {
         });
     }
 
+    // Organization image functions
+    async previewOrgImage(input) {
+        const file = input.files[0];
+        const preview = document.getElementById('orgImagePreview');
+        const img = document.getElementById('orgImagePreviewImg');
+
+        if (file) {
+            console.log('Original logo file size:', file.size);
+            try {
+                const compressedBase64 = await this.compressOrgImage(file);
+                img.src = compressedBase64;
+                preview.style.display = 'block';
+                console.log('Preview logo updated with compressed version.');
+            } catch (error) {
+                console.error('Error compressing logo for preview:', error);
+                // Fallback to original if compression fails
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    img.src = e.target.result;
+                    preview.style.display = 'block';
+                };
+                reader.readAsDataURL(file);
+            }
+        } else {
+            preview.style.display = 'none';
+            img.src = '';
+        }
+    }
+
+    clearOrgImage() {
+        document.getElementById('orgLogo').value = '';
+        document.getElementById('orgImagePreview').style.display = 'none';
+        document.getElementById('orgImagePreviewImg').src = '';
+    }
+
+    async compressOrgImage(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    let width = img.width;
+                    let height = img.height;
+                    
+                    // Voor logos: vierkant maken en max 512px
+                    const maxSize = 512;
+                    const size = Math.max(width, height);
+                    
+                    if (size > maxSize) {
+                        const scale = maxSize / size;
+                        width = Math.round(width * scale);
+                        height = Math.round(height * scale);
+                    }
+                    
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+                    
+                    // Start met quality 0.8 voor logos (iets hoger dan nieuws)
+                    let quality = 0.8;
+                    let compressed = canvas.toDataURL('image/png', quality); // PNG voor logos (betere kwaliteit)
+                    
+                    // Als te groot, probeer JPEG met lagere quality
+                    const maxBytes = 1 * 1024 * 1024; // 1MB target voor logos
+                    if (compressed.length > maxBytes) {
+                        quality = 0.7;
+                        compressed = canvas.toDataURL('image/jpeg', quality);
+                        
+                        while (compressed.length > maxBytes && quality > 0.3) {
+                            quality -= 0.1;
+                            compressed = canvas.toDataURL('image/jpeg', quality);
+                        }
+                    }
+                    
+                    console.log('Compressed logo:', {
+                        originalSize: file.size,
+                        compressedLength: compressed.length,
+                        quality: quality.toFixed(1),
+                        dimensions: `${width}x${height}`
+                    });
+                    
+                    resolve(compressed);
+                };
+                img.onerror = reject;
+                img.src = e.target.result;
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
+    }
+
     async saveNews(newsId) {
+        // Parse newsId correct (kan 'null' string zijn)
+        const actualNewsId = newsId && newsId !== 'null' && newsId !== null ? parseInt(newsId) : null;
+        
+        // Disable save button to prevent double clicks
+        const buttonStates = this.disableSaveButton(actualNewsId ? 'Bijwerken...' : 'Opslaan...');
+        
         try {
-            // Parse newsId correct (kan 'null' string zijn)
-            const actualNewsId = newsId && newsId !== 'null' && newsId !== null ? parseInt(newsId) : null;
             
             const title = (document.getElementById('newsTitle').value || '').trim();
             const excerpt = (document.getElementById('newsExcerpt').value || '').trim();
@@ -1658,10 +2566,11 @@ class HolwertAdmin {
                 ? parseInt(organization_id_val) 
                 : null;
             
-            // Note: Date fields removed - using created_at/updated_at from database
-            // const pubDate = document.getElementById('newsPubDate').value;
-            // const pubTime = document.getElementById('newsPubTime').value || '12:00';
-            // const published_at = pubDate ? `${pubDate}T${pubTime}:00.000Z` : new Date().toISOString();
+            // Haal publicatiedatum op uit formulier
+            const pubDate = document.getElementById('newsPubDate')?.value;
+            const pubTime = document.getElementById('newsPubTime')?.value || '12:00';
+            // Format: YYYY-MM-DD HH:MM:SS voor MySQL
+            const published_at = pubDate ? `${pubDate} ${pubTime}:00` : null;
             
             // Handle image upload
             const uploadedFile = document.getElementById('newsImage')?.files[0];
@@ -1674,11 +2583,13 @@ class HolwertAdmin {
                     console.log('News image compressed, length:', compressedBase64.length);
                     
                     if (compressedBase64.length > 4 * 1024 * 1024) {
+                        this.enableSaveButton(buttonStates);
                         this.showNotification('Afbeelding is te groot. Kies een kleinere afbeelding.', 'error');
                         return;
                     }
                 } catch (error) {
                     console.error('Error processing image:', error);
+                    this.enableSaveButton(buttonStates);
                     this.showNotification('Fout bij verwerken van afbeelding', 'error');
                     return;
                 }
@@ -1698,6 +2609,7 @@ class HolwertAdmin {
                 const missingFields = [];
                 if (!title) missingFields.push('Titel');
                 if (!content) missingFields.push('Inhoud');
+                this.enableSaveButton(buttonStates);
                 this.showNotification(`Vul de volgende verplichte velden in: ${missingFields.join(', ')}`, 'error');
                 return;
             }
@@ -1708,8 +2620,8 @@ class HolwertAdmin {
                 content,
                 category,
                 organization_id,
-                // Note: published_at column doesn't exist in DB, using created_at/updated_at instead
-                is_published: document.getElementById('newsPublished').checked
+                is_published: document.getElementById('newsPublished').checked,
+                published_at: published_at // Stuur publicatiedatum mee
             };
             
             // Voeg image_url alleen toe als het gedefinieerd is
@@ -1723,6 +2635,8 @@ class HolwertAdmin {
             console.log('🚀 Sending request:', { url, method, body });
             console.log('🔍 Body keys:', Object.keys(body));
             console.log('❌ published_at in body?', 'published_at' in body);
+
+            this.showLoader(null, actualNewsId ? 'Nieuws bijwerken...' : 'Nieuws opslaan...');
 
             const res = await fetch(url, {
                 method,
@@ -1739,15 +2653,23 @@ class HolwertAdmin {
                     const j = await res.json(); 
                     msg = j.message || j.error || msg;
                 } catch {}
+                this.hideLoader();
+                this.enableSaveButton(buttonStates);
                 this.showNotification(`Opslaan mislukt: ${msg}`, 'error');
                 return;
             }
 
+            this.hideLoader();
             this.showNotification('Nieuws artikel opgeslagen', 'success');
-            document.querySelector('.modal-overlay')?.remove();
+            
+            // Sluit alle modals direct na succes
+            document.querySelectorAll('.modal-overlay')?.forEach(el => el.remove());
+            
             this.loadNews();
         } catch (e) {
             console.error('saveNews error:', e);
+            this.hideLoader();
+            this.enableSaveButton(buttonStates);
             this.showNotification(`Fout bij opslaan nieuws: ${e?.message || 'Onbekende fout'}`, 'error');
         }
     }
@@ -1857,7 +2779,7 @@ class HolwertAdmin {
                 <div class="news-meta">
                     <div class="news-meta-item">
                         <i class="fas fa-calendar-alt"></i>
-                        <span>${new Date(article.created_at).toLocaleDateString('nl-NL')}</span>
+                        <span>${new Date(article.published_at || article.created_at).toLocaleDateString('nl-NL')}</span>
                     </div>
                     <div class="news-meta-item">
                         <i class="fas fa-tag"></i>
@@ -1918,6 +2840,7 @@ class HolwertAdmin {
         }
 
         try {
+            this.showLoader(null, 'Nieuws verwijderen...');
             const response = await fetch(`${this.apiBaseUrl}/admin/news/${newsId}`, {
                 method: 'DELETE',
                 headers: {
@@ -1926,20 +2849,24 @@ class HolwertAdmin {
             });
 
             if (response.ok) {
+                this.hideLoader();
                 this.showNotification('Nieuws artikel verwijderd', 'success');
                 this.loadNews();
             } else {
                 const error = await response.json();
+                this.hideLoader();
                 this.showNotification(`Fout bij verwijderen: ${error.message || 'Onbekende fout'}`, 'error');
             }
         } catch (error) {
             console.error('Error deleting news:', error);
+            this.hideLoader();
             this.showNotification('Fout bij verwijderen nieuws artikel', 'error');
         }
     }
 
     async loadEvents() {
         try {
+            this.showLoader('eventsContent', 'Evenementen laden...');
             const response = await fetch(`${this.apiBaseUrl}/admin/events`, {
                 headers: {
                     'Authorization': `Bearer ${this.token}`
@@ -1953,11 +2880,306 @@ class HolwertAdmin {
                 const container = document.getElementById('eventsContent');
                 if (container) container.innerHTML = '<p>Fout bij laden events.</p>';
             }
+            this.hideLoader('eventsContent');
         } catch (error) {
             console.error('Error loading events:', error);
             const container = document.getElementById('eventsContent');
             if (container) container.innerHTML = '<p>Fout bij laden events.</p>';
+            this.hideLoader('eventsContent');
         }
+    }
+
+    // Nieuwe editor (create/edit) voor events, nieuws-stijl
+    async openEventEditor(eventId = null) {
+        // Verwijder bestaande overlays
+        document.querySelectorAll('.modal-overlay').forEach(el => el.remove());
+
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        Object.assign(overlay.style, {
+            position: 'fixed',
+            inset: '0',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'rgba(0,0,0,0.35)',
+            zIndex: '9999'
+        });
+
+        // Defaults
+        let initial = {
+            title: '',
+            description: '',
+            event_date: '',
+            event_end_date: '',
+            location: '',
+            organization_id: '',
+            price: '',
+            image_url: ''
+        };
+        let imageCleared = false;
+
+        // Haal event op via proxy (snel) als we bewerken
+        if (eventId) {
+            try {
+                const res = await fetch(`https://holwert.appenvloed.com/admin/db-proxy.php`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-API-Key': 'holwert-db-proxy-2026-secure-key-change-in-production'
+                    },
+                    body: JSON.stringify({
+                        action: 'execute',
+                        query: `SELECT * FROM events WHERE id = ? LIMIT 1`,
+                        params: [eventId]
+                    })
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    const ev = data.rows?.[0];
+                    if (ev) {
+                        initial = {
+                            title: ev.title || '',
+                            description: ev.description || '',
+                            event_date: ev.event_date ? new Date(ev.event_date).toISOString().slice(0,16) : '',
+                            event_end_date: ev.event_end_date ? new Date(ev.event_end_date).toISOString().slice(0,16) : (ev.event_date ? new Date(ev.event_date).toISOString().slice(0,16) : ''),
+                            location: ev.location || '',
+                            organization_id: ev.organization_id || '',
+                            price: ev.price || '',
+                            image_url: ev.image_url || ''
+                        };
+                    } else {
+                        this.showNotification('Event niet gevonden', 'error');
+                        return;
+                    }
+                } else {
+                    this.showNotification('Fout bij laden event', 'error');
+                    return;
+                }
+            } catch (err) {
+                console.error('Error loading event via proxy:', err);
+                this.showNotification('Fout bij laden event', 'error');
+                return;
+            }
+        }
+
+        // Modal HTML
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.style.maxWidth = '720px';
+        modal.style.width = '95%';
+        modal.innerHTML = `
+            <div class="modal-header">
+                <h3>${eventId ? 'Evenement bewerken' : 'Nieuw evenement'}</h3>
+                <button class="close" aria-label="Sluiten">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form">
+                    <div class="form-group">
+                        <label>Titel</label>
+                        <input type="text" id="evTitle" value="${initial.title}" placeholder="Titel">
+                    </div>
+                    <div class="form-group">
+                        <label>Omschrijving</label>
+                        <textarea id="evDesc" style="min-height:120px" placeholder="Omschrijving">${initial.description}</textarea>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Begindatum</label>
+                            <input type="datetime-local" id="evStart" value="${initial.event_date}">
+                        </div>
+                        <div class="form-group">
+                            <label>Einddatum</label>
+                            <input type="datetime-local" id="evEnd" value="${initial.event_end_date}">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Locatie</label>
+                        <input type="text" id="evLocation" value="${initial.location}" placeholder="Locatie">
+                    </div>
+                    <div class="form-group">
+                        <label>Kosten (optioneel, bijv. 5.00)</label>
+                        <input type="number" step="0.01" min="0" id="evPrice" value="${initial.price || ''}" placeholder="Kosten">
+                    </div>
+                    <div class="form-group">
+                        <label>Organisatie (optioneel)</label>
+                        <select id="evOrg">
+                            <option value="">Geen organisatie</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Afbeelding (optioneel)</label>
+                        <input type="file" id="evImage" accept="image/*">
+                        <div id="evImagePreview" style="${initial.image_url ? 'display:block' : 'display:none'};margin-top:10px;">
+                            <img id="evImagePreviewImg" src="${initial.image_url || ''}" style="max-width:200px;max-height:200px;border-radius:8px;">
+                            <button type="button" class="btn btn-sm btn-secondary" id="evImageClear" style="margin-top:5px;">Verwijder afbeelding</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary btn-cancel">Annuleren</button>
+                <button class="btn btn-primary btn-save">${eventId ? 'Opslaan' : 'Opslaan'}</button>
+            </div>
+        `;
+
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+
+        // Close handlers
+        const close = () => overlay.remove();
+        modal.querySelector('.close')?.addEventListener('click', close);
+        modal.querySelector('.btn-cancel')?.addEventListener('click', close);
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+        modal.addEventListener('click', (e) => e.stopPropagation());
+
+        // Image preview handlers
+        const imgInput = modal.querySelector('#evImage');
+        const imgPreview = modal.querySelector('#evImagePreview');
+        const imgPreviewImg = modal.querySelector('#evImagePreviewImg');
+        const imgClear = modal.querySelector('#evImageClear');
+        if (imgInput) {
+            imgInput.addEventListener('change', async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) {
+                    imgPreview.style.display = 'none';
+                    imgPreviewImg.src = '';
+                    return;
+                }
+                try {
+                    const compressedBase64 = await this.compressEventImage(file);
+                    imgPreviewImg.src = compressedBase64;
+                    imgPreview.style.display = 'block';
+                } catch (err) {
+                    console.error('Error processing image:', err);
+                    this.showNotification('Fout bij verwerken van afbeelding', 'error');
+                    imgPreview.style.display = 'none';
+                    imgPreviewImg.src = '';
+                }
+            });
+        }
+        if (imgClear) {
+            imgClear.addEventListener('click', () => {
+                if (imgInput) imgInput.value = '';
+                imgPreview.style.display = 'none';
+                imgPreviewImg.src = '';
+                imageCleared = true;
+            });
+        }
+
+        // Async load organizations via proxy
+        const orgSelect = modal.querySelector('#evOrg');
+        (async () => {
+            try {
+                const orgRes = await fetch(`https://holwert.appenvloed.com/admin/db-proxy.php`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-API-Key': 'holwert-db-proxy-2026-secure-key-change-in-production'
+                    },
+                    body: JSON.stringify({
+                        action: 'execute',
+                        query: 'SELECT id, name FROM organizations ORDER BY name ASC'
+                    })
+                });
+                if (orgRes.ok) {
+                    const orgData = await orgRes.json();
+                    const organizations = orgData.rows || [];
+                    if (orgSelect) {
+                        const opts = ['<option value="">Geen organisatie</option>'].concat(
+                            organizations.map(org => `<option value="${org.id}">${org.name || `Organisatie ${org.id}`}</option>`)
+                        );
+                        orgSelect.innerHTML = opts.join('');
+                        if (initial.organization_id) {
+                            orgSelect.value = initial.organization_id;
+                        }
+                    }
+                } else {
+                    console.warn('Organizations via proxy mislukt:', orgRes.status);
+                }
+            } catch (err) {
+                console.warn('Organizations via proxy error:', err);
+            }
+        })();
+
+        // Save handler
+        modal.querySelector('.btn-save')?.addEventListener('click', async () => {
+            try {
+                const saveBtn = modal.querySelector('.btn-save');
+                const cancelBtn = modal.querySelector('.btn-cancel');
+                if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Opslaan...'; }
+                if (cancelBtn) { cancelBtn.disabled = true; }
+                this.showLoader(null, 'Evenement opslaan...');
+
+                const title = (modal.querySelector('#evTitle')?.value || '').trim();
+                const description = (modal.querySelector('#evDesc')?.value || '').trim();
+                const event_date_raw = modal.querySelector('#evStart')?.value;
+                const event_end_date_raw = modal.querySelector('#evEnd')?.value;
+                const location = (modal.querySelector('#evLocation')?.value || '').trim();
+                const orgVal = modal.querySelector('#evOrg')?.value;
+                const organization_id = orgVal ? parseInt(orgVal) : null;
+                const priceVal = modal.querySelector('#evPrice')?.value;
+                const price = priceVal ? parseFloat(priceVal) : null;
+                const imgVal = modal.querySelector('#evImagePreviewImg')?.src;
+                let image_url = imgVal && imgVal.startsWith('data:image') ? imgVal : (initial.image_url || null);
+                if (imageCleared) {
+                    image_url = null; // gebruiker heeft afbeelding verwijderd
+                }
+
+                if (!title || !description || !event_date_raw || !location) {
+                    this.showNotification('Vul alle verplichte velden in', 'error');
+                    this.hideLoader();
+                    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Opslaan'; }
+                    if (cancelBtn) { cancelBtn.disabled = false; }
+                    return;
+                }
+
+                const body = {
+                    title,
+                    description,
+                    event_date: new Date(event_date_raw).toISOString(),
+                    event_end_date: event_end_date_raw ? new Date(event_end_date_raw).toISOString() : null,
+                    location,
+                    organization_id,
+                    status: 'scheduled',
+                    price,
+                    image_url
+                };
+
+                const url = eventId ? `${this.apiBaseUrl}/admin/events/${eventId}` : `${this.apiBaseUrl}/admin/events`;
+                const method = eventId ? 'PUT' : 'POST';
+
+                const res = await fetch(url, {
+                    method,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${this.token}`
+                    },
+                    body: JSON.stringify(body)
+                });
+
+                if (!res.ok) {
+                    let msg = `HTTP ${res.status}`;
+                    try { const j = await res.json(); msg = j.message || j.error || msg; } catch {}
+                    this.showNotification(`Opslaan mislukt: ${msg}`, 'error');
+                } else {
+                    this.showNotification('Evenement opgeslagen', 'success');
+                    overlay.remove();
+                    this.loadEvents();
+                    this.loadNotificationCounts();
+                }
+                this.hideLoader();
+                if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Opslaan'; }
+                if (cancelBtn) { cancelBtn.disabled = false; }
+            } catch (err) {
+                console.error('saveEvent (editor) error:', err);
+                this.showNotification('Fout bij opslaan evenement: ' + (err?.message || err), 'error');
+                this.hideLoader();
+            }
+        });
+
+        // Scroll naar top
+        window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
     displayEvents(events) {
@@ -1977,10 +3199,7 @@ class HolwertAdmin {
                 <td><span class="status-badge status-published">GEPUBLICEERD</span></td>
                 <td>
                     <div class="action-buttons">
-                        <button class="btn-icon btn-view" onclick="admin.viewEvent(${ev.id}, ${JSON.stringify(ev).replace(/"/g, '&quot;')})" title="Bekijken">
-                            <i class="fas fa-eye"></i>
-                        </button>
-                        <button class="btn-icon btn-edit" onclick="admin.editEvent(${ev.id})" title="Bewerken">
+                        <button class="btn-icon btn-edit" onclick="admin.openEventEditor(${ev.id})" title="Bewerken">
                             <i class="fas fa-edit"></i>
                         </button>
                         <button class="btn-icon btn-delete" onclick="admin.deleteEvent(${ev.id}, '${(ev.title || '').replace(/'/g, "\\'")}')">
@@ -2015,28 +3234,13 @@ class HolwertAdmin {
         `;
     }
 
+    // Legacy view/edit niet meer gebruiken; we werken met openEventEditor
     async viewEvent(id, eventData = null) {
-        try {
-            let event;
-            if (eventData) {
-                // Gebruik de doorgegeven event data
-                event = eventData;
-            } else {
-                // Fallback: haal event data op via API
-                const response = await fetch(`${this.apiBaseUrl}/events/${id}`);
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                event = await response.json();
-            }
-            this.showEventPreviewModal(event);
-        } catch (err) {
-            console.error('Error loading event:', err);
-            this.showNotification('Fout bij laden evenement', 'error');
-        }
+        console.log('viewEvent legacy called, use openEventEditor instead');
     }
 
     async editEvent(id) {
-        // Gebruik de nieuwe uniforme openEventModal functie
-        await this.openEventModal(id, 'edit');
+        console.log('editEvent legacy called, use openEventEditor instead');
     }
 
     async deleteEvent(id, title) {
@@ -2068,8 +3272,7 @@ class HolwertAdmin {
     }
 
     async openCreateEventModal() {
-        // Gebruik de nieuwe uniforme openEventModal functie
-        await this.openEventModal(null, 'create');
+        console.log('openCreateEventModal legacy called, use openEventEditor(null) instead');
     }
 
     showCreateEventModal(organizations) {
@@ -2272,6 +3475,9 @@ class HolwertAdmin {
         const form = document.getElementById('editEventForm');
         if (!form) return;
 
+        // Disable save button to prevent double clicks
+        const buttonStates = this.disableSaveButton('Bijwerken...');
+
         const formData = new FormData(form);
         const eventData = {
             title: formData.get('title'),
@@ -2285,6 +3491,9 @@ class HolwertAdmin {
         };
 
         try {
+            // Show loader during update
+            this.showLoader(null, 'Evenement bijwerken...');
+
             const response = await fetch(`${this.apiBaseUrl}/admin/events/${id}`, {
                 method: 'PUT',
                 headers: {
@@ -2295,16 +3504,24 @@ class HolwertAdmin {
             });
 
             if (response.ok) {
+                this.hideLoader();
+                this.enableSaveButton(buttonStates);
                 this.showNotification('Evenement succesvol bijgewerkt', 'success');
-                document.querySelector('.modal-overlay').remove();
+                setTimeout(() => {
+                    document.querySelector('.modal-overlay')?.remove();
+                }, 500);
                 this.loadEvents(); // Herlaad de lijst
                 this.loadNotificationCounts(); // Refresh notification badges
             } else {
                 const error = await response.json();
+                this.hideLoader();
+                this.enableSaveButton(buttonStates);
                 this.showNotification(error.message || 'Fout bij bijwerken', 'error');
             }
         } catch (err) {
             console.error('Error updating event:', err);
+            this.hideLoader();
+            this.enableSaveButton(buttonStates);
             this.showNotification('Fout bij bijwerken evenement', 'error');
         }
     }
@@ -2453,7 +3670,14 @@ class HolwertAdmin {
     }
 
     async loadFoundLost() {
-        document.getElementById('foundLostContent').innerHTML = '<p class="text-muted">Gevonden/Verloren sectie - Wordt geïmplementeerd</p>';
+        const container = document.getElementById('foundLostContent');
+        if (!container) return;
+        this.showLoader('foundLostContent', 'Gevonden/Verloren laden...');
+        // Simulate loading for consistency
+        setTimeout(() => {
+            container.innerHTML = '<p class="text-muted">Gevonden/Verloren sectie - Wordt geïmplementeerd</p>';
+            this.hideLoader('foundLostContent');
+        }, 500);
     }
 
     async loadModeration() {
@@ -2461,8 +3685,8 @@ class HolwertAdmin {
             const container = document.getElementById('moderationContent');
             if (!container) return;
 
-            // Toon loading state
-            container.innerHTML = '<div class="loading-spinner">Laden...</div>';
+            // Show loader
+            this.showLoader('moderationContent', 'Moderatie content laden...');
 
             // Haal pending content op
             const response = await fetch(`${this.apiBaseUrl}/admin/moderation/pending`, {
@@ -2478,9 +3702,11 @@ class HolwertAdmin {
             } else {
                 container.innerHTML = '<p class="text-muted">Geen content wacht op moderatie</p>';
             }
+            this.hideLoader('moderationContent');
         } catch (error) {
             console.error('Error loading moderation content:', error);
             document.getElementById('moderationContent').innerHTML = '<p class="text-muted">Fout bij laden moderatie content</p>';
+            this.hideLoader('moderationContent');
         }
     }
 
@@ -3126,7 +4352,7 @@ class HolwertAdmin {
                             </span>
                         </div>
                         <div class="content-meta">
-                            <small>${new Date(article.created_at).toLocaleDateString('nl-NL')}</small>
+                            <small>${new Date(article.published_at || article.created_at).toLocaleDateString('nl-NL')}</small>
                         </div>
                         <div class="content-actions">
                             <button class="btn btn-sm btn-primary" onclick="admin.viewNews(${article.id})">
@@ -3219,32 +4445,8 @@ class HolwertAdmin {
             
             let organizations = [];
             
-            // Haal organisaties op voor dropdown (bij create en edit)
-            if (mode !== 'view') {
-                try {
-                    const orgRes = await fetch(`${this.apiBaseUrl}/admin/organizations`, {
-                        headers: {
-                            'Authorization': `Bearer ${this.token}`,
-                            'Content-Type': 'application/json'
-                        }
-                    });
-                    if (orgRes.ok) {
-                        const orgData = await orgRes.json();
-                        organizations = orgData.organizations || [];
-                        console.log('Organizations loaded:', organizations.length);
-                    } else {
-                        // Niet gooien van error, gewoon loggen en doorgaan zonder organisaties
-                        const errorText = await orgRes.text();
-                        console.warn('Failed to load organizations:', orgRes.status, errorText);
-                        // Toon alleen een waarschuwing, geen error
-                        this.showNotification('Organisaties konden niet worden geladen. Je kunt nog steeds een event aanmaken.', 'warning');
-                    }
-                } catch (err) {
-                    // Bij network errors, gewoon loggen en doorgaan
-                    console.warn('Error loading organizations (continuing anyway):', err);
-                    // Geen notification - modal wordt gewoon getoond zonder organisaties
-                }
-            }
+            // Stap 1: toon eerst de modal met lege dropdown; laad organisaties daarna async
+            // (voorkomt dat een trage call de modal blokkeert)
             
             if (eventId) {
                 // Haal event data op voor bewerken/bekijken
@@ -3478,20 +4680,251 @@ class HolwertAdmin {
                 const startEl = overlay.querySelector('#evStart');
                 const endEl = overlay.querySelector('#evEnd');
                 const syncEnd = () => {
-                    if (startEl.value) {
+                    if (startEl && startEl.value && endEl) {
                         endEl.min = startEl.value;
                         if (!endEl.value || endEl.value < startEl.value) {
                             endEl.value = startEl.value;
                         }
                     }
                 };
-                startEl.addEventListener('change', syncEnd);
+                startEl?.addEventListener('change', syncEnd);
+                endEl?.addEventListener('change', syncEnd);
                 syncEnd();
             }
+
+            // Scroll naar top zodat modal niet buiten beeld valt (zeker op mobiel)
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         } catch (e) {
             console.error('openEventModal error:', e);
             this.showNotification('Fout bij openen event-modal', 'error');
         }
+    }
+
+    // Eenvoudige event-modal (naar voorbeeld nieuws) - toont direct, laadt organisaties async
+    async showCreateEventModalSimple() {
+        // Verwijder bestaande overlays
+        document.querySelectorAll('.modal-overlay').forEach(el => el.remove());
+
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        Object.assign(overlay.style, {
+            position: 'fixed',
+            inset: '0',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'rgba(0,0,0,0.35)',
+            zIndex: '9999'
+        });
+
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.style.maxWidth = '720px';
+        modal.style.width = '95%';
+        modal.innerHTML = `
+            <div class="modal-header">
+                <h3>Nieuw evenement</h3>
+                <button class="close" aria-label="Sluiten">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form">
+                    <div class="form-group">
+                        <label>Titel</label>
+                        <input type="text" id="evTitle" placeholder="Titel">
+                    </div>
+                    <div class="form-group">
+                        <label>Omschrijving</label>
+                        <textarea id="evDesc" style="min-height:120px" placeholder="Omschrijving"></textarea>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Begindatum</label>
+                            <input type="datetime-local" id="evStart">
+                        </div>
+                        <div class="form-group">
+                            <label>Einddatum</label>
+                            <input type="datetime-local" id="evEnd">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Locatie</label>
+                        <input type="text" id="evLocation" placeholder="Locatie">
+                    </div>
+                    <div class="form-group">
+                        <label>Kosten (optioneel, bijv. 5.00)</label>
+                        <input type="number" step="0.01" min="0" id="evPrice" placeholder="Kosten">
+                    </div>
+                    <div class="form-group">
+                        <label>Organisatie (optioneel)</label>
+                        <select id="evOrg">
+                            <option value="">Geen organisatie</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Afbeelding (optioneel)</label>
+                        <input type="file" id="evImage" accept="image/*">
+                        <div id="evImagePreview" style="display:none;margin-top:10px;">
+                            <img id="evImagePreviewImg" src="" style="max-width:200px;max-height:200px;border-radius:8px;">
+                            <button type="button" class="btn btn-sm btn-secondary" id="evImageClear" style="margin-top:5px;">Verwijder afbeelding</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary btn-cancel">Annuleren</button>
+                <button class="btn btn-primary btn-save">Opslaan</button>
+            </div>
+        `;
+
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+        console.log('[Events] Simple modal overlay added');
+
+        // Close handlers
+        const close = () => overlay.remove();
+        modal.querySelector('.close')?.addEventListener('click', close);
+        modal.querySelector('.btn-cancel')?.addEventListener('click', close);
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+        modal.addEventListener('click', (e) => e.stopPropagation());
+
+        // Image preview handlers
+        const imgInput = modal.querySelector('#evImage');
+        const imgPreview = modal.querySelector('#evImagePreview');
+        const imgPreviewImg = modal.querySelector('#evImagePreviewImg');
+        const imgClear = modal.querySelector('#evImageClear');
+        if (imgInput) {
+            imgInput.addEventListener('change', async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) {
+                    imgPreview.style.display = 'none';
+                    imgPreviewImg.src = '';
+                    return;
+                }
+                try {
+                    const compressedBase64 = await this.compressEventImage(file);
+                    imgPreviewImg.src = compressedBase64;
+                    imgPreview.style.display = 'block';
+                } catch (err) {
+                    console.error('Error processing image:', err);
+                    this.showNotification('Fout bij verwerken van afbeelding', 'error');
+                    imgPreview.style.display = 'none';
+                    imgPreviewImg.src = '';
+                }
+            });
+        }
+        if (imgClear) {
+            imgClear.addEventListener('click', () => {
+                if (imgInput) imgInput.value = '';
+                imgPreview.style.display = 'none';
+                imgPreviewImg.src = '';
+            });
+        }
+
+        // Async load organizations via proxy (snelste route)
+        const orgSelect = modal.querySelector('#evOrg');
+        (async () => {
+            try {
+                const orgRes = await fetch(`https://holwert.appenvloed.com/admin/db-proxy.php`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-API-Key': 'holwert-db-proxy-2026-secure-key-change-in-production'
+                    },
+                    body: JSON.stringify({
+                        action: 'execute',
+                        query: 'SELECT id, name FROM organizations ORDER BY name ASC'
+                    })
+                });
+                if (orgRes.ok) {
+                    const orgData = await orgRes.json();
+                    const organizations = orgData.rows || [];
+                    console.log('Organizations loaded (proxy, simple modal):', organizations.length);
+                    if (orgSelect) {
+                        const opts = ['<option value="">Geen organisatie</option>'].concat(
+                            organizations.map(org => `<option value="${org.id}">${org.name || `Organisatie ${org.id}`}</option>`)
+                        );
+                        orgSelect.innerHTML = opts.join('');
+                    }
+                } else {
+                    console.warn('Organizations via proxy mislukt:', orgRes.status);
+                }
+            } catch (err) {
+                console.warn('Organizations via proxy error (simple modal):', err);
+            }
+        })();
+
+        // Save handler
+        modal.querySelector('.btn-save')?.addEventListener('click', async () => {
+            try {
+                const saveBtn = modal.querySelector('.btn-save');
+                const cancelBtn = modal.querySelector('.btn-cancel');
+                if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Opslaan...'; }
+                if (cancelBtn) { cancelBtn.disabled = true; }
+                this.showLoader(null, 'Evenement opslaan...');
+
+                const title = (modal.querySelector('#evTitle')?.value || '').trim();
+                const description = (modal.querySelector('#evDesc')?.value || '').trim();
+                const event_date_raw = modal.querySelector('#evStart')?.value;
+                const event_end_date_raw = modal.querySelector('#evEnd')?.value;
+                const location = (modal.querySelector('#evLocation')?.value || '').trim();
+                const orgVal = modal.querySelector('#evOrg')?.value;
+                const organization_id = orgVal ? parseInt(orgVal) : null;
+                const priceVal = modal.querySelector('#evPrice')?.value;
+                const price = priceVal ? parseFloat(priceVal) : null;
+                const imgVal = modal.querySelector('#evImagePreviewImg')?.src;
+                const image_url = imgVal && imgVal.startsWith('data:image') ? imgVal : null;
+
+                if (!title || !description || !event_date_raw || !location) {
+                    this.showNotification('Vul alle verplichte velden in', 'error');
+                    this.hideLoader();
+                    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Opslaan'; }
+                    if (cancelBtn) { cancelBtn.disabled = false; }
+                    return;
+                }
+
+                const body = {
+                    title,
+                    description,
+                    event_date: new Date(event_date_raw).toISOString(),
+                    event_end_date: event_end_date_raw ? new Date(event_end_date_raw).toISOString() : null,
+                    location,
+                    organization_id,
+                    status: 'scheduled',
+                    price,
+                    image_url
+                };
+
+                const res = await fetch(`${this.apiBaseUrl}/admin/events`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${this.token}`
+                    },
+                    body: JSON.stringify(body)
+                });
+
+                if (!res.ok) {
+                    let msg = `HTTP ${res.status}`;
+                    try { const j = await res.json(); msg = j.message || j.error || msg; } catch {}
+                    this.showNotification(`Opslaan mislukt: ${msg}`, 'error');
+                } else {
+                    this.showNotification('Evenement opgeslagen', 'success');
+                    overlay.remove();
+                    this.loadEvents();
+                    this.loadNotificationCounts();
+                }
+                this.hideLoader();
+                if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Opslaan'; }
+                if (cancelBtn) { cancelBtn.disabled = false; }
+            } catch (err) {
+                console.error('saveEvent (simple) error:', err);
+                this.showNotification('Fout bij opslaan evenement: ' + (err?.message || err), 'error');
+                this.hideLoader();
+            }
+        });
+
+        // Scroll naar top
+        window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
     async saveEvent(eventId) {
@@ -3596,7 +5029,9 @@ class HolwertAdmin {
             }
 
             this.showNotification('Event opgeslagen', 'success');
-            document.querySelector('.modal-overlay')?.remove();
+            setTimeout(() => {
+                document.querySelector('.modal-overlay')?.remove();
+            }, 500);
             // Refresh events lijst
             this.loadEvents();
             // Refresh organisatie lijst als we in een organisatie zitten

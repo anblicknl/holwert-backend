@@ -150,15 +150,15 @@ async function executeQueryViaProxy(query, params = [], action = 'execute') {
 
     if (action === 'insert') {
       const insertId = response.data.insertId ? parseInt(response.data.insertId) : null;
-      console.log(`[PHP Proxy] Insert result - insertId: ${insertId}, affectedRows: ${response.data.affectedRows}`);
+      const affectedRows = response.data.affectedRows || 0;
+      console.log(`[PHP Proxy] Insert result - insertId: ${insertId}, affectedRows: ${affectedRows}`);
       
-      if (!insertId) {
-        throw new Error('PHP Proxy returned null insertId for INSERT query');
-      }
+      // insertId kan null zijn bij ON DUPLICATE KEY UPDATE (update in plaats van insert)
+      // Dit is normaal en geen error
       
       return {
-        rows: [{ id: insertId }],
-        rowCount: response.data.affectedRows || 0,
+        rows: insertId ? [{ id: insertId }] : [],
+        rowCount: affectedRows,
         insertId: insertId
       };
     }
@@ -621,7 +621,7 @@ app.post('/api/upload/image', authenticateToken, async (req, res) => {
 app.get('/api/news', async (req, res) => {
   try {
     await ensureBookmarksTable();
-    const { organization_id } = req.query;
+    const { organization_id, limit = 20 } = req.query;
     
     // Check if user is authenticated (optional)
     let userId = null;
@@ -637,28 +637,37 @@ app.get('/api/news', async (req, res) => {
       }
     }
     
+    const limitValue = parseInt(limit) || 20;
+    const params = [];
+    
     let query = `
       SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt, n.image_url,
-             n.created_at, n.updated_at, n.organization_id,
+             n.created_at, n.updated_at, 
+             COALESCE(n.published_at, n.created_at) as published_at,
+             n.organization_id,
              u.first_name, u.last_name,
              o.name as organization_name, o.logo_url as organization_logo, o.brand_color as organization_brand_color
              ${userId ? ', CASE WHEN b.user_id IS NOT NULL THEN true ELSE false END as is_bookmarked' : ', false as is_bookmarked'}
       FROM news n
-      JOIN users u ON n.author_id = u.id
+      LEFT JOIN users u ON n.author_id = u.id
       LEFT JOIN organizations o ON n.organization_id = o.id
-      ${userId ? `LEFT JOIN bookmarks b ON b.news_id = n.id AND b.user_id = ${userId}` : ''}
+      ${userId ? `LEFT JOIN bookmarks b ON b.news_id = n.id AND b.user_id = ?` : ''}
       WHERE n.is_published = true
     `;
     
-    const params = [];
+    if (userId) {
+      params.push(userId);
+    }
     
     // Filter by organization_id if provided
     if (organization_id) {
-      query += ` AND n.organization_id = $1`;
+      query += ` AND n.organization_id = ?`;
       params.push(parseInt(organization_id));
     }
     
-    query += ` ORDER BY n.created_at DESC LIMIT 20`;
+    // Sorteer op published_at (publicatiedatum), fallback naar created_at als published_at NULL is
+    query += ` ORDER BY COALESCE(n.published_at, n.created_at) DESC LIMIT ?`;
+    params.push(limitValue);
     
     const result = await executeQuery(query, params);
 
@@ -679,9 +688,9 @@ app.get('/api/news', async (req, res) => {
       news: processedNews,
       pagination: {
         page: 1,
-        limit: 20,
+        limit: limitValue,
         total: result.rows.length,
-        pages: 1
+        pages: Math.ceil(result.rows.length / limitValue)
       }
     });
 
@@ -702,24 +711,23 @@ app.get('/api/news/related', async (req, res) => {
       return res.status(400).json({ error: 'organization_id is required' });
     }
     const params = [organization_id];
-    let paramCount = 1; // organization_id is already $1
     let query = `
       SELECT n.id, n.title, COALESCE(n.content, '') as content, n.image_url,
-             n.created_at,
+             n.created_at, 
+             COALESCE(n.published_at, n.created_at) as published_at,
              u.first_name, u.last_name,
              o.name as organization_name, o.logo_url as organization_logo, o.brand_color as organization_brand_color
       FROM news n
-      JOIN users u ON n.author_id = u.id
+      LEFT JOIN users u ON n.author_id = u.id
       LEFT JOIN organizations o ON n.organization_id = o.id
-      WHERE n.is_published = true AND n.organization_id = $1`;
+      WHERE n.is_published = true AND n.organization_id = ?`;
     if (exclude) {
-      paramCount++;
       params.push(parseInt(exclude));
-      query += ` AND n.id <> $${paramCount}`;
+      query += ` AND n.id <> ?`;
     }
-    paramCount++;
     params.push(parseInt(limit));
-    query += ` ORDER BY n.created_at DESC LIMIT $${paramCount}`;
+    // Sorteer op published_at (publicatiedatum), fallback naar created_at
+    query += ` ORDER BY COALESCE(n.published_at, n.created_at) DESC LIMIT ?`;
 
     const result = await executeQuery(query, params);
 
@@ -762,16 +770,16 @@ app.get('/api/app/bookmarks', authenticateToken, async (req, res) => {
         SELECT n.id, n.title, n.excerpt, n.image_url, n.created_at, b.created_at as bookmarked_at
         FROM bookmarks b
         JOIN news n ON n.id = b.news_id
-        WHERE b.user_id = $1
+        WHERE b.user_id = ?
         ORDER BY b.created_at DESC
         LIMIT 100
       `, [userId]);
-      return res.json({ bookmarks: result.rows });
+      return res.json({ bookmarks: result });
     } else {
       const result = await executeQuery(`
-        SELECT news_id, created_at FROM bookmarks WHERE user_id = $1 ORDER BY created_at DESC LIMIT 500
+        SELECT news_id, created_at FROM bookmarks WHERE user_id = ? ORDER BY created_at DESC LIMIT 500
       `, [userId]);
-      return res.json({ bookmarks: result.rows });
+      return res.json({ bookmarks: result });
     }
   } catch (error) {
     console.error('Get bookmarks error:', error);
@@ -785,8 +793,8 @@ app.get('/api/app/bookmarks/:news_id', authenticateToken, async (req, res) => {
     await ensureBookmarksTable();
     const userId = req.user.userId;
     const newsId = parseInt(req.params.news_id);
-    const result = await executeQuery(`SELECT 1 FROM bookmarks WHERE user_id = $1 AND news_id = $2`, [userId, newsId]);
-    res.json({ bookmarked: result.rows.length > 0 });
+    const result = await executeQuery(`SELECT 1 FROM bookmarks WHERE user_id = ? AND news_id = ?`, [userId, newsId]);
+    res.json({ bookmarked: result.length > 0 });
   } catch (error) {
     console.error('Check bookmark error:', error);
     res.status(500).json({ error: 'Failed to check bookmark', message: error.message });
@@ -801,7 +809,7 @@ app.post('/api/app/bookmarks', authenticateToken, async (req, res) => {
     const { news_id } = req.body;
     if (!news_id) return res.status(400).json({ error: 'news_id is required' });
     await executeQuery(`
-      INSERT INTO bookmarks (user_id, news_id) VALUES ($1, $2)
+      INSERT INTO bookmarks (user_id, news_id) VALUES (?, ?)
       ON DUPLICATE KEY UPDATE user_id = user_id
     `, [userId, news_id]);
     res.status(201).json({ success: true });
@@ -817,8 +825,8 @@ app.delete('/api/app/bookmarks/:news_id', authenticateToken, async (req, res) =>
     await ensureBookmarksTable();
     const userId = req.user.userId;
     const newsId = parseInt(req.params.news_id);
-    const result = await executeQuery(`DELETE FROM bookmarks WHERE user_id = $1 AND news_id = $2`, [userId, newsId]);
-    res.json({ success: true, removed: result.rowCount > 0 });
+    const result = await executeQuery(`DELETE FROM bookmarks WHERE user_id = ? AND news_id = ?`, [userId, newsId]);
+    res.json({ success: true, removed: result.affectedRows > 0 });
   } catch (error) {
     console.error('Remove bookmark error:', error);
     res.status(500).json({ error: 'Failed to remove bookmark', message: error.message });
@@ -828,16 +836,26 @@ app.delete('/api/app/bookmarks/:news_id', authenticateToken, async (req, res) =>
 // ===== APP FOLLOWS (organizations) =====
 async function ensureFollowsTable() {
   try {
-    await executeQuery(`
-      CREATE TABLE IF NOT EXISTS follows (
-        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-        created_at TIMESTAMPTZ DEFAULT NOW(),
-        PRIMARY KEY (user_id, organization_id)
-      );
-    `);
+    // Check of tabel bestaat via proxy (CREATE TABLE wordt geblokkeerd door proxy)
+    try {
+      await executeQueryViaProxy(`SELECT 1 FROM follows LIMIT 1`, [], 'execute');
+      // Tabel bestaat al
+      return;
+    } catch (checkError) {
+      // Tabel bestaat niet - probeer aan te maken via proxy
+      // Maar CREATE TABLE wordt geblokkeerd, dus we kunnen alleen checken
+      console.log('[ensureFollowsTable] Table check failed, but CREATE TABLE is blocked by proxy');
+      // Tabel moet handmatig aangemaakt worden of via een andere methode
+    }
   } catch (e) {
-    console.error('ensureFollowsTable error:', e);
+    console.error('[ensureFollowsTable] Error details:', {
+      message: e.message,
+      code: e.code,
+      errno: e.errno,
+      sqlState: e.sqlState,
+      stack: e.stack
+    });
+    // Don't throw - table might already exist
   }
 }
 
@@ -846,7 +864,12 @@ app.get('/api/app/following', authenticateToken, async (req, res) => {
   try {
     await ensureFollowsTable();
     const userId = req.user.userId;
-    const result = await executeQuery(`SELECT organization_id, created_at FROM follows WHERE user_id = $1 ORDER BY created_at DESC`, [userId]);
+    // Gebruik altijd proxy voor follow queries (Vercel serverless heeft geen directe MySQL)
+    const result = await executeQueryViaProxy(
+      `SELECT organization_id, created_at FROM follows WHERE user_id = ? ORDER BY created_at DESC`,
+      [userId],
+      'execute'
+    );
     res.json({ following: result.rows });
   } catch (error) {
     console.error('Get following error:', error);
@@ -860,7 +883,12 @@ app.get('/api/app/following/:organization_id', authenticateToken, async (req, re
     await ensureFollowsTable();
     const userId = req.user.userId;
     const orgId = parseInt(req.params.organization_id);
-    const result = await executeQuery(`SELECT 1 FROM follows WHERE user_id = $1 AND organization_id = $2`, [userId, orgId]);
+    // Gebruik altijd proxy voor follow queries (Vercel serverless heeft geen directe MySQL)
+    const result = await executeQueryViaProxy(
+      `SELECT 1 FROM follows WHERE user_id = ? AND organization_id = ?`,
+      [userId, orgId],
+      'execute'
+    );
     res.json({ following: result.rows.length > 0 });
   } catch (error) {
     console.error('Check following error:', error);
@@ -871,29 +899,73 @@ app.get('/api/app/following/:organization_id', authenticateToken, async (req, re
 // Follow org
 app.post('/api/app/follow', authenticateToken, async (req, res) => {
   try {
-    await ensureFollowsTable();
     const userId = req.user.userId;
     const { organization_id } = req.body;
     if (!organization_id) return res.status(400).json({ error: 'organization_id is required' });
-    await executeQuery(`INSERT INTO follows (user_id, organization_id) VALUES (?, ?) ON DUPLICATE KEY UPDATE user_id = user_id`, [userId, organization_id]);
+    
+    console.log(`[Follow] User ${userId} following org ${organization_id}`);
+    
+    // Eerst checken of tabel bestaat
+    try {
+      await executeQueryViaProxy(`SELECT 1 FROM follows LIMIT 1`, [], 'execute');
+    } catch (tableError) {
+      console.error('[Follow] Table check failed:', tableError.message);
+      // Tabel bestaat mogelijk niet, maar we proberen toch de insert
+    }
+    
+    // Gebruik altijd proxy voor follow queries (Vercel serverless heeft geen directe MySQL)
+    // ON DUPLICATE KEY UPDATE zorgt ervoor dat dubbele entries worden geupdate in plaats van error
+    const result = await executeQueryViaProxy(
+      `INSERT INTO follows (user_id, organization_id) VALUES (?, ?) ON DUPLICATE KEY UPDATE user_id = user_id`,
+      [userId, organization_id],
+      'insert'
+    );
+    console.log(`[Follow] Success - affectedRows: ${result.rowCount}, insertId: ${result.insertId}`);
     res.status(201).json({ success: true });
   } catch (error) {
-    console.error('Follow error:', error);
-    res.status(500).json({ error: 'Failed to follow', message: error.message });
+    console.error('[Follow] Error details:', {
+      message: error.message,
+      stack: error.stack,
+      code: error.code,
+      errno: error.errno,
+      sqlState: error.sqlState,
+      response: error.response?.data,
+      responseStatus: error.response?.status,
+      responseHeaders: error.response?.headers
+    });
+    const errorMessage = error.response?.data?.message || error.message || 'Unknown error';
+    res.status(500).json({ error: 'Failed to follow', message: errorMessage });
   }
 });
 
 // Unfollow org
 app.delete('/api/app/follow/:organization_id', authenticateToken, async (req, res) => {
   try {
-    await ensureFollowsTable();
     const userId = req.user.userId;
     const orgId = parseInt(req.params.organization_id);
-    const result = await executeQuery(`DELETE FROM follows WHERE user_id = $1 AND organization_id = $2`, [userId, orgId]);
+    
+    console.log(`[Unfollow] User ${userId} unfollowing org ${orgId}`);
+    // Gebruik altijd proxy voor follow queries (Vercel serverless heeft geen directe MySQL)
+    const result = await executeQueryViaProxy(
+      `DELETE FROM follows WHERE user_id = ? AND organization_id = ?`,
+      [userId, orgId],
+      'delete'
+    );
+    console.log(`[Unfollow] Success - affectedRows: ${result.rowCount}`);
     res.json({ success: true, removed: result.rowCount > 0 });
   } catch (error) {
-    console.error('Unfollow error:', error);
-    res.status(500).json({ error: 'Failed to unfollow', message: error.message });
+    console.error('[Unfollow] Error details:', {
+      message: error.message,
+      stack: error.stack,
+      code: error.code,
+      errno: error.errno,
+      sqlState: error.sqlState,
+      response: error.response?.data,
+      responseStatus: error.response?.status,
+      responseHeaders: error.response?.headers
+    });
+    const errorMessage = error.response?.data?.message || error.message || 'Unknown error';
+    res.status(500).json({ error: 'Failed to unfollow', message: errorMessage });
   }
 });
 
@@ -902,8 +974,13 @@ app.get('/api/organizations/:id/followers/count', async (req, res) => {
   try {
     await ensureFollowsTable();
     const orgId = parseInt(req.params.id);
-    const result = await executeQuery(`SELECT COUNT(*)::int AS count FROM follows WHERE organization_id = $1`, [orgId]);
-    const count = (result.rows[0] && result.rows[0].count) || 0;
+    // Gebruik altijd proxy voor follow queries (Vercel serverless heeft geen directe MySQL)
+    const result = await executeQueryViaProxy(
+      `SELECT COUNT(*) AS count FROM follows WHERE organization_id = ?`,
+      [orgId],
+      'execute'
+    );
+    const count = (result.rows?.[0]?.count) || 0;
     res.json({ count });
   } catch (error) {
     console.error('Get followers count error:', error);
@@ -925,7 +1002,7 @@ app.post('/api/push/token', authenticateToken, async (req, res) => {
     
     // Check if token already exists
     const existingToken = await executeQuery(
-      'SELECT id FROM push_tokens WHERE token = $1',
+      'SELECT id FROM push_tokens WHERE token = ?',
       [token]
     );
     
@@ -933,14 +1010,14 @@ app.post('/api/push/token', authenticateToken, async (req, res) => {
       // Update existing token
       await executeQuery(
         `UPDATE push_tokens 
-         SET user_id = $1, 
-             device_type = $2, 
-             device_name = $3,
-             notification_preferences = COALESCE($4, notification_preferences),
+         SET user_id = ?, 
+             device_type = ?, 
+             device_name = ?,
+             notification_preferences = COALESCE(?, notification_preferences),
              is_active = true,
              last_used_at = CURRENT_TIMESTAMP,
              updated_at = CURRENT_TIMESTAMP
-         WHERE token = $5`,
+         WHERE token = ?`,
         [userId, device_type, device_name, notification_preferences ? JSON.stringify(notification_preferences) : null, token]
       );
       
@@ -950,7 +1027,7 @@ app.post('/api/push/token', authenticateToken, async (req, res) => {
       // Insert new token
       await executeQuery(
         `INSERT INTO push_tokens (user_id, token, device_type, device_name, notification_preferences)
-         VALUES ($1, $2, $3, $4, $5)`,
+         VALUES (?, ?, ?, ?, ?)`,
         [userId, token, device_type, device_name, notification_preferences ? JSON.stringify(notification_preferences) : null]
       );
       
@@ -975,8 +1052,8 @@ app.put('/api/push/preferences', authenticateToken, async (req, res) => {
     
     await executeQuery(
       `UPDATE push_tokens 
-       SET notification_preferences = $1, updated_at = CURRENT_TIMESTAMP
-       WHERE user_id = $2`,
+       SET notification_preferences = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE user_id = ?`,
       [JSON.stringify(notification_preferences), userId]
     );
     
@@ -994,7 +1071,7 @@ app.delete('/api/push/token/:token', authenticateToken, async (req, res) => {
     const { token } = req.params;
     
     const result = await executeQuery(
-      'DELETE FROM push_tokens WHERE token = $1 AND user_id = $2',
+      'DELETE FROM push_tokens WHERE token = ? AND user_id = ?',
       [token, userId]
     );
     
@@ -1016,7 +1093,7 @@ app.post('/api/push/deactivate', authenticateToken, async (req, res) => {
     const userId = req.user.userId;
     
     await executeQuery(
-      'UPDATE push_tokens SET is_active = false, updated_at = CURRENT_TIMESTAMP WHERE user_id = $1',
+      'UPDATE push_tokens SET is_active = false, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?',
       [userId]
     );
     
@@ -1037,7 +1114,7 @@ app.get('/api/push/tokens', authenticateToken, async (req, res) => {
       `SELECT id, device_type, device_name, notification_preferences, is_active, 
               last_used_at, created_at, updated_at
        FROM push_tokens 
-       WHERE user_id = $1
+       WHERE user_id = ?
        ORDER BY last_used_at DESC`,
       [userId]
     );
@@ -1068,25 +1145,28 @@ app.get('/api/news/:id', async (req, res) => {
       }
     }
     
+    // Check if published_at column exists, if not use created_at
     const result = await executeQuery(`
       SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt, n.image_url,
-             n.created_at, n.updated_at, n.category, n.custom_category, n.is_published,
+             n.created_at, n.updated_at, 
+             COALESCE(n.published_at, n.created_at) as published_at,
+             n.category, n.custom_category, n.is_published,
              u.first_name, u.last_name,
              o.id as organization_id, o.name as organization_name, o.logo_url as organization_logo, o.brand_color as organization_brand_color
              ${userId ? ', CASE WHEN b.user_id IS NOT NULL THEN true ELSE false END as is_bookmarked' : ', false as is_bookmarked'}
       FROM news n
-      JOIN users u ON n.author_id = u.id
+      LEFT JOIN users u ON n.author_id = u.id
       LEFT JOIN organizations o ON n.organization_id = o.id
       ${userId ? `LEFT JOIN bookmarks b ON b.news_id = n.id AND b.user_id = ${userId}` : ''}
-      WHERE n.id = $1 AND n.is_published = true
+      WHERE n.id = ? AND n.is_published = true
       LIMIT 1
     `, [id]);
 
-    if (result.rows.length === 0) {
+    if (result.length === 0) {
       return res.status(404).json({ error: 'Article not found' });
     }
 
-    const article = result.rows[0];
+    const article = result[0];
 
     // Use image_url directly - no more base64 processing!
     const imageVariants = {
@@ -1112,8 +1192,8 @@ app.get('/api/news/:id', async (req, res) => {
 // Create news article with workflow logic
 app.post('/api/news', authenticateToken, async (req, res) => {
   try {
-    const { title, content, excerpt, category, custom_category, organization_id, image_url } = req.body;
-    const authorId = req.user.userId;
+    const { title, content, excerpt, category, custom_category, organization_id, image_url, published_at } = req.body;
+    let authorId = req.user?.userId || null;
 
     // Validation
     if (!title || !content) {
@@ -1122,18 +1202,20 @@ app.post('/api/news', authenticateToken, async (req, res) => {
       });
     }
 
-    // Determine publication status based on user type
+    // Determine publication status
     let isPublished = false;
 
-    // Check if user is associated with an approved organization
-    if (organization_id) {
+    // Admin mag direct publiceren op basis van aangevinkte optie
+    if (req.user?.role === 'admin') {
+      isPublished = req.body.is_published === true;
+    } else if (organization_id) {
+      // Niet-admin: publiceer alleen meteen als organisatie goedgekeurd is
       const orgResult = await executeQuery(
-        'SELECT is_approved FROM organizations WHERE id = $1',
+        'SELECT is_approved FROM organizations WHERE id = ?',
         [organization_id]
       );
       
       if (orgResult.rows.length > 0 && orgResult.rows[0].is_approved) {
-        // Organization content: publish immediately
         isPublished = true;
       }
     }
@@ -1146,20 +1228,89 @@ app.post('/api/news', authenticateToken, async (req, res) => {
       finalCustomCategory = custom_category;
     }
 
-    // Insert into news table
-    const result = await executeQuery(
-      'INSERT INTO news (title, content, excerpt, author_id, organization_id, image_url, image_data, category, custom_category, is_published) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id, title, COALESCE(content, \'\') as content, excerpt, category, custom_category, image_url, is_published, created_at',
-      [title, content, excerpt || null, authorId, organization_id || null, image_url || null, req.body.image_data || null, finalCategory, finalCustomCategory, isPublished]
+    // Validate author exists; if niet gevonden, zet op null om FK-fouten te voorkomen
+    if (authorId) {
+      try {
+        const authorCheck = await executeQuery('SELECT id FROM users WHERE id = ? LIMIT 1', [authorId]);
+        if (!authorCheck.rows.length) {
+          console.warn('Author not found, storing news without author_id');
+          authorId = null;
+        }
+      } catch (e) {
+        console.warn('Author check failed, fallback to null author_id:', e.message);
+        authorId = null;
+      }
+    }
+
+    // Insert into news table (MySQL: geen RETURNING; gebruik executeInsert)
+    // Gebruik published_at uit request, of zet automatisch bij publicatie
+    let publishedAtValue = null;
+    if (published_at) {
+      // Gebruik opgegeven publicatiedatum
+      publishedAtValue = published_at;
+    } else if (isPublished) {
+      // Als artikel wordt gepubliceerd maar geen datum is opgegeven, gebruik NOW()
+      publishedAtValue = 'NOW()';
+    }
+    
+    // Probeer eerst met published_at, fallback naar zonder als kolom niet bestaat
+    let insertResult;
+    try {
+      if (publishedAtValue) {
+        // Probeer met published_at kolom
+        // Gebruik STR_TO_DATE voor published_at om zeker te zijn van correcte parsing
+        const publishedAtSQL = publishedAtValue === 'NOW()' 
+          ? 'NOW()' 
+          : `STR_TO_DATE(?, '%Y-%m-%d %H:%i:%s')`;
+        const insertParams = publishedAtValue === 'NOW()' 
+          ? [title, content, excerpt || null, authorId, organization_id || null, image_url || null, finalCategory, finalCustomCategory, isPublished]
+          : [title, content, excerpt || null, authorId, organization_id || null, image_url || null, finalCategory, finalCustomCategory, isPublished, publishedAtValue];
+        
+        insertResult = await executeInsert(
+          `INSERT INTO news (title, content, excerpt, author_id, organization_id, image_url, category, custom_category, is_published, published_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ${publishedAtSQL}, NOW(), NOW())`,
+          insertParams
+        );
+      } else {
+        // Geen published_at (artikel niet gepubliceerd)
+        insertResult = await executeInsert(
+          'INSERT INTO news (title, content, excerpt, author_id, organization_id, image_url, category, custom_category, is_published, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())',
+          [title, content, excerpt || null, authorId, organization_id || null, image_url || null, finalCategory, finalCustomCategory, isPublished]
+        );
+      }
+    } catch (insertError) {
+      // Als published_at kolom niet bestaat, probeer zonder
+      if (insertError.message && insertError.message.includes('published_at')) {
+        console.log('⚠️ published_at kolom bestaat nog niet, gebruik fallback zonder published_at');
+        insertResult = await executeInsert(
+          'INSERT INTO news (title, content, excerpt, author_id, organization_id, image_url, category, custom_category, is_published, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())',
+          [title, content, excerpt || null, authorId, organization_id || null, image_url || null, finalCategory, finalCustomCategory, isPublished]
+        );
+      } else {
+        throw insertError; // Re-throw als het een andere error is
+      }
+    }
+
+    if (!insertResult.insertId) {
+      throw new Error('Failed to insert news (no insertId returned)');
+    }
+
+    const fetchResult = await executeQuery(
+      'SELECT id, title, COALESCE(content, \'\') AS content, excerpt, category, custom_category, image_url, is_published, COALESCE(published_at, created_at) as published_at, author_id, organization_id, created_at, updated_at FROM news WHERE id = ? LIMIT 1',
+      [insertResult.insertId]
     );
 
-    const newArticle = result.rows[0];
+    if (!fetchResult.rows.length) {
+      throw new Error(`Inserted news not found with id ${insertResult.insertId}`);
+    }
+
+    const newArticle = fetchResult.rows[0];
     
     // Send push notification if published and has organization
     if (isPublished && organization_id) {
       try {
         // Get organization name
         const orgResult = await executeQuery(
-          'SELECT name FROM organizations WHERE id = $1',
+          'SELECT name FROM organizations WHERE id = ?',
           [organization_id]
         );
         
@@ -1214,12 +1365,12 @@ app.post('/api/news', authenticateToken, async (req, res) => {
 app.put('/api/news/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, content, excerpt, category, custom_category, organization_id, image_url, image_data } = req.body;
+    const { title, content, excerpt, category, custom_category, organization_id, image_url } = req.body;
     const userId = req.user.userId;
 
     // Check if article exists and user has permission
     const existingArticle = await executeQuery(
-      'SELECT id, author_id, is_published FROM news WHERE id = $1',
+      'SELECT id, author_id, is_published FROM news WHERE id = ?',
       [id]
     );
 
@@ -1254,14 +1405,19 @@ app.put('/api/news/:id', authenticateToken, async (req, res) => {
     }
 
     // Update article
-    const result = await executeQuery(
-      'UPDATE news SET title = $1, content = $2, excerpt = $3, organization_id = $4, image_url = $5, image_data = $6, category = $7, custom_category = $8, updated_at = NOW() WHERE id = $9 RETURNING id, title, COALESCE(content, \'\') as content, excerpt, category, custom_category, image_url, image_data, is_published, created_at, updated_at',
-      [title, content, excerpt || null, organization_id || null, image_url || null, image_data || null, finalCategory, finalCustomCategory, id]
+    await executeQuery(
+      'UPDATE news SET title = ?, content = ?, excerpt = ?, organization_id = ?, image_url = ?, category = ?, custom_category = ?, updated_at = NOW() WHERE id = ?',
+      [title, content, excerpt || null, organization_id || null, image_url || null, finalCategory, finalCustomCategory, id]
+    );
+
+    const fetchResult = await executeQuery(
+      'SELECT id, title, COALESCE(content, \'\') as content, excerpt, category, custom_category, image_url, is_published, COALESCE(published_at, created_at) as published_at, author_id, organization_id, created_at, updated_at FROM news WHERE id = ? LIMIT 1',
+      [id]
     );
 
     res.json({
       message: 'Article updated successfully',
-      article: result.rows[0]
+      article: fetchResult.rows[0]
     });
 
   } catch (error) {
@@ -1520,7 +1676,10 @@ app.get('/api/admin/news', authenticateToken, async (req, res) => {
     const offset = (page - 1) * limit;
 
     let query = `
-      SELECT n.*, u.first_name, u.last_name, o.name as organization_name, o.logo_url as organization_logo
+      SELECT n.id, n.title, n.content, n.excerpt, n.category, n.custom_category, n.image_url, 
+             n.is_published, n.author_id, n.organization_id, n.created_at, n.updated_at,
+             COALESCE(n.published_at, n.created_at) as published_at,
+             u.first_name, u.last_name, o.name as organization_name, o.logo_url as organization_logo
       FROM news n
       LEFT JOIN users u ON n.author_id = u.id
       LEFT JOIN organizations o ON n.organization_id = o.id
@@ -1528,25 +1687,19 @@ app.get('/api/admin/news', authenticateToken, async (req, res) => {
     `;
     const params = [];
 
-    let paramCount = 0;
     if (status) {
-      paramCount++;
       params.push(status);
-      query += ` AND n.status = $${paramCount}`;
+      query += ` AND n.status = ?`;
     }
 
     if (category) {
-      paramCount++;
       params.push(category);
-      query += ` AND n.category = $${paramCount}`;
+      query += ` AND n.category = ?`;
     }
 
-    paramCount++;
-    query += ` ORDER BY n.created_at DESC LIMIT $${paramCount}`;
+    // Sorteer op published_at (publicatiedatum), fallback naar created_at
+    query += ` ORDER BY COALESCE(n.published_at, n.created_at) DESC LIMIT ? OFFSET ?`;
     params.push(parseInt(limit));
-    
-    paramCount++;
-    query += ` OFFSET $${paramCount}`;
     params.push(parseInt(offset));
 
     const result = await executeQuery(query, params);
@@ -1557,12 +1710,12 @@ app.get('/api/admin/news', authenticateToken, async (req, res) => {
     
     if (status) {
       countParams.push(status);
-      countQuery += ` AND n.status = $${countParams.length}`;
+      countQuery += ` AND n.status = ?`;
     }
     
     if (category) {
       countParams.push(category);
-      countQuery += ` AND n.category = $${countParams.length}`;
+      countQuery += ` AND n.category = ?`;
     }
 
     const countResult = await executeQuery(countQuery, countParams);
@@ -1593,12 +1746,14 @@ app.get('/api/admin/news/:id', authenticateToken, async (req, res) => {
 
     const result = await executeQuery(`
       SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt, n.image_url, n.organization_id,
-             n.created_at, n.updated_at, n.category, n.custom_category, n.is_published,
+             n.created_at, n.updated_at, 
+             COALESCE(n.published_at, n.created_at) as published_at,
+             n.category, n.custom_category, n.is_published,
              u.first_name, u.last_name, o.name as organization_name, o.logo_url as organization_logo
       FROM news n
       LEFT JOIN users u ON n.author_id = u.id
       LEFT JOIN organizations o ON n.organization_id = o.id
-      WHERE n.id = $1
+      WHERE n.id = ?
     `, [id]);
 
     if (result.rows.length === 0) {
@@ -1638,7 +1793,7 @@ app.get('/api/admin/news/:id', authenticateToken, async (req, res) => {
 app.put('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, content, excerpt, category, custom_category, organization_id, image_url, image_data, is_published } = req.body;
+    const { title, content, excerpt, category, custom_category, organization_id, image_url, image_data, is_published, published_at } = req.body;
 
     // Validation
     if (!title || !content) {
@@ -1655,56 +1810,80 @@ app.put('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res)
       finalCustomCategory = custom_category;
     }
 
-    // Build update query dynamically to handle optional fields
+    // Build update query dynamically to handle optional fields (MySQL syntax)
     let updateFields = [];
     let values = [];
-    let paramCount = 1;
 
-    updateFields.push(`title = $${paramCount++}`);
+    updateFields.push(`title = ?`);
     values.push(title);
 
-    updateFields.push(`content = $${paramCount++}`);
+    updateFields.push(`content = ?`);
     values.push(content);
 
-    updateFields.push(`excerpt = $${paramCount++}`);
+    updateFields.push(`excerpt = ?`);
     values.push(excerpt || null);
 
-    updateFields.push(`category = $${paramCount++}`);
+    updateFields.push(`category = ?`);
     values.push(finalCategory);
 
-    updateFields.push(`custom_category = $${paramCount++}`);
+    updateFields.push(`custom_category = ?`);
     values.push(finalCustomCategory);
 
-    updateFields.push(`organization_id = $${paramCount++}`);
+    updateFields.push(`organization_id = ?`);
     values.push(organization_id || null);
 
     if (image_url !== undefined) {
-      updateFields.push(`image_url = $${paramCount++}`);
+      updateFields.push(`image_url = ?`);
       values.push(image_url || null);
     }
 
     if (image_data !== undefined) {
-      updateFields.push(`image_data = $${paramCount++}`);
+      updateFields.push(`image_data = ?`);
       values.push(image_data || null);
     }
 
     if (is_published !== undefined) {
-      updateFields.push(`is_published = $${paramCount++}`);
+      updateFields.push(`is_published = ?`);
       values.push(is_published);
     }
-
-    // Note: published_at column doesn't exist in database, using created_at instead
-    // if (published_at) {
-    //   updateFields.push(`published_at = $${paramCount++}`);
-    //   values.push(published_at);
-    // }
+    
+    // Handle published_at: gebruik waarde uit request, of zet automatisch bij publicatie
+    if (published_at !== undefined && published_at !== null && published_at !== '') {
+      // Gebruik de opgegeven publicatiedatum (formaat: YYYY-MM-DD HH:MM:SS)
+      // MySQL accepteert dit formaat direct, maar we gebruiken STR_TO_DATE voor zekerheid
+      updateFields.push(`published_at = STR_TO_DATE(?, '%Y-%m-%d %H:%i:%s')`);
+      values.push(published_at);
+    } else if (is_published === true) {
+      // Als artikel wordt gepubliceerd maar geen datum is opgegeven, gebruik NOW()
+      // Alleen als published_at nog NULL is (nieuwe publicatie)
+      updateFields.push(`published_at = COALESCE(published_at, NOW())`);
+    } else if (is_published === false) {
+      // Optioneel: zet published_at op NULL wanneer artikel wordt gedepubliceerd
+      // Laat dit uit voor nu, zodat historische data behouden blijft
+    }
 
     updateFields.push('updated_at = NOW()');
 
     values.push(id);
-    const query = `UPDATE news SET ${updateFields.join(', ')} WHERE id = $${paramCount} RETURNING id, title, content, excerpt, category, custom_category, organization_id, image_url, is_published, created_at, updated_at`;
-
-    const result = await executeQuery(query, values);
+    
+    // MySQL: geen RETURNING, gebruik separate SELECT
+    try {
+      await executeQuery(`UPDATE news SET ${updateFields.join(', ')} WHERE id = ?`, values);
+    } catch (updateError) {
+      // Als published_at kolom niet bestaat, verwijder die uit updateFields en probeer opnieuw
+      if (updateError.message && updateError.message.includes('published_at')) {
+        console.log('⚠️ published_at kolom bestaat nog niet, update zonder published_at');
+        const fieldsWithoutPublishedAt = updateFields.filter(f => !f.includes('published_at'));
+        await executeQuery(`UPDATE news SET ${fieldsWithoutPublishedAt.join(', ')} WHERE id = ?`, values.filter((v, i) => !updateFields[i].includes('published_at')));
+      } else {
+        throw updateError;
+      }
+    }
+    
+    const result = await executeQuery(
+      'SELECT id, title, COALESCE(content, \'\') as content, excerpt, category, custom_category, organization_id, image_url, is_published, COALESCE(published_at, created_at) as published_at, author_id, created_at, updated_at FROM news WHERE id = ? LIMIT 1',
+      [id]
+    );
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Article not found' });
@@ -2112,13 +2291,13 @@ app.post('/api/migrate-events', async (req, res) => {
 // Get all events (public)
 app.get('/events', async (req, res) => {
   try {
-    // Check if events table exists first
+    // Check if events table exists (MySQL)
     const tableCheck = await executeQuery(`
       SELECT EXISTS (
-        SELECT FROM information_schema.tables 
-        WHERE table_schema = 'public' 
-        AND table_name = 'events'
-      );
+        SELECT 1 FROM information_schema.tables 
+        WHERE table_schema = DATABASE() 
+          AND table_name = 'events'
+      ) AS exists;
     `);
     
     if (!tableCheck.rows[0].exists) {
@@ -2134,50 +2313,51 @@ app.get('/events', async (req, res) => {
       });
     }
 
-    const { page = 1, limit = 20, organization_id } = req.query;
+    const { page = 1, limit = 20, organization_id, status } = req.query;
     const offset = (page - 1) * limit;
 
     let query = `
       SELECT e.*, o.name as organization_name, o.brand_color as organization_brand_color, o.logo_url as organization_logo
       FROM events e
       LEFT JOIN organizations o ON e.organization_id = o.id
-      WHERE e.event_date >= NOW()
+      WHERE e.status = 'scheduled'
     `;
     
     const params = [];
     
-    // Filter by organization_id if provided
     let paramCount = 0;
     if (organization_id) {
       const orgId = parseInt(organization_id);
-      if (isNaN(orgId)) {
-        return res.status(400).json({ error: 'Invalid organization_id' });
-      }
+      if (isNaN(orgId)) return res.status(400).json({ error: 'Invalid organization_id' });
       paramCount++;
       query += ` AND e.organization_id = $${paramCount}`;
       params.push(orgId);
     }
+    if (status) {
+      paramCount++;
+      query += ` AND e.status = $${paramCount}`;
+      params.push(status);
+    }
     
-    paramCount++;
-    query += ` ORDER BY e.event_date ASC LIMIT $${paramCount}`;
-    params.push(parseInt(limit));
-    
-    paramCount++;
-    query += ` OFFSET $${paramCount}`;
-    params.push(parseInt(offset));
+    query += ` ORDER BY e.event_date ASC LIMIT ? OFFSET ?`;
+    params.push(parseInt(limit), parseInt(offset));
 
     const result = await executeQuery(query, params);
 
     // Get total count
-    let countQuery = 'SELECT COUNT(*) as total FROM events e WHERE e.event_date >= NOW()';
+    let countQuery = `SELECT COUNT(*) as total FROM events e WHERE e.status = 'scheduled'`;
     const countParams = [];
     
     if (organization_id) {
       const orgId = parseInt(organization_id);
       if (!isNaN(orgId)) {
-      countQuery += ` AND e.organization_id = $1`;
         countParams.push(orgId);
+        countQuery += ` AND e.organization_id = $${countParams.length}`;
       }
+    }
+    if (status) {
+      countParams.push(status);
+      countQuery += ` AND e.status = $${countParams.length}`;
     }
     
     const countResult = await executeQuery(countQuery, countParams);
@@ -2230,79 +2410,65 @@ app.get('/events/:id', async (req, res) => {
 // Alias route for mobile app expecting /api/events
 app.get('/api/events', async (req, res) => {
   try {
-    // Check if events table exists first
-    const tableCheck = await executeQuery(`
-      SELECT EXISTS (
-        SELECT FROM information_schema.tables 
-        WHERE table_schema = 'public' 
-        AND table_name = 'events'
-      );
-    `);
-    
-    if (!tableCheck.rows[0].exists) {
-      console.log('[GET /api/events] Events table does not exist, returning empty array');
-      return res.json({
-        events: [],
-        pagination: {
-          page: 1,
-          limit: 20,
-          total: 0,
-          pages: 0
-        }
-      });
-    }
-
-    const { page = 1, limit = 20, organization_id } = req.query;
+    // Check if events table exists (MySQL)
+    const { page = 1, limit = 20, organization_id, status } = req.query;
     const offset = (page - 1) * limit;
 
-    let query = `
-      SELECT e.*, o.name as organization_name, o.brand_color as organization_brand_color, o.logo_url as organization_logo
-      FROM events e
-      LEFT JOIN organizations o ON e.organization_id = o.id
-      WHERE e.event_date >= NOW()
-    `;
-    
-    const params = [];
-    
-    let paramCount = 0;
-    if (organization_id) {
-      const orgId = parseInt(organization_id);
-      if (isNaN(orgId)) {
-        return res.status(400).json({ error: 'Invalid organization_id' });
-      }
-      paramCount++;
-      query += ` AND e.organization_id = $${paramCount}`;
-      params.push(orgId);
-    }
-    
-    paramCount++;
-    query += ` ORDER BY e.event_date ASC LIMIT $${paramCount}`;
-    params.push(parseInt(limit));
-    
-    paramCount++;
-    query += ` OFFSET $${paramCount}`;
-    params.push(parseInt(offset));
+    // Haal events direct via de PHP-proxy (zeker de juiste MySQL-DB)
+    const proxyBody = {
+      action: 'execute',
+      query: `
+        SELECT e.*, o.name as organization_name, o.brand_color as organization_brand_color, o.logo_url as organization_logo
+        FROM events e
+        LEFT JOIN organizations o ON e.organization_id = o.id
+        WHERE 1=1
+        ${organization_id ? ' AND e.organization_id = ?' : ''}
+        ${status ? ' AND e.status = ?' : ''}
+        ORDER BY e.event_date ASC
+        LIMIT ? OFFSET ?
+      `,
+      params: [
+        ...(organization_id ? [parseInt(organization_id)] : []),
+        ...(status ? [status] : []),
+        parseInt(limit),
+        parseInt(offset)
+      ]
+    };
 
-    const result = await executeQuery(query, params);
+    const proxyCountBody = {
+      action: 'execute',
+      query: `
+        SELECT COUNT(*) as total
+        FROM events e
+        WHERE 1=1
+        ${organization_id ? ' AND e.organization_id = ?' : ''}
+        ${status ? ' AND e.status = ?' : ''}
+      `,
+      params: [
+        ...(organization_id ? [parseInt(organization_id)] : []),
+        ...(status ? [status] : [])
+      ]
+    };
 
-    let countQuery = 'SELECT COUNT(*) as total FROM events e WHERE e.event_date >= NOW()';
-    const countParams = [];
-    if (organization_id) {
-      const orgId = parseInt(organization_id);
-      if (!isNaN(orgId)) {
-      countQuery += ` AND e.organization_id = $1`;
-        countParams.push(orgId);
-    }
-    }
-    const countResult = await executeQuery(countQuery, countParams);
+    const proxyRes = await axios.post(PHP_PROXY_URL, proxyBody, {
+      headers: { 'X-API-Key': PHP_PROXY_API_KEY, 'Content-Type': 'application/json' },
+      timeout: 10000
+    });
+    const proxyCountRes = await axios.post(PHP_PROXY_URL, proxyCountBody, {
+      headers: { 'X-API-Key': PHP_PROXY_API_KEY, 'Content-Type': 'application/json' },
+      timeout: 10000
+    });
+
+    const events = proxyRes.data.rows || [];
+    const total = proxyCountRes.data.rows?.[0]?.total || 0;
 
     res.json({
-      events: result.rows,
+      events,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
-        total: parseInt(countResult.rows[0].total),
-        pages: Math.ceil(countResult.rows[0].total / limit)
+        total: parseInt(total),
+        pages: Math.ceil(total / limit)
       }
     });
   } catch (error) {
@@ -2354,21 +2520,14 @@ app.get('/api/admin/events', authenticateToken, async (req, res) => {
       WHERE 1=1
     `;
     const params = [];
-    let paramCount = 0;
 
     if (status) {
-      paramCount++;
       params.push(status);
-      query += ` AND e.status = $${paramCount}`;
+      query += ` AND e.status = ?`;
     }
 
-    paramCount++;
-    query += ` ORDER BY e.event_date DESC LIMIT $${paramCount}`;
-    params.push(parseInt(limit));
-    
-    paramCount++;
-    query += ` OFFSET $${paramCount}`;
-    params.push(parseInt(offset));
+    query += ` ORDER BY e.event_date DESC LIMIT ? OFFSET ?`;
+    params.push(parseInt(limit), parseInt(offset));
 
     const result = await executeQuery(query, params);
 
@@ -2378,7 +2537,7 @@ app.get('/api/admin/events', authenticateToken, async (req, res) => {
     
     if (status) {
       countParams.push(status);
-      countQuery += ` AND e.status = $${countParams.length}`;
+      countQuery += ` AND e.status = ?`;
     }
 
     const countResult = await executeQuery(countQuery, countParams);
@@ -2406,16 +2565,37 @@ app.get('/api/admin/events', authenticateToken, async (req, res) => {
 // Create event
 app.post('/api/admin/events', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const { title, description, event_date, end_date, location, organization_id, status = 'scheduled' } = req.body;
+    const { title, description, event_date, end_date, event_end_date, location, organization_id, status = 'scheduled', price, image_url } = req.body;
     if (!title || !event_date) return res.status(400).json({ error: 'title and event_date are required' });
-    const result = await executeQuery(
-      `INSERT INTO events (title, description, event_date, end_date, location, organization_id, status, organizer_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING id, title, description, event_date, end_date, location, organization_id, status, created_at`,
-      [title, description || null, event_date, end_date || null, location || null, organization_id || null, status, req.user.userId]
+
+    // Organizer mag ontbreken; als user niet bestaat, zet organizer_id op null
+    let organizerId = req.user?.userId || null;
+    if (organizerId) {
+      try {
+        const orgCheck = await executeQuery('SELECT id FROM users WHERE id = ?', [organizerId]);
+        if (!orgCheck.rows.length) organizerId = null;
+      } catch (e) {
+        organizerId = null;
+      }
+    }
+
+    const insertResult = await executeInsert(
+      `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [title, description || null, event_date, event_end_date || end_date || null, location || null, organization_id || null, status, organizerId, price || null, image_url || null]
     );
-    
-    const newEvent = result.rows[0];
+
+    if (!insertResult.insertId) {
+      throw new Error('Failed to insert event (no insertId)');
+    }
+
+    const fetchResult = await executeQuery(
+      `SELECT id, title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, created_at, updated_at
+       FROM events WHERE id = ? LIMIT 1`,
+      [insertResult.insertId]
+    );
+
+    const newEvent = fetchResult.rows[0];
     
     // Send push notification if event is scheduled and has organization
     if (status === 'scheduled' && organization_id) {
@@ -2467,26 +2647,33 @@ app.post('/api/admin/events', authenticateToken, requireAdmin, async (req, res) 
 app.put('/api/admin/events/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, description, event_date, end_date, location, organization_id, status } = req.body;
+    const { title, description, event_date, end_date, event_end_date, location, organization_id, status, price, image_url } = req.body;
     const sets = [];
     const params = [];
-    const push = (v) => { params.push(v); return `$${params.length}`; };
+    const push = (v) => { params.push(v); return `?`; };
     if (title !== undefined) sets.push(`title = ${push(title)}`);
     if (description !== undefined) sets.push(`description = ${push(description)}`);
     if (event_date !== undefined) sets.push(`event_date = ${push(event_date)}`);
-    if (end_date !== undefined) sets.push(`end_date = ${push(end_date)}`);
+    if (end_date !== undefined || event_end_date !== undefined) sets.push(`event_end_date = ${push(event_end_date !== undefined ? event_end_date : end_date)}`);
     if (location !== undefined) sets.push(`location = ${push(location)}`);
     if (organization_id !== undefined) sets.push(`organization_id = ${push(organization_id)}`);
     if (status !== undefined) sets.push(`status = ${push(status)}`);
+    if (price !== undefined) sets.push(`price = ${push(price)}`);
+    if (image_url !== undefined) sets.push(`image_url = ${push(image_url)}`);
     if (!sets.length) return res.status(400).json({ error: 'No fields to update' });
     params.push(id);
-    const result = await executeQuery(
-      `UPDATE events SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${params.length}
-       RETURNING id, title, description, event_date, end_date, location, organization_id, status, created_at, updated_at`,
+    await executeQuery(
+      `UPDATE events SET ${sets.join(', ')}, updated_at = NOW() WHERE id = ?`,
       params
     );
-    if (!result.rows.length) return res.status(404).json({ error: 'Event not found' });
-    res.json({ event: result.rows[0] });
+
+    const fetchResult = await executeQuery(
+      `SELECT id, title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, created_at, updated_at
+       FROM events WHERE id = ? LIMIT 1`,
+      [id]
+    );
+    if (!fetchResult.rows.length) return res.status(404).json({ error: 'Event not found' });
+    res.json({ event: fetchResult.rows[0] });
   } catch (error) {
     console.error('Update event error:', error);
     res.status(500).json({ error: 'Failed to update event', message: error.message });
@@ -2497,7 +2684,7 @@ app.put('/api/admin/events/:id', authenticateToken, requireAdmin, async (req, re
 app.delete('/api/admin/events/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await executeQuery('DELETE FROM events WHERE id = $1', [id]);
+    const result = await executeQuery('DELETE FROM events WHERE id = ?', [id]);
     if (!result.rowCount) return res.status(404).json({ error: 'Event not found' });
     res.json({ success: true });
   } catch (error) {
@@ -3307,13 +3494,15 @@ async function sendNotificationToUsers(userIds, notification, notificationType) 
     }
     
     // Get active push tokens for these users with matching notification preferences
+    // MySQL: Use IN clause instead of ANY, and JSON_EXTRACT for JSON fields
+    const placeholders = userIds.map(() => '?').join(',');
     const result = await executeQuery(
       `SELECT pt.id, pt.user_id, pt.token, pt.notification_preferences
        FROM push_tokens pt
-       WHERE pt.user_id = ANY($1)
+       WHERE pt.user_id IN (${placeholders})
        AND pt.is_active = true
-       AND (pt.notification_preferences->$2)::boolean = true`,
-      [userIds, notificationType]
+       AND JSON_EXTRACT(pt.notification_preferences, CONCAT('$.', ?)) = true`,
+      [...userIds, notificationType]
     );
     
     if (result.rows.length === 0) {
@@ -3332,7 +3521,7 @@ async function sendNotificationToUsers(userIds, notification, notificationType) 
         await executeQuery(
           `INSERT INTO notification_history 
            (user_id, push_token_id, notification_type, title, body, data, status)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
           [
             row.user_id,
             row.id,
@@ -3364,7 +3553,7 @@ async function sendNotificationToFollowers(organizationId, notification, notific
     // Get all followers of this organization
     await ensureFollowsTable();
     const followersResult = await executeQuery(
-      'SELECT user_id FROM follows WHERE organization_id = $1',
+      'SELECT user_id FROM follows WHERE organization_id = ?',
       [organizationId]
     );
     
@@ -3388,56 +3577,48 @@ async function initializePushNotificationsTables() {
   try {
     console.log('📦 Initializing push notifications tables...');
     
-    // Create push_tokens table
+    // Create push_tokens table (MySQL syntax)
     await executeQuery(`
       CREATE TABLE IF NOT EXISTS push_tokens (
-        id SERIAL PRIMARY KEY,
-        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT,
         token VARCHAR(255) UNIQUE NOT NULL,
         device_type VARCHAR(50),
         device_name VARCHAR(255),
-        notification_preferences JSONB DEFAULT '{
+        notification_preferences JSON DEFAULT ('{
           "news": true,
           "agenda": true,
           "organizations": true,
           "weather": true
-        }'::jsonb,
+        }'),
         is_active BOOLEAN DEFAULT true,
         last_used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_push_tokens_user_id (user_id),
+        INDEX idx_push_tokens_token (token),
+        INDEX idx_push_tokens_active (is_active)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
     
-    // Create indexes
-    await executeQuery(`
-      CREATE INDEX IF NOT EXISTS idx_push_tokens_user_id ON push_tokens(user_id);
-      CREATE INDEX IF NOT EXISTS idx_push_tokens_token ON push_tokens(token);
-      CREATE INDEX IF NOT EXISTS idx_push_tokens_active ON push_tokens(is_active);
-    `);
-    
-    // Create notification_history table
+    // Create notification_history table (MySQL syntax)
     await executeQuery(`
       CREATE TABLE IF NOT EXISTS notification_history (
-        id SERIAL PRIMARY KEY,
-        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-        push_token_id INTEGER REFERENCES push_tokens(id) ON DELETE SET NULL,
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT,
+        push_token_id INT,
         notification_type VARCHAR(50),
         title VARCHAR(255),
         body TEXT,
-        data JSONB,
+        data JSON,
         status VARCHAR(50),
         error_message TEXT,
         sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        delivered_at TIMESTAMP
-      )
-    `);
-    
-    // Create indexes for notification_history
-    await executeQuery(`
-      CREATE INDEX IF NOT EXISTS idx_notification_history_user_id ON notification_history(user_id);
-      CREATE INDEX IF NOT EXISTS idx_notification_history_type ON notification_history(notification_type);
-      CREATE INDEX IF NOT EXISTS idx_notification_history_sent_at ON notification_history(sent_at);
+        delivered_at TIMESTAMP NULL,
+        INDEX idx_notification_history_user_id (user_id),
+        INDEX idx_notification_history_type (notification_type),
+        INDEX idx_notification_history_sent_at (sent_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
     
     console.log('✅ Push notifications tables initialized');
