@@ -1347,6 +1347,11 @@ app.post('/api/news', authenticateToken, async (req, res) => {
       }
     }
 
+    // Invalidate cache for news endpoints
+    invalidateCache('/api/news');
+    invalidateCache('/api/featured');
+    invalidateCache('/api/admin/news');
+
     const message = isPublished 
       ? 'News article published successfully' 
       : 'News article created and submitted for moderation';
@@ -1421,6 +1426,12 @@ app.put('/api/news/:id', authenticateToken, async (req, res) => {
       'SELECT id, title, COALESCE(content, \'\') as content, excerpt, category, custom_category, image_url, is_published, COALESCE(published_at, created_at) as published_at, author_id, organization_id, created_at, updated_at FROM news WHERE id = ? LIMIT 1',
       [id]
     );
+
+    // Invalidate cache for news endpoints
+    invalidateCache('/api/news');
+    invalidateCache(`/api/news/${id}`);
+    invalidateCache('/api/featured');
+    invalidateCache('/api/admin/news');
 
     res.json({
       message: 'Article updated successfully',
@@ -1896,6 +1907,12 @@ app.put('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res)
       return res.status(404).json({ error: 'Article not found' });
     }
 
+    // Invalidate cache for news endpoints
+    invalidateCache('/api/news');
+    invalidateCache(`/api/news/${id}`);
+    invalidateCache('/api/featured');
+    invalidateCache('/api/admin/news');
+
     res.json({
       message: 'Article updated successfully',
       article: result.rows[0]
@@ -1914,10 +1931,17 @@ app.put('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res)
 app.delete('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await executeQuery('DELETE FROM news WHERE id = $1', [id]);
+    const result = await executeQuery('DELETE FROM news WHERE id = ?', [id]);
     if (!result.rowCount) {
       return res.status(404).json({ error: 'Article not found' });
     }
+    
+    // Invalidate cache for news endpoints
+    invalidateCache('/api/news');
+    invalidateCache(`/api/news/${id}`);
+    invalidateCache('/api/featured');
+    invalidateCache('/api/admin/news');
+    
     res.json({ success: true });
   } catch (error) {
     console.error('Delete news error:', error);
