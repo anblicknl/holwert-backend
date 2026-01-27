@@ -1133,6 +1133,29 @@ app.get('/api/push/tokens', authenticateToken, async (req, res) => {
   }
 });
 
+// Get news count (public)
+app.get('/api/news/count', async (req, res) => {
+  try {
+    const { organization_id } = req.query;
+    
+    let query = 'SELECT COUNT(*) as total FROM news WHERE is_published = true';
+    const params = [];
+    
+    if (organization_id) {
+      query += ' AND organization_id = ?';
+      params.push(parseInt(organization_id));
+    }
+    
+    const result = await executeQuery(query, params);
+    const total = result.rows[0]?.total || 0;
+    
+    res.json({ total: parseInt(total) });
+  } catch (error) {
+    console.error('Get news count error:', error);
+    res.status(500).json({ error: 'Failed to get news count', message: error.message });
+  }
+});
+
 // Get single published news (public, with optional bookmark status if authenticated)
 app.get('/api/news/:id', async (req, res) => {
   try {
@@ -2435,6 +2458,30 @@ app.get('/events/:id', async (req, res) => {
   } catch (error) {
     console.error('Get event error:', error);
     res.status(500).json({ error: 'Failed to get event', message: error.message });
+  }
+});
+
+// Get events count (public)
+app.get('/api/events/count', async (req, res) => {
+  try {
+    const { organization_id } = req.query;
+    
+    let query = 'SELECT COUNT(*) as total FROM events WHERE status = ?';
+    const params = ['scheduled'];
+    
+    if (organization_id) {
+      query += ' AND organization_id = ?';
+      params.push(parseInt(organization_id));
+    }
+    
+    const result = await executeQuery(query, params);
+    const total = result.rows[0]?.total || 0;
+    
+    res.json({ total: parseInt(total) });
+  } catch (error) {
+    console.error('Get events count error:', error);
+    // Return 0 instead of error to prevent breaking the app
+    res.json({ total: 0 });
   }
 });
 
