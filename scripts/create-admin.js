@@ -62,9 +62,8 @@ async function createAdminUser() {
       console.log('✅ Admin user created!');
     }
     
-    console.log('\n📋 Admin credentials:');
-    console.log('   Email: admin@holwert.nl');
-    console.log('   Password: admin123');
+    console.log('\n📋 Admin user created/updated successfully!');
+    console.log(`   Email: ${email}`);
     console.log('\n⚠️  Change the password after first login!\n');
     
   } catch (error) {
