@@ -1,0 +1,25 @@
+# .htaccess voor Environment Variables op Shared Hosting
+# 
+# Als je hosting provider .env bestanden niet ondersteunt,
+# kun je environment variables hier instellen via SetEnv
+#
+# LET OP: Pas de waarden aan en upload dit bestand naar je FTP server
+
+# Database Configuratie
+SetEnv DB_HOST "localhost"
+SetEnv DB_PORT "3306"
+SetEnv DB_NAME "appenvlo_holwert"
+SetEnv DB_USER "db_holwert"
+SetEnv DB_PASSWORD "je_database_wachtwoord_hier"
+
+# PHP Proxy API Key
+SetEnv PHP_PROXY_API_KEY "je_api_key_hier"
+
+# Beveiliging: Blokkeer toegang tot .env bestanden
+<FilesMatch "^\.env">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# Beveiliging: Blokkeer directory listing
+Options -Indexes

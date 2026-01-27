@@ -8,6 +8,9 @@
  * Gebruik: Upload naar /admin/mysql-setup.php en open in browser
  */
 
+// Load environment variables from .env file (if exists)
+require_once __DIR__ . '/load-env.php';
+
 // Database credentials - SECURITY: Use environment variables only!
 $db_host = $_ENV['DB_HOST'] ?? getenv('DB_HOST') ?: 'localhost';
 $db_port = (int)($_ENV['DB_PORT'] ?? getenv('DB_PORT') ?: 3306);

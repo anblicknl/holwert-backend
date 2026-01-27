@@ -3,6 +3,9 @@
  * Check if Node.js is available on this server
  */
 
+// Load environment variables from .env file (if exists)
+require_once __DIR__ . '/load-env.php';
+
 echo "<h2>🔍 Server Capabilities Check</h2>";
 
 // Check PHP version
@@ -42,11 +45,21 @@ if (function_exists('exec')) {
 
 // Check database connection
 echo "<h3>Database Connection:</h3>";
+// Database configuratie - SECURITY: Use environment variables only!
+$db_config = [
+    'host' => $_ENV['DB_HOST'] ?? getenv('DB_HOST') ?: 'localhost',
+    'port' => (int)($_ENV['DB_PORT'] ?? getenv('DB_PORT') ?: 3306),
+    'dbname' => $_ENV['DB_NAME'] ?? getenv('DB_NAME') ?: 'appenvlo_holwert',
+    'user' => $_ENV['DB_USER'] ?? getenv('DB_USER') ?: 'db_holwert',
+    'password' => $_ENV['DB_PASSWORD'] ?? getenv('DB_PASSWORD') ?: '',
+    'charset' => 'utf8mb4'
+];
+
 try {
     $pdo = new PDO(
-        "mysql:host=localhost;dbname=appenvlo_holwert;charset=utf8mb4",
-        'db_holwert',
-        $_ENV['DB_PASSWORD'] ?? getenv('DB_PASSWORD') ?: ''
+        "mysql:host={$db_config['host']};port={$db_config['port']};dbname={$db_config['dbname']};charset={$db_config['charset']}",
+        $db_config['user'],
+        $db_config['password']
     );
     echo "<p>✅ MySQL connectie werkt!</p>";
 } catch (PDOException $e) {

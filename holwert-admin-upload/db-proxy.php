@@ -8,6 +8,9 @@
  * Security: Alleen whitelisted queries zijn toegestaan
  */
 
+// Load environment variables from .env file (if exists)
+require_once __DIR__ . '/load-env.php';
+
 // Enable output buffering and compression voor betere performance
 if (extension_loaded('zlib') && !ob_get_level()) {
     ob_start('ob_gzhandler');

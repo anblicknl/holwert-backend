@@ -1,35 +1,65 @@
-# Holwert Admin Panel - FTP Upload Instructies
+===========================================
+HOLWERT ADMIN PANEL - FTP UPLOAD INSTRUCTIES
+===========================================
 
-Dit zijn de bestanden die je moet uploaden naar de `/admin` map op je FTP server.
+BELANGRIJK: Environment Variables Instellen
+===========================================
 
-## 📤 TE UPLOADEN NAAR FTP (UPDATE 28 DEC 2024):
+Voordat je deze bestanden uploadt, moet je environment variables instellen!
 
-1. ✅ **`index.html`** (Hoofd admin interface)
-2. ✅ **`admin-panel.js`** (Alle JavaScript logic - NIEUW!)
-3. ✅ **`styles.css`** (Sober zwart-wit styling)
+Zie ENVIRONMENT_SETUP.md voor gedetailleerde instructies.
 
-## 🗑️ VERWIJDER VAN FTP:
+KORTE SAMENVATTING:
+-------------------
+1. Maak een .env bestand aan (kopieer .env.example)
+2. Vul in:
+   - DB_PASSWORD = je database wachtwoord
+   - PHP_PROXY_API_KEY = haal op via: vercel env pull (in holwert-backend directory)
+3. Upload .env naar je FTP server (in dezelfde directory als db-proxy.php)
+4. Zorg dat .env NIET publiek toegankelijk is (gebruik .htaccess)
 
-- **`app.js`** - Oude versie, moet WEG!
+Bestanden om te uploaden:
+=========================
+- db-proxy.php (BELANGRIJK - moet werken!)
+- load-env.php (helper voor .env bestanden)
+- admin-panel.js (admin interface)
+- login.html (login pagina)
+- index.html (dashboard)
+- dashboard.html (alternatief dashboard)
+- styles.css (styling)
+- .htaccess (beveiliging + environment variables)
+- .env (NIET committen! Alleen uploaden naar FTP)
 
-## ℹ️ NEGEER DEZE:
+Optionele bestanden:
+===================
+- mysql-setup.php (database setup script)
+- check-nodejs.php (test script)
+- add-published-at-column.php (migratie script)
+- add-privacy-policy-to-organizations.php (migratie script)
+- fix-news-date.php (fix script)
 
-- `app.js` - Backup versie, gebruik admin-panel.js
-- `dashboard.html` - Dit is nu een redirect naar `index.html`
-- `login.html` - Standalone login pagina (optioneel)
-- `_alternative/` map - Backup bestanden
-- `_dont-use/` map - Test bestanden
+Testen na upload:
+=================
+1. Test db-proxy.php: https://jouw-domein.com/admin/db-proxy.php
+   - Moet een JSON error geven (niet een 500 error)
+   - Als je "Database password not configured" ziet, werkt .env niet
+   
+2. Test login: https://jouw-domein.com/admin/login.html
+   - Log in met admin@holwert.nl en je nieuwe wachtwoord
 
----
+3. Controleer .htaccess:
+   - Zorg dat .env bestanden geblokkeerd zijn
+   - Zorg dat directory listing uit staat
 
-**BELANGRIJK NA UPLOADEN:**
+Beveiliging:
+============
+✅ .env bestand NIET publiek toegankelijk maken
+✅ .htaccess gebruiken om .env te blokkeren
+✅ Sterke wachtwoorden gebruiken
+✅ PHP_PROXY_API_KEY moet hetzelfde zijn als in Vercel
+❌ NOOIT .env committen naar Git
+❌ NOOIT credentials delen
 
-1. **VERWIJDER `app.js` VAN JE FTP SERVER!**
-2. Upload `admin-panel.js` en `index.html`
-3. **HARD REFRESH** in Firefox: Shift + F5
-4. Of gebruik een **private window**: Cmd + Shift + P
-
-**PROBLEEM OPGELOST:**
-- Dubbele `editNews` functie verwijderd (was op regel 1867 EN 1543)
-- Oude functies verwijderd die conflicteerden (showEditNewsModal, toggleCustomCategory, saveNewsChanges)
-- Bewerken van nieuws zou nu moeten werken!
+Hulp nodig?
+===========
+Zie ENVIRONMENT_SETUP.md voor uitgebreide instructies.

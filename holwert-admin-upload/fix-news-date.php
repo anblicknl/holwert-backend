@@ -4,15 +4,23 @@
  * Upload dit bestand en bezoek het via de browser
  */
 
-// Database configuratie
+// Load environment variables from .env file (if exists)
+require_once __DIR__ . '/load-env.php';
+
+// Database configuratie - SECURITY: Use environment variables only!
 $db_config = [
-    'host' => 'localhost',
-    'port' => 3306,
-    'dbname' => 'appenvlo_holwert',
-    'user' => 'db_holwert',
+    'host' => $_ENV['DB_HOST'] ?? getenv('DB_HOST') ?: 'localhost',
+    'port' => (int)($_ENV['DB_PORT'] ?? getenv('DB_PORT') ?: 3306),
+    'dbname' => $_ENV['DB_NAME'] ?? getenv('DB_NAME') ?: 'appenvlo_holwert',
+    'user' => $_ENV['DB_USER'] ?? getenv('DB_USER') ?: 'db_holwert',
     'password' => $_ENV['DB_PASSWORD'] ?? getenv('DB_PASSWORD') ?: '',
     'charset' => 'utf8mb4'
 ];
+
+// SECURITY: Fail if password is not set via environment variable
+if (empty($db_config['password'])) {
+    die('ERROR: Database password not configured. Set DB_PASSWORD environment variable.');
+}
 
 try {
     $pdo = new PDO(
