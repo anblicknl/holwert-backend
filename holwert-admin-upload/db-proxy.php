@@ -25,15 +25,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit;
 }
 
-// Database configuratie
+// Database configuratie - SECURITY: Use environment variables only!
 $db_config = [
-    'host' => 'localhost',
-    'port' => 3306,
-    'dbname' => 'appenvlo_holwert',
-    'user' => 'db_holwert',
-    'password' => 'h0lwert.2026',
+    'host' => $_ENV['DB_HOST'] ?? getenv('DB_HOST') ?: 'localhost',
+    'port' => (int)($_ENV['DB_PORT'] ?? getenv('DB_PORT') ?: 3306),
+    'dbname' => $_ENV['DB_NAME'] ?? getenv('DB_NAME') ?: 'appenvlo_holwert',
+    'user' => $_ENV['DB_USER'] ?? getenv('DB_USER') ?: 'db_holwert',
+    'password' => $_ENV['DB_PASSWORD'] ?? getenv('DB_PASSWORD') ?: '',
     'charset' => 'utf8mb4'
 ];
+
+// SECURITY: Fail if password is not set via environment variable
+if (empty($db_config['password'])) {
+    http_response_code(500);
+    echo json_encode(['error' => 'Database password not configured - set DB_PASSWORD environment variable']);
+    exit;
+}
 
 // Security: API key (gebruik een sterk wachtwoord!)
 $API_KEY = 'holwert-db-proxy-2026-secure-key-change-in-production';

@@ -10,7 +10,7 @@ $db_config = [
     'port' => 3306,
     'dbname' => 'appenvlo_holwert',
     'user' => 'db_holwert',
-    'password' => 'h0lwert.2026',
+    'password' => $_ENV['DB_PASSWORD'] ?? getenv('DB_PASSWORD') ?: '',
     'charset' => 'utf8mb4'
 ];
 

@@ -288,11 +288,21 @@ app.get('/', async (req, res) => {
   }
 });
 
-// Setup admin user (one-time use endpoint - remove after use!)
+// Setup admin user - SECURITY: Use environment variables only!
 app.get('/api/setup-admin', async (req, res) => {
   try {
-    const email = 'admin@holwert.nl';
-    const password = 'admin123';
+    // SECURITY: Get credentials from environment variables only
+    const email = process.env.ADMIN_EMAIL;
+    const password = process.env.ADMIN_PASSWORD;
+    
+    if (!email || !password) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Admin credentials not configured',
+        message: 'Set ADMIN_EMAIL and ADMIN_PASSWORD environment variables'
+      });
+    }
+    
     const hashedPassword = await bcrypt.hash(password, 10);
     
     // Check if admin already exists
@@ -326,9 +336,8 @@ app.get('/api/setup-admin', async (req, res) => {
       
       res.json({ 
         success: true,
-        message: 'Admin user updated - Use this new token!',
+        message: 'Admin user updated',
         email: email,
-        note: 'Password has been reset to: admin123',
         token: newToken,
         instruction: 'Copy this token and run: localStorage.setItem("authToken", "' + newToken + '") then refresh the page'
       });
@@ -362,9 +371,7 @@ app.get('/api/setup-admin', async (req, res) => {
         success: true,
         message: 'Admin user created',
         email: email,
-        password: 'admin123',
         token: newToken,
-        note: 'Please change password after first login!',
         instruction: 'Copy this token and run: localStorage.setItem("authToken", "' + newToken + '") then refresh the page'
       });
     }

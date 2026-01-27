@@ -8,12 +8,17 @@
  * Gebruik: Upload naar /admin/mysql-setup.php en open in browser
  */
 
-// Database credentials
-$db_host = 'localhost';
-$db_port = 3306;
-$db_user = 'db_holwert';
-$db_password = 'h0lwert.2026';
-$db_name = 'appenvlo_holwert';
+// Database credentials - SECURITY: Use environment variables only!
+$db_host = $_ENV['DB_HOST'] ?? getenv('DB_HOST') ?: 'localhost';
+$db_port = (int)($_ENV['DB_PORT'] ?? getenv('DB_PORT') ?: 3306);
+$db_user = $_ENV['DB_USER'] ?? getenv('DB_USER') ?: 'db_holwert';
+$db_password = $_ENV['DB_PASSWORD'] ?? getenv('DB_PASSWORD') ?: '';
+$db_name = $_ENV['DB_NAME'] ?? getenv('DB_NAME') ?: 'appenvlo_holwert';
+
+// SECURITY: Fail if password is not set via environment variable
+if (empty($db_password)) {
+    die('ERROR: Database password not configured. Set DB_PASSWORD environment variable.');
+}
 
 // Error handling
 error_reporting(E_ALL);
@@ -331,7 +336,7 @@ try {
     echo "<strong>DB_HOST</strong> = " . htmlspecialchars($possibleHosts[1] ?? 'localhost') . "<br>";
     echo "<strong>DB_PORT</strong> = 3306<br>";
     echo "<strong>DB_USER</strong> = " . htmlspecialchars($db_user) . "<br>";
-    echo "<strong>DB_PASSWORD</strong> = " . htmlspecialchars($db_password) . "<br>";
+    echo "<strong>DB_PASSWORD</strong> = " . (empty($db_password) ? '<span style="color:red;">NOT SET - Configure via environment variable!</span>' : '***HIDDEN***') . "<br>";
     echo "<strong>DB_NAME</strong> = " . htmlspecialchars($db_name) . "<br>";
     echo "</div>";
     

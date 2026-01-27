@@ -46,7 +46,7 @@ try {
     $pdo = new PDO(
         "mysql:host=localhost;dbname=appenvlo_holwert;charset=utf8mb4",
         'db_holwert',
-        'h0lwert.2026'
+        $_ENV['DB_PASSWORD'] ?? getenv('DB_PASSWORD') ?: ''
     );
     echo "<p>✅ MySQL connectie werkt!</p>";
 } catch (PDOException $e) {
