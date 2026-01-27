@@ -42,8 +42,15 @@ if (empty($db_config['password'])) {
     exit;
 }
 
-// Security: API key (gebruik een sterk wachtwoord!)
-$API_KEY = 'holwert-db-proxy-2026-secure-key-change-in-production';
+// Security: API key - SECURITY: Use environment variable only!
+$API_KEY = $_ENV['PHP_PROXY_API_KEY'] ?? getenv('PHP_PROXY_API_KEY') ?: '';
+
+// SECURITY: Fail if API key is not set via environment variable
+if (empty($API_KEY)) {
+    http_response_code(500);
+    echo json_encode(['error' => 'API key not configured - set PHP_PROXY_API_KEY environment variable']);
+    exit;
+}
 
 // Check API key
 $providedKey = $_SERVER['HTTP_X_API_KEY'] ?? $_POST['api_key'] ?? '';

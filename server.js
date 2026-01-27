@@ -3131,7 +3131,7 @@ app.post('/api/setup-mysql-database', async (req, res) => {
       host: req.body.host || process.env.DB_HOST || process.env.MYSQL_HOST || 'localhost',
       port: req.body.port || process.env.DB_PORT || process.env.MYSQL_PORT || 3306,
       user: req.body.user || process.env.DB_USER || process.env.MYSQL_USER || 'db_holwert',
-      password: req.body.password || process.env.DB_PASSWORD || process.env.MYSQL_PASSWORD || 'h0lwert.2026',
+      password: req.body.password || process.env.DB_PASSWORD || process.env.MYSQL_PASSWORD || '',
       database: req.body.database || process.env.DB_NAME || process.env.MYSQL_DATABASE || 'appenvlo_holwert',
       multipleStatements: true,
       charset: 'utf8mb4'
