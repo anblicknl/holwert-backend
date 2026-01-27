@@ -2466,9 +2466,11 @@ app.get('/api/events/count', async (req, res) => {
   try {
     const { organization_id } = req.query;
     
-    let query = 'SELECT COUNT(*) as total FROM events WHERE status = ?';
-    const params = ['scheduled'];
+    // Use same logic as /api/events endpoint - check if events table exists
+    let query = 'SELECT COUNT(*) as total FROM events WHERE 1=1';
+    const params = [];
     
+    // Filter by organization_id if provided
     if (organization_id) {
       query += ' AND organization_id = ?';
       params.push(parseInt(organization_id));
