@@ -1169,11 +1169,11 @@ app.get('/api/news/:id', async (req, res) => {
       LIMIT 1
     `, [id]);
 
-    if (result.length === 0) {
+    if (!result.rows || result.rows.length === 0) {
       return res.status(404).json({ error: 'Article not found' });
     }
 
-    const article = result[0];
+    const article = result.rows[0];
 
     // Use image_url directly - no more base64 processing!
     const imageVariants = {
