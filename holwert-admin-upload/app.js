@@ -1670,13 +1670,33 @@ class HolwertAdmin {
             if (uploadedFile) {
                 try {
                     const compressedBase64 = await this.compressNewsImage(uploadedFile);
-                    imageUrl = compressedBase64;
-                    console.log('News image compressed, length:', compressedBase64.length);
+                    console.log('News image compressed (temp base64), length:', compressedBase64.length);
                     
                     if (compressedBase64.length > 4 * 1024 * 1024) {
                         this.showNotification('Afbeelding is te groot. Kies een kleinere afbeelding.', 'error');
                         return;
                     }
+
+                    // Upload to backend (folder uploads/YYYY/MM/<orgNum>/)
+                    const uploadRes = await fetch(`${this.apiBaseUrl}/upload/image`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${this.token}`
+                        },
+                        body: JSON.stringify({
+                            imageData: compressedBase64,
+                            filename: `news-image-${Date.now()}.jpg`,
+                            organizationId: organization_id != null ? organization_id : undefined
+                        })
+                    });
+                    if (!uploadRes.ok) {
+                        let msg = `HTTP ${uploadRes.status}`;
+                        try { const j = await uploadRes.json(); msg = j.message || j.error || msg; } catch {}
+                        throw new Error(msg);
+                    }
+                    const uploadJson = await uploadRes.json();
+                    imageUrl = uploadJson.imageUrl || null;
                 } catch (error) {
                     console.error('Error processing image:', error);
                     this.showNotification('Fout bij verwerken van afbeelding', 'error');
@@ -3519,13 +3539,33 @@ class HolwertAdmin {
             if (uploadedFile) {
                 try {
                     const compressedBase64 = await this.compressEventImage(uploadedFile);
-                    imageUrl = compressedBase64;
-                    console.log('Event image compressed and converted to base64, length:', compressedBase64.length);
+                    console.log('Event image compressed (temp base64), length:', compressedBase64.length);
                     
                     if (compressedBase64.length > 4 * 1024 * 1024) {
                         this.showNotification('Afbeelding is te groot. Kies een kleinere afbeelding.', 'error');
                         return;
                     }
+
+                    // Upload to backend (folder uploads/YYYY/MM/<orgNum>/)
+                    const uploadRes = await fetch(`${this.apiBaseUrl}/upload/image`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${this.token}`
+                        },
+                        body: JSON.stringify({
+                            imageData: compressedBase64,
+                            filename: `event-image-${Date.now()}.jpg`,
+                            organizationId: organization_id != null ? organization_id : undefined
+                        })
+                    });
+                    if (!uploadRes.ok) {
+                        let msg = `HTTP ${uploadRes.status}`;
+                        try { const j = await uploadRes.json(); msg = j.message || j.error || msg; } catch {}
+                        throw new Error(msg);
+                    }
+                    const uploadJson = await uploadRes.json();
+                    imageUrl = uploadJson.imageUrl || null;
                 } catch (error) {
                     console.error('Error processing image:', error);
                     this.showNotification('Fout bij verwerken van afbeelding', 'error');
@@ -3535,7 +3575,25 @@ class HolwertAdmin {
                 // Als er geen nieuwe afbeelding is geüpload, behoud de bestaande (bij edit)
                 const existingImage = document.querySelector('#evImagePreviewImg')?.src;
                 if (existingImage && existingImage.startsWith('data:image')) {
-                    imageUrl = existingImage;
+                    const uploadRes = await fetch(`${this.apiBaseUrl}/upload/image`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${this.token}`
+                        },
+                        body: JSON.stringify({
+                            imageData: existingImage,
+                            filename: `event-image-${Date.now()}.jpg`,
+                            organizationId: organization_id != null ? organization_id : undefined
+                        })
+                    });
+                    if (!uploadRes.ok) {
+                        let msg = `HTTP ${uploadRes.status}`;
+                        try { const j = await uploadRes.json(); msg = j.message || j.error || msg; } catch {}
+                        throw new Error(msg);
+                    }
+                    const uploadJson = await uploadRes.json();
+                    imageUrl = uploadJson.imageUrl || null;
                 } else if (actualEventId) {
                     // Bij bewerken zonder nieuwe afbeelding, haal de bestaande image_url op
                     const existingImageUrl = document.querySelector('[data-existing-image]')?.getAttribute('data-existing-image');

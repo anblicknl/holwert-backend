@@ -485,16 +485,18 @@ app.post('/api/upload', authenticateToken, upload.single('image'), async (req, r
       contentType: req.file.mimetype
     });
     
-    // Create WordPress-style year/month folder structure
+    // Folder: uploads/YYYY/MM/ plus organisatie-submap (01, 07, …) of 00 bij geen org
     const now = new Date();
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, '0');
-    const folder = `uploads/${year}/${month}/`;
-    
+    const orgId = req.body.organizationId != null && req.body.organizationId !== ''
+      ? String(parseInt(req.body.organizationId, 10)).padStart(2, '0')
+      : '00';
+    const folder = `uploads/${year}/${month}/${orgId}/`;
     form.append('folder', folder);
-    
-         // Upload to external server (HTTPS; ignore hostname mismatch on cert)
-         const uploadResponse = await axios.post('https://holwert.appenvloed.com/upload/upload.php', form, {
+
+    // Upload to external server (HTTPS; ignore hostname mismatch on cert)
+    const uploadResponse = await axios.post('https://holwert.appenvloed.com/upload/upload.php', form, {
            headers: {
              ...form.getHeaders(),
              'User-Agent': 'HolwertBackend/1.0',
@@ -508,15 +510,12 @@ app.post('/api/upload', authenticateToken, upload.single('image'), async (req, r
          });
     
     if (uploadResponse.data.success) {
-      // Convert HTTP URL to HTTPS
       const imageUrl = uploadResponse.data.url.replace('http://', 'https://');
-      
-      // Log the upload success
       console.log('Image uploaded successfully:', imageUrl);
-      
       res.json({
         message: 'Image uploaded successfully to external server',
         url: imageUrl,
+        imageUrl: imageUrl,
         image_data: JSON.stringify({
           original: { url: imageUrl },
           full: { url: imageUrl },
@@ -548,10 +547,10 @@ app.post('/api/upload', authenticateToken, upload.single('image'), async (req, r
   }
 });
 
-// ===== FIXED IMAGE UPLOAD FOR EDITING =====
+// ===== FIXED IMAGE UPLOAD FOR EDITING (base64 fallback) =====
 app.post('/api/upload/image', authenticateToken, async (req, res) => {
   try {
-    const { imageData, filename } = req.body;
+    const { imageData, filename, organizationId } = req.body;
 
     if (!imageData) {
       return res.status(400).json({
@@ -562,28 +561,28 @@ app.post('/api/upload/image', authenticateToken, async (req, res) => {
 
     console.log('Uploading edit image to external server:', {
       filename: filename || 'unknown',
-      dataLength: imageData.length
+      dataLength: imageData.length,
+      organizationId: organizationId ?? 'none'
     });
 
-    // Convert base64 to buffer
     const base64Data = imageData.replace(/^data:image\/[a-z]+;base64,/, '');
     const buffer = Buffer.from(base64Data, 'base64');
-    
-    // Create form data for external upload
+
     const form = new FormData();
     const uniqueFilename = filename || `image-${Date.now()}-${Math.round(Math.random() * 1E9)}.jpg`;
-    
     form.append('file', buffer, {
       filename: uniqueFilename,
       contentType: 'image/jpeg'
     });
-    
-    // Create WordPress-style year/month folder structure
+
+    // uploads/YYYY/MM/ + organisatie 01, 07, … of 00
     const now = new Date();
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, '0');
-    const folder = `uploads/${year}/${month}/`;
-    
+    const orgNum = organizationId != null && organizationId !== ''
+      ? String(parseInt(organizationId, 10)).padStart(2, '0')
+      : '00';
+    const folder = `uploads/${year}/${month}/${orgNum}/`;
     form.append('folder', folder);
     
         // Upload to external server (HTTPS; ignore hostname mismatch on cert)
@@ -624,11 +623,83 @@ app.post('/api/upload/image', authenticateToken, async (req, res) => {
   }
 });
 
+// Bootstrap: news (eerste pagina) + organizations in één request voor snelle app-opstart
+app.get('/api/app/bootstrap', async (req, res) => {
+  try {
+    await ensureBookmarksTable();
+    let userId = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const decoded = jwt.verify(authHeader.substring(7), JWT_SECRET);
+        userId = decoded.userId;
+      } catch (e) { /* ignore */ }
+    }
+
+    const newsParams = [];
+    let newsQuery = `
+      SELECT n.id, n.title, '' as content,
+        COALESCE(n.excerpt, LEFT(COALESCE(n.content, ''), 2000)) as excerpt,
+        n.image_url, n.created_at, n.updated_at,
+        COALESCE(n.published_at, n.created_at) as published_at,
+        n.organization_id, o.name as organization_name, o.logo_url as organization_logo,
+        o.brand_color as organization_brand_color
+        ${userId ? ', CASE WHEN b.user_id IS NOT NULL THEN true ELSE false END as is_bookmarked' : ', false as is_bookmarked'}
+      FROM news n
+      LEFT JOIN organizations o ON n.organization_id = o.id
+      ${userId ? 'LEFT JOIN bookmarks b ON b.news_id = n.id AND b.user_id = ?' : ''}
+      WHERE n.is_published = true
+      ORDER BY COALESCE(n.published_at, n.created_at) DESC LIMIT 10 OFFSET 0`;
+    if (userId) newsParams.push(userId);
+
+    const orgFields = `id, name, description, logo_url, brand_color, category,
+      CASE WHEN logo_url IS NOT NULL AND logo_url <> '' THEN true ELSE false END as has_logo`;
+    const orgQuery = `SELECT ${orgFields} FROM organizations WHERE is_approved = true ORDER BY name ASC LIMIT 100`;
+    const countNewsQuery = 'SELECT COUNT(*) as total FROM news n WHERE n.is_published = true';
+
+    const [newsResult, orgResult, countResult] = await Promise.all([
+      executeQuery(newsQuery, newsParams),
+      executeQuery(orgQuery, []),
+      executeQuery(countNewsQuery, [])
+    ]);
+
+    const stripHtml = (input) => {
+      if (!input) return '';
+      return String(input).replace(/<[^>]*>/g, ' ').replace(/<[^>]*$/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').trim();
+    };
+    const newsRows = (newsResult.rows || []).map((article) => {
+      const cleanExcerpt = stripHtml(article.excerpt).slice(0, 180);
+      return { ...article, excerpt: cleanExcerpt };
+    });
+
+    let orgRows = orgResult.rows || [];
+    // Laat logo_url ongemoeid; de mobiele app normaliseert zelf base64 -> file:// via ApiService
+    orgRows = orgRows.map((o) => ({
+      ...o,
+      description: typeof o.description === 'string' ? o.description.slice(0, 200) : o.description
+    }));
+
+    const totalNews = parseInt(countResult.rows?.[0]?.total || 0);
+    res.set('Cache-Control', 'public, max-age=30');
+    res.json({
+      news: newsRows,
+      newsPagination: { page: 1, limit: 10, total: totalNews, pages: Math.ceil(totalNews / 10) },
+      organizations: orgRows,
+      organizationsPagination: { page: 1, limit: 100, total: orgRows.length, pages: 1 }
+    });
+  } catch (error) {
+    console.error('Bootstrap error:', error);
+    res.status(500).json({ error: 'Bootstrap failed', message: error.message });
+  }
+});
+
 // Get all published news (public, with optional bookmark status if authenticated)
 app.get('/api/news', async (req, res) => {
   try {
     await ensureBookmarksTable();
-    const { organization_id, limit = 20 } = req.query;
+    const { organization_id, category, search, minimal = false } = req.query;
+    const limit = req.query.limit ?? 20;
+    const page = req.query.page ?? 1;
     
     // Check if user is authenticated (optional)
     let userId = null;
@@ -644,19 +715,28 @@ app.get('/api/news', async (req, res) => {
       }
     }
     
-    const limitValue = parseInt(limit) || 20;
+    const limitValue = Math.min(parseInt(limit) || 20, 100);
+    const pageValue = Math.max(parseInt(page) || 1, 1);
+    const offset = (pageValue - 1) * limitValue;
+    const minimalMode = minimal === 'true';
     const params = [];
     
     let query = `
-      SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt, n.image_url,
-             n.created_at, n.updated_at, 
-             COALESCE(n.published_at, n.created_at) as published_at,
-             n.organization_id,
-             u.first_name, u.last_name,
-             o.name as organization_name, o.logo_url as organization_logo, o.brand_color as organization_brand_color
-             ${userId ? ', CASE WHEN b.user_id IS NOT NULL THEN true ELSE false END as is_bookmarked' : ', false as is_bookmarked'}
+      SELECT 
+        n.id, 
+        n.title, 
+        ${minimalMode ? `'' as content` : `COALESCE(n.content, '') as content`},
+        COALESCE(n.excerpt, LEFT(COALESCE(n.content, ''), 2000)) as excerpt,
+        n.image_url,
+        n.created_at, 
+        n.updated_at, 
+        COALESCE(n.published_at, n.created_at) as published_at,
+        n.organization_id,
+        o.name as organization_name, 
+        o.logo_url as organization_logo,
+        o.brand_color as organization_brand_color
+        ${userId ? ', CASE WHEN b.user_id IS NOT NULL THEN true ELSE false END as is_bookmarked' : ', false as is_bookmarked'}
       FROM news n
-      LEFT JOIN users u ON n.author_id = u.id
       LEFT JOIN organizations o ON n.organization_id = o.id
       ${userId ? `LEFT JOIN bookmarks b ON b.news_id = n.id AND b.user_id = ?` : ''}
       WHERE n.is_published = true
@@ -671,33 +751,85 @@ app.get('/api/news', async (req, res) => {
       query += ` AND n.organization_id = ?`;
       params.push(parseInt(organization_id));
     }
+
+    if (category) {
+      query += ` AND (n.category = ? OR n.custom_category = ?)`;
+      params.push(category, category);
+    }
+
+    if (search) {
+      const s = `%${String(search)}%`;
+      query += ` AND (n.title LIKE ? OR n.excerpt LIKE ? OR n.content LIKE ?)`;
+      params.push(s, s, s);
+    }
     
     // Sorteer op published_at (publicatiedatum), fallback naar created_at als published_at NULL is
-    query += ` ORDER BY COALESCE(n.published_at, n.created_at) DESC LIMIT ?`;
-    params.push(limitValue);
-    
-    const result = await executeQuery(query, params);
+    query += ` ORDER BY COALESCE(n.published_at, n.created_at) DESC LIMIT ? OFFSET ?`;
+    params.push(limitValue, offset);
 
-    // Use image_url directly - no more base64 processing!
-    const processedNews = result.rows.map(article => ({
-      ...article,
-      // Provide image variants all pointing to the same URL for backward compatibility
-      image_variants: {
-            original: article.image_url,
-            full: article.image_url,
-            large: article.image_url,
-            medium: article.image_url,
-            thumbnail: article.image_url
+    // Count query (voor pagination)
+    const countParams = [];
+    let countQuery = `SELECT COUNT(*) as total FROM news n WHERE n.is_published = true`;
+    if (organization_id) {
+      countQuery += ` AND n.organization_id = ?`;
+      countParams.push(parseInt(organization_id));
+    }
+    if (category) {
+      countQuery += ` AND (n.category = ? OR n.custom_category = ?)`;
+      countParams.push(category, category);
+    }
+    if (search) {
+      const s = `%${String(search)}%`;
+      countQuery += ` AND (n.title LIKE ? OR n.excerpt LIKE ? OR n.content LIKE ?)`;
+      countParams.push(s, s, s);
+    }
+
+    const [result, countResult] = await Promise.all([
+      executeQuery(query, params),
+      executeQuery(countQuery, countParams)
+    ]);
+    const total = parseInt(countResult.rows?.[0]?.total || 0);
+
+    const stripHtml = (input) => {
+      if (!input) return '';
+      return String(input)
+        .replace(/<[^>]*>/g, ' ')
+        // Remove any dangling "<tag" fragments without closing ">"
+        .replace(/<[^>]*$/g, ' ')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&amp;/gi, '&')
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>')
+        .replace(/&quot;/gi, '"')
+        .replace(/&#39;/gi, "'")
+        .replace(/\s+/g, ' ')
+        .trim();
+    };
+
+    // Lijst licht houden: bij minimal geen image_variants (app gebruikt image_url)
+    const processedNews = result.rows.map(article => {
+      const cleanExcerpt = minimalMode ? stripHtml(article.excerpt).slice(0, 180) : article.excerpt;
+      const item = { ...article, excerpt: cleanExcerpt };
+      if (!minimalMode) {
+        item.image_variants = {
+          original: article.image_url,
+          full: article.image_url,
+          large: article.image_url,
+          medium: article.image_url,
+          thumbnail: article.image_url
+        };
       }
-    }));
+      return item;
+    });
 
+    res.set('Cache-Control', 'public, max-age=30');
     res.json({
       news: processedNews,
       pagination: {
-        page: 1,
+        page: pageValue,
         limit: limitValue,
-        total: result.rows.length,
-        pages: Math.ceil(result.rows.length / limitValue)
+        total: total,
+        pages: Math.ceil(total / limitValue)
       }
     });
 
@@ -1374,6 +1506,7 @@ app.post('/api/news', authenticateToken, async (req, res) => {
     invalidateCache('/api/news');
     invalidateCache('/api/featured');
     invalidateCache('/api/admin/news');
+    invalidateCache('/api/admin/dashboard');
 
     const message = isPublished 
       ? 'News article published successfully' 
@@ -1455,6 +1588,7 @@ app.put('/api/news/:id', authenticateToken, async (req, res) => {
     invalidateCache(`/api/news/${id}`);
     invalidateCache('/api/featured');
     invalidateCache('/api/admin/news');
+    invalidateCache('/api/admin/dashboard');
 
     res.json({
       message: 'Article updated successfully',
@@ -1486,7 +1620,7 @@ app.post('/api/auth/login', async (req, res) => {
 
     // Find user by email
     const userResult = await executeQuery(
-      'SELECT id, email, password, first_name, last_name, role, is_active FROM users WHERE email = $1',
+      'SELECT id, email, password_hash, first_name, last_name, role, is_active FROM users WHERE email = $1',
       [email]
     );
 
@@ -1510,7 +1644,7 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     // Verify password
-    const isValidPassword = await bcrypt.compare(password, user.password);
+    const isValidPassword = await bcrypt.compare(password, user.password_hash);
     if (!isValidPassword) {
       return res.status(401).json({
         error: 'Invalid email or password',
@@ -1563,6 +1697,83 @@ app.get('/api/auth/verify', authenticateToken, (req, res) => {
 });
 
 // ===== ADMIN ENDPOINTS =====
+
+// Get admin dashboard in one request (stats + moderation counts) - fastest admin load
+app.get('/api/admin/dashboard', authenticateToken, async (req, res) => {
+  try {
+    const cacheKey = getCacheKey('/api/admin/dashboard');
+    const cached = getCached(cacheKey);
+    if (cached) {
+      console.log('[Dashboard] Returning cached data');
+      return res.json(cached);
+    }
+    console.log('[Dashboard] Fetching fresh data from database');
+    const result = await executeQuery(`
+      SELECT 
+        (SELECT COUNT(*) FROM users) as users_count,
+        (SELECT COUNT(*) FROM organizations) as organizations_count,
+        (SELECT COUNT(*) FROM news) as news_count,
+        (SELECT COUNT(*) FROM events) as events_count,
+        (SELECT COUNT(*) FROM organizations WHERE is_approved = false) as pending_orgs,
+        (SELECT COUNT(*) FROM news WHERE is_published = false) as pending_news,
+        (SELECT COUNT(*) FROM events WHERE is_published = false) as pending_events
+    `);
+    const row = result.rows[0] || {};
+    const pendingOrgs = parseInt(row.pending_orgs) || 0;
+    const pendingNews = parseInt(row.pending_news) || 0;
+    const pendingEvents = parseInt(row.pending_events) || 0;
+    const payload = {
+      stats: {
+        users: parseInt(row.users_count) || 0,
+        organizations: parseInt(row.organizations_count) || 0,
+        news: parseInt(row.news_count) || 0,
+        events: parseInt(row.events_count) || 0
+      },
+      moderation: {
+        count: pendingOrgs + pendingNews + pendingEvents,
+        organizations: pendingOrgs,
+        news: pendingNews,
+        events: pendingEvents
+      }
+    };
+    setCache(cacheKey, payload, CACHE_TTL.stats);
+    res.json(payload);
+  } catch (error) {
+    try {
+      const result = await executeQuery(`
+        SELECT 
+          (SELECT COUNT(*) FROM users) as users_count,
+          (SELECT COUNT(*) FROM organizations) as organizations_count,
+          (SELECT COUNT(*) FROM news) as news_count,
+          (SELECT COUNT(*) FROM events) as events_count,
+          (SELECT COUNT(*) FROM organizations WHERE is_approved = false) as pending_orgs,
+          (SELECT COUNT(*) FROM news WHERE is_published = false) as pending_news
+      `);
+      const row = result.rows[0] || {};
+      const pendingOrgs = parseInt(row.pending_orgs) || 0;
+      const pendingNews = parseInt(row.pending_news) || 0;
+      const payload = {
+        stats: {
+          users: parseInt(row.users_count) || 0,
+          organizations: parseInt(row.organizations_count) || 0,
+          news: parseInt(row.news_count) || 0,
+          events: parseInt(row.events_count) || 0
+        },
+        moderation: {
+          count: pendingOrgs + pendingNews,
+          organizations: pendingOrgs,
+          news: pendingNews,
+          events: 0
+        }
+      };
+      setCache(getCacheKey('/api/admin/dashboard'), payload, CACHE_TTL.stats);
+      return res.json(payload);
+    } catch (e) {
+      console.error('Get admin dashboard error:', error);
+      res.status(500).json({ error: 'Failed to get dashboard', message: error.message });
+    }
+  }
+});
 
 // Get admin dashboard statistics - OPTIMIZED: Single query + caching
 app.get('/api/admin/stats', authenticateToken, async (req, res) => {
@@ -1623,11 +1834,10 @@ app.get('/api/admin/moderation/count', authenticateToken, async (req, res) => {
     `);
     
     const row = result.rows[0] || {};
-    const totalCount = (parseInt(row.orgs_count) || 0) + 
-                      (parseInt(row.news_count) || 0) + 
-                      (parseInt(row.events_count) || 0);
-    
-    const response = { count: totalCount };
+    const orgs = parseInt(row.orgs_count) || 0;
+    const news = parseInt(row.news_count) || 0;
+    const events = parseInt(row.events_count) || 0;
+    const response = { count: orgs + news + events, organizations: orgs, news, events };
     setCache(cacheKey, response, CACHE_TTL.moderation);
     res.json(response);
   } catch (error) {
@@ -1639,8 +1849,9 @@ app.get('/api/admin/moderation/count', authenticateToken, async (req, res) => {
           (SELECT COUNT(*) FROM news WHERE is_published = false) as news_count
       `);
       const row = result.rows[0] || {};
-      const totalCount = (parseInt(row.orgs_count) || 0) + (parseInt(row.news_count) || 0);
-      const response = { count: totalCount };
+      const orgs = parseInt(row.orgs_count) || 0;
+      const news = parseInt(row.news_count) || 0;
+      const response = { count: orgs + news, organizations: orgs, news, events: 0 };
       setCache(getCacheKey('/api/admin/moderation/count'), response, CACHE_TTL.moderation);
       res.json(response);
     } catch (e) {
@@ -1713,11 +1924,14 @@ app.get('/api/admin/pending', authenticateToken, async (req, res) => {
 // Get all news articles (admin)
 app.get('/api/admin/news', authenticateToken, async (req, res) => {
   try {
-    const { page = 1, limit = 20, status, category } = req.query;
+    const { page = 1, limit = 20, status, category, minimal } = req.query;
     const offset = (page - 1) * limit;
+    const isMinimal = minimal === '1' || minimal === 'true';
 
+    const contentField = isMinimal ? 'NULL as content' : 'n.content';
+    const imageField = isMinimal ? 'n.image_url' : 'n.image_url';
     let query = `
-      SELECT n.id, n.title, n.content, n.excerpt, n.category, n.custom_category, n.image_url, 
+      SELECT n.id, n.title, ${contentField}, n.excerpt, n.category, n.custom_category, ${imageField}, 
              n.is_published, n.author_id, n.organization_id, n.created_at, n.updated_at,
              COALESCE(n.published_at, n.created_at) as published_at,
              u.first_name, u.last_name, o.name as organization_name, o.logo_url as organization_logo
@@ -1935,6 +2149,7 @@ app.put('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res)
     invalidateCache(`/api/news/${id}`);
     invalidateCache('/api/featured');
     invalidateCache('/api/admin/news');
+    invalidateCache('/api/admin/dashboard');
 
     res.json({
       message: 'Article updated successfully',
@@ -1964,6 +2179,7 @@ app.delete('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, r
     invalidateCache(`/api/news/${id}`);
     invalidateCache('/api/featured');
     invalidateCache('/api/admin/news');
+    invalidateCache('/api/admin/dashboard');
     
     res.json({ success: true });
   } catch (error) {
@@ -2168,6 +2384,7 @@ app.post('/api/admin/organizations', authenticateToken, requireAdmin, async (req
     invalidateCache('/api/admin/organizations');
     invalidateCache('/api/admin/stats');
     invalidateCache('/api/admin/moderation/count');
+    invalidateCache('/api/admin/dashboard');
     
     res.status(201).json({ organization: orgResult.rows[0] });
   } catch (error) {
@@ -2224,6 +2441,7 @@ app.put('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (
     invalidateCache('/api/admin/organizations');
     invalidateCache('/api/admin/stats');
     invalidateCache('/api/admin/moderation/count');
+    invalidateCache('/api/admin/dashboard');
     
     res.json({ organization: result.rows[0] });
   } catch (error) {
@@ -2243,6 +2461,7 @@ app.post('/api/admin/organizations/:id/approve', authenticateToken, requireAdmin
     invalidateCache('/api/admin/organizations');
     invalidateCache('/api/admin/stats');
     invalidateCache('/api/admin/moderation/count');
+    invalidateCache('/api/admin/dashboard');
     
     res.json({ message: 'Organization approved successfully' });
   } catch (error) {
@@ -2262,6 +2481,7 @@ app.post('/api/admin/organizations/:id/reject', authenticateToken, requireAdmin,
     invalidateCache('/api/admin/organizations');
     invalidateCache('/api/admin/stats');
     invalidateCache('/api/admin/moderation/count');
+    invalidateCache('/api/admin/dashboard');
     
     res.json({ message: 'Organization rejected successfully' });
   } catch (error) {
@@ -2281,6 +2501,7 @@ app.delete('/api/admin/organizations/:id', authenticateToken, requireAdmin, asyn
     invalidateCache('/api/admin/organizations');
     invalidateCache('/api/admin/stats');
     invalidateCache('/api/admin/moderation/count');
+    invalidateCache('/api/admin/dashboard');
     
     res.json({ success: true });
   } catch (error) {
@@ -2467,7 +2688,7 @@ app.get('/api/events/count', async (req, res) => {
     const { organization_id } = req.query;
     
     // Use same logic as /api/events endpoint - check if events table exists
-    let query = 'SELECT COUNT(*) as total FROM events WHERE 1=1';
+    let query = 'SELECT COUNT(*) as total FROM events WHERE COALESCE(event_end_date, event_date) >= CURDATE()';
     const params = [];
     
     // Filter by organization_id if provided
@@ -2493,6 +2714,7 @@ app.get('/api/events', async (req, res) => {
     // Check if events table exists (MySQL)
     const { page = 1, limit = 20, organization_id, status } = req.query;
     const offset = (page - 1) * limit;
+    const showOnlyUpcoming = req.query.upcoming !== 'false';
 
     // Haal events direct via de PHP-proxy (zeker de juiste MySQL-DB)
     const proxyBody = {
@@ -2502,6 +2724,7 @@ app.get('/api/events', async (req, res) => {
         FROM events e
         LEFT JOIN organizations o ON e.organization_id = o.id
         WHERE 1=1
+        ${showOnlyUpcoming ? ' AND COALESCE(e.event_end_date, e.event_date) >= CURDATE()' : ''}
         ${organization_id ? ' AND e.organization_id = ?' : ''}
         ${status ? ' AND e.status = ?' : ''}
         ORDER BY e.event_date ASC
@@ -2521,6 +2744,7 @@ app.get('/api/events', async (req, res) => {
         SELECT COUNT(*) as total
         FROM events e
         WHERE 1=1
+        ${showOnlyUpcoming ? ' AND COALESCE(e.event_end_date, e.event_date) >= CURDATE()' : ''}
         ${organization_id ? ' AND e.organization_id = ?' : ''}
         ${status ? ' AND e.status = ?' : ''}
       `,
@@ -2904,15 +3128,29 @@ app.post('/api/admin/users', authenticateToken, requireAdmin, async (req, res) =
       return res.status(400).json({ error: 'first_name, last_name, email, password are required' });
     }
     const hashed = await bcrypt.hash(password, 10);
-    const result = await executeQuery(
-      `INSERT INTO users (first_name, last_name, email, password, role, is_active)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id, first_name, last_name, email, role, is_active, created_at`,
+    
+    // MySQL: gebruik password_hash + insertId i.p.v. RETURNING
+    const insertResult = await executeInsert(
+      `INSERT INTO users (first_name, last_name, email, password_hash, role, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
       [first_name, last_name, email, hashed, role, is_active]
     );
-    res.status(201).json({ user: result.rows[0] });
+    
+    const userId = insertResult.insertId || insertResult.rows?.[0]?.id;
+    if (!userId) {
+      return res.status(500).json({ error: 'Failed to create user', message: 'No insertId returned' });
+    }
+    
+    const fetchResult = await executeQuery(
+      'SELECT id, first_name, last_name, email, role, is_active, created_at, updated_at FROM users WHERE id = $1',
+      [userId]
+    );
+    
+    res.status(201).json({ user: fetchResult.rows[0] });
   } catch (error) {
-    if (error.code === '23505') return res.status(409).json({ error: 'Email already exists' });
+    if (error.code === '23505' || error.code === 'ER_DUP_ENTRY' || error.errno === 1062) {
+      return res.status(409).json({ error: 'Email already exists' });
+    }
     console.error('Create user error:', error);
     res.status(500).json({ error: 'Failed to create user', message: error.message });
   }
@@ -2933,19 +3171,27 @@ app.put('/api/admin/users/:id', authenticateToken, requireAdmin, async (req, res
     if (is_active !== undefined) sets.push(`is_active = ${push(is_active)}`);
     if (password) {
       const hashed = await bcrypt.hash(password, 10);
-      sets.push(`password = ${push(hashed)}`);
+      sets.push(`password_hash = ${push(hashed)}`);
     }
     if (!sets.length) return res.status(400).json({ error: 'No fields to update' });
     params.push(id);
-    const result = await executeQuery(
-      `UPDATE users SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${params.length}
-       RETURNING id, first_name, last_name, email, role, is_active, created_at, updated_at`,
+    
+    // MySQL: geen RETURNING, dus update + fetch
+    await executeQuery(
+      `UPDATE users SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${params.length}`,
       params
     );
-    if (!result.rows.length) return res.status(404).json({ error: 'User not found' });
-    res.json({ user: result.rows[0] });
+    
+    const fetchResult = await executeQuery(
+      'SELECT id, first_name, last_name, email, role, is_active, created_at, updated_at FROM users WHERE id = $1',
+      [id]
+    );
+    if (!fetchResult.rows.length) return res.status(404).json({ error: 'User not found' });
+    res.json({ user: fetchResult.rows[0] });
   } catch (error) {
-    if (error.code === '23505') return res.status(409).json({ error: 'Email already exists' });
+    if (error.code === '23505' || error.code === 'ER_DUP_ENTRY' || error.errno === 1062) {
+      return res.status(409).json({ error: 'Email already exists' });
+    }
     console.error('Update user error:', error);
     res.status(500).json({ error: 'Failed to update user', message: error.message });
   }
@@ -3009,7 +3255,8 @@ app.get('/api/organizations', async (req, res) => {
       description,
       logo_url,
       brand_color,
-      category
+      category,
+      CASE WHEN logo_url IS NOT NULL AND logo_url <> '' THEN true ELSE false END as has_logo
     ` : `
         id,
         name,
@@ -3059,9 +3306,23 @@ app.get('/api/organizations', async (req, res) => {
     params.push(parseInt(offset));
 
     const result = await executeQuery(query, params);
+    let rows = result.rows || [];
+
+    // Bij minimal: geen base64 logo's meesturen (kleine payload, snelle opstart)
+    if (minimal === 'true') {
+      rows = rows.map((o) => {
+        const logo = o.logo_url;
+        const stripBase64 = typeof logo === 'string' && logo.startsWith('data:');
+        return {
+          ...o,
+          logo_url: stripBase64 ? null : logo,
+          description: typeof o.description === 'string' ? o.description.slice(0, 200) : o.description
+        };
+      });
+    }
 
     // Get total count (only if not minimal, to save time)
-    let total = result.rows.length;
+    let total = rows.length;
     if (minimal !== 'true') {
     let countQuery = 'SELECT COUNT(*) as total FROM organizations WHERE is_approved = true';
     const countParams = [];
@@ -3080,8 +3341,9 @@ app.get('/api/organizations', async (req, res) => {
       total = parseInt(countResult.rows[0].total);
     }
 
+    res.set('Cache-Control', 'public, max-age=60');
     res.json({
-      organizations: result.rows,
+      organizations: rows,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),

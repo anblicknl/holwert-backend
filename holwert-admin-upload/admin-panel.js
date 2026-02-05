@@ -386,74 +386,70 @@ class HolwertAdmin {
     async loadDashboard() {
         try {
             console.log('=== LOADING DASHBOARD ===');
-            console.log('API Base URL:', this.apiBaseUrl);
-            console.log('Token:', this.token);
-            
-            // Show loader
             this.showLoader('dashboard', 'Dashboard laden...');
-            
-            // Load dashboard statistics from single endpoint
-            const statsRes = await fetch(`${this.apiBaseUrl}/admin/stats`, {
-                    headers: { 'Authorization': `Bearer ${this.token}` }
+
+            // Eén request: stats + moderation counts (sneller dan stats + 3 aparte calls)
+            const res = await fetch(`${this.apiBaseUrl}/admin/dashboard`, {
+                headers: { 'Authorization': `Bearer ${this.token}` }
             });
 
-            console.log('Stats response status:', statsRes.status);
-            console.log('Stats response ok:', statsRes.ok);
-
-            if (statsRes.ok) {
-                const statsData = await statsRes.json();
-                console.log('Stats loaded:', statsData);
-                console.log('Users count:', statsData.users);
-                console.log('Organizations count:', statsData.organizations);
-                
-                // Update DOM elements
+            if (res.ok) {
+                const data = await res.json();
+                const stats = data.stats || {};
+                const mod = data.moderation || {};
                 const totalUsersEl = document.getElementById('totalUsers');
                 const totalOrgsEl = document.getElementById('totalOrganizations');
                 const totalNewsEl = document.getElementById('totalNews');
                 const totalEventsEl = document.getElementById('totalEvents');
-                
-                console.log('DOM elements found:', {
-                    totalUsers: !!totalUsersEl,
-                    totalOrganizations: !!totalOrgsEl,
-                    totalNews: !!totalNewsEl,
-                    totalEvents: !!totalEventsEl
-                });
-                
-                if (totalUsersEl) {
-                    totalUsersEl.textContent = statsData.users || 0;
-                    console.log('Updated totalUsers to:', totalUsersEl.textContent);
-                }
-                if (totalOrgsEl) {
-                    totalOrgsEl.textContent = statsData.organizations || 0;
-                    console.log('Updated totalOrganizations to:', totalOrgsEl.textContent);
-                }
-                if (totalNewsEl) {
-                    totalNewsEl.textContent = statsData.news || 0;
-                    console.log('Updated totalNews to:', totalNewsEl.textContent);
-                }
-                if (totalEventsEl) {
-                    totalEventsEl.textContent = statsData.events || 0;
-                    console.log('Updated totalEvents to:', totalEventsEl.textContent);
-                }
+                if (totalUsersEl) totalUsersEl.textContent = stats.users ?? 0;
+                if (totalOrgsEl) totalOrgsEl.textContent = stats.organizations ?? 0;
+                if (totalNewsEl) totalNewsEl.textContent = stats.news ?? 0;
+                if (totalEventsEl) totalEventsEl.textContent = stats.events ?? 0;
+                this.updateNotificationBadge('moderation', mod.count ?? 0);
+                this.updateNotificationBadge('organizations', mod.organizations ?? 0);
+                this.updateNotificationBadge('events', mod.events ?? 0);
             } else {
-                console.error('Failed to load stats:', statsRes.status);
-                const errorText = await statsRes.text();
-                console.error('Error response:', errorText);
+                const fallback = await this.loadDashboardFallback();
+                if (!fallback) {
+                    console.error('Dashboard load failed:', res.status);
+                }
             }
 
-            // Pending niet meer laden (scheelt traagheid/spinner); recent activity mag blijven
-            console.log('[Dashboard] Pending load overgeslagen (skipPending=true)');
             this.loadRecentActivity();
-            
-            // Load notification counts
-            this.loadNotificationCounts();
-            
-            // Hide loader
             this.hideLoader('dashboard');
-
         } catch (error) {
             console.error('Error loading dashboard:', error);
+            const fallback = await this.loadDashboardFallback();
             this.hideLoader('dashboard');
+        }
+    }
+
+    async loadDashboardFallback() {
+        try {
+            const [statsRes, modRes] = await Promise.all([
+                fetch(`${this.apiBaseUrl}/admin/stats`, { headers: { 'Authorization': `Bearer ${this.token}` } }),
+                fetch(`${this.apiBaseUrl}/admin/moderation/count`, { headers: { 'Authorization': `Bearer ${this.token}` } })
+            ]);
+            if (statsRes.ok) {
+                const statsData = await statsRes.json();
+                const totalUsersEl = document.getElementById('totalUsers');
+                const totalOrgsEl = document.getElementById('totalOrganizations');
+                const totalNewsEl = document.getElementById('totalNews');
+                const totalEventsEl = document.getElementById('totalEvents');
+                if (totalUsersEl) totalUsersEl.textContent = statsData.users ?? 0;
+                if (totalOrgsEl) totalOrgsEl.textContent = statsData.organizations ?? 0;
+                if (totalNewsEl) totalNewsEl.textContent = statsData.news ?? 0;
+                if (totalEventsEl) totalEventsEl.textContent = statsData.events ?? 0;
+            }
+            if (modRes.ok) {
+                const mod = await modRes.json();
+                this.updateNotificationBadge('moderation', mod.count ?? 0);
+                this.updateNotificationBadge('organizations', mod.organizations ?? 0);
+                this.updateNotificationBadge('events', mod.events ?? 0);
+            }
+            return true;
+        } catch (e) {
+            return false;
         }
     }
 
@@ -1127,8 +1123,7 @@ class HolwertAdmin {
                     // Show loader during image compression
                     this.showLoader(null, 'Logo verwerken...');
                     const compressedBase64 = await this.compressOrgImage(uploadedFile);
-                    logoUrl = compressedBase64;
-                    console.log('Logo compressed, length:', compressedBase64.length);
+                    console.log('Logo compressed (temp base64), length:', compressedBase64.length);
 
                     if (compressedBase64.length > 4 * 1024 * 1024) {
                         this.hideLoader();
@@ -1136,6 +1131,9 @@ class HolwertAdmin {
                         this.showNotification('Logo is te groot. Kies een kleinere afbeelding.', 'error');
                         return;
                     }
+
+                    this.showLoader(null, 'Logo uploaden...');
+                    logoUrl = await this.uploadBase64ToBackend(compressedBase64, `org-logo-${Date.now()}.jpg`, null);
                 } catch (error) {
                     console.error('Error processing logo:', error);
                     this.hideLoader();
@@ -1526,8 +1524,7 @@ class HolwertAdmin {
                     // Show loader during image compression
                     this.showLoader(null, 'Logo verwerken...');
                     const compressedBase64 = await this.compressOrgImage(uploadedFile);
-                    logoUrl = compressedBase64;
-                    console.log('Logo compressed, length:', compressedBase64.length);
+                    console.log('Logo compressed (temp base64), length:', compressedBase64.length);
 
                     if (compressedBase64.length > 4 * 1024 * 1024) {
                         this.hideLoader();
@@ -1535,6 +1532,9 @@ class HolwertAdmin {
                         this.showNotification('Logo is te groot. Kies een kleinere afbeelding.', 'error');
                         return;
                     }
+
+                    this.showLoader(null, 'Logo uploaden...');
+                    logoUrl = await this.uploadBase64ToBackend(compressedBase64, `org-logo-${Date.now()}.jpg`, id);
                 } catch (error) {
                     console.error('Error processing logo:', error);
                     this.hideLoader();
@@ -1978,7 +1978,7 @@ class HolwertAdmin {
             const containerId = newsContainer ? newsContainer.id : null;
             this.showLoader(containerId, 'Nieuws laden...');
             
-            const response = await fetch(`${this.apiBaseUrl}/admin/news`, {
+            const response = await fetch(`${this.apiBaseUrl}/admin/news?minimal=1`, {
                 headers: {
                     'Authorization': `Bearer ${this.token}`
                 }
@@ -2455,6 +2455,65 @@ class HolwertAdmin {
         });
     }
 
+    // DataURL naar Blob (voor snelle multipart-upload i.p.v. base64 in JSON)
+    dataURLtoBlob(dataUrl) {
+        if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) return null;
+        const parts = dataUrl.split(',');
+        const mime = parts[0].match(/data:image\/([a-z]+);/)?.[1] || 'jpeg';
+        const bstr = atob(parts[1]);
+        let n = bstr.length;
+        const u8 = new Uint8Array(n);
+        while (n--) u8[n] = bstr.charCodeAt(n);
+        return new Blob([u8], { type: `image/${mime}` });
+    }
+
+    // Multipart file-upload naar /api/upload (sneller dan base64 in JSON). Folder: uploads/YYYY/MM/<orgNum>/
+    async uploadFileToBackend(blob, filenameHint = 'image.jpg', organizationId = null) {
+        if (!blob || !(blob instanceof Blob)) return null;
+        const form = new FormData();
+        form.append('image', blob, filenameHint);
+        if (organizationId != null && organizationId !== '') form.append('organizationId', String(organizationId));
+        const res = await fetch(`${this.apiBaseUrl}/upload`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${this.token}` },
+            body: form
+        });
+        if (!res.ok) {
+            let msg = `HTTP ${res.status}`;
+            try { const j = await res.json(); msg = j.message || j.error || msg; } catch {}
+            throw new Error(msg);
+        }
+        const data = await res.json();
+        return data.url || data.imageUrl || null;
+    }
+
+    // Upload afbeelding (gebruikt multipart als dataUrl, anders fallback naar base64 endpoint). organizationId voor map uploads/YYYY/MM/01|07|...
+    async uploadBase64ToBackend(dataUrl, filenameHint = 'image.jpg', organizationId = null) {
+        if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) return null;
+        const blob = this.dataURLtoBlob(dataUrl);
+        if (blob) return this.uploadFileToBackend(blob, filenameHint, organizationId);
+        // Fallback: base64 naar /api/upload/image (zwaarder)
+        const res = await fetch(`${this.apiBaseUrl}/upload/image`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${this.token}`
+            },
+            body: JSON.stringify({
+                imageData: dataUrl,
+                filename: filenameHint,
+                organizationId: organizationId != null ? String(organizationId) : undefined
+            })
+        });
+        if (!res.ok) {
+            let msg = `HTTP ${res.status}`;
+            try { const j = await res.json(); msg = j.message || j.error || msg; } catch {}
+            throw new Error(msg);
+        }
+        const data = await res.json();
+        return data.imageUrl || data.url || null;
+    }
+
     // Organization image functions
     async previewOrgImage(input) {
         const file = input.files[0];
@@ -2578,15 +2637,18 @@ class HolwertAdmin {
             
             if (uploadedFile) {
                 try {
+                    this.showLoader(null, 'Afbeelding verwerken...');
                     const compressedBase64 = await this.compressNewsImage(uploadedFile);
-                    imageUrl = compressedBase64;
-                    console.log('News image compressed, length:', compressedBase64.length);
+                    console.log('News image compressed (temp base64), length:', compressedBase64.length);
                     
                     if (compressedBase64.length > 4 * 1024 * 1024) {
                         this.enableSaveButton(buttonStates);
                         this.showNotification('Afbeelding is te groot. Kies een kleinere afbeelding.', 'error');
                         return;
                     }
+
+                    this.showLoader(null, 'Afbeelding uploaden...');
+                    imageUrl = await this.uploadBase64ToBackend(compressedBase64, `news-image-${Date.now()}.jpg`, organization_id);
                 } catch (error) {
                     console.error('Error processing image:', error);
                     this.enableSaveButton(buttonStates);
@@ -2677,7 +2739,7 @@ class HolwertAdmin {
     async viewNews(newsId) {
         try {
             console.log('🔍 viewNews called with ID:', newsId);
-            const response = await fetch(`${this.apiBaseUrl}/admin/news`, {
+            const response = await fetch(`${this.apiBaseUrl}/admin/news?minimal=1`, {
                 headers: {
                     'Authorization': `Bearer ${this.token}`
                 }
@@ -4263,7 +4325,7 @@ class HolwertAdmin {
                 </div>
             `;
 
-            const response = await fetch(`${this.apiBaseUrl}/admin/news?organization_id=${orgId}`, {
+            const response = await fetch(`${this.apiBaseUrl}/admin/news?organization_id=${orgId}&minimal=1`, {
                 headers: {
                     'Authorization': `Bearer ${this.token}`
                 }
@@ -4872,7 +4934,15 @@ class HolwertAdmin {
                 const priceVal = modal.querySelector('#evPrice')?.value;
                 const price = priceVal ? parseFloat(priceVal) : null;
                 const imgVal = modal.querySelector('#evImagePreviewImg')?.src;
-                const image_url = imgVal && imgVal.startsWith('data:image') ? imgVal : null;
+                let image_url = null;
+                if (imgVal && imgVal.startsWith('data:image')) {
+                    this.showLoader(null, 'Afbeelding uploaden...');
+                    image_url = await this.uploadBase64ToBackend(imgVal, `event-image-${Date.now()}.jpg`, organization_id);
+                } else if (imgVal && (imgVal.startsWith('http://') || imgVal.startsWith('https://'))) {
+                    image_url = imgVal;
+                } else {
+                    image_url = null;
+                }
 
                 if (!title || !description || !event_date_raw || !location) {
                     this.showNotification('Vul alle verplichte velden in', 'error');
@@ -4952,13 +5022,15 @@ class HolwertAdmin {
             if (uploadedFile) {
                 try {
                     const compressedBase64 = await this.compressEventImage(uploadedFile);
-                    imageUrl = compressedBase64;
-                    console.log('Event image compressed and converted to base64, length:', compressedBase64.length);
+                    console.log('Event image compressed (temp base64), length:', compressedBase64.length);
                     
                     if (compressedBase64.length > 4 * 1024 * 1024) {
                         this.showNotification('Afbeelding is te groot. Kies een kleinere afbeelding.', 'error');
                         return;
                     }
+
+                    this.showLoader(null, 'Afbeelding uploaden...');
+                    imageUrl = await this.uploadBase64ToBackend(compressedBase64, `event-image-${Date.now()}.jpg`, organization_id);
                 } catch (error) {
                     console.error('Error processing image:', error);
                     this.showNotification('Fout bij verwerken van afbeelding', 'error');
@@ -4968,7 +5040,8 @@ class HolwertAdmin {
                 // Als er geen nieuwe afbeelding is geüpload, behoud de bestaande (bij edit)
                 const existingImage = document.querySelector('#evImagePreviewImg')?.src;
                 if (existingImage && existingImage.startsWith('data:image')) {
-                    imageUrl = existingImage;
+                    this.showLoader(null, 'Afbeelding uploaden...');
+                    imageUrl = await this.uploadBase64ToBackend(existingImage, `event-image-${Date.now()}.jpg`, organization_id);
                 } else if (actualEventId) {
                     // Bij bewerken zonder nieuwe afbeelding, haal de bestaande image_url op
                     const existingImageUrl = document.querySelector('[data-existing-image]')?.getAttribute('data-existing-image');
