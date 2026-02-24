@@ -113,6 +113,24 @@ function loginRateLimiter(req, res, next) {
   return next();
 }
 
+
+// Helper: haal user op met fallback als kolommen niet bestaan
+async function getUserById(id) {
+  try {
+    const r = await executeQuery(
+      'SELECT id, email, first_name, last_name, profile_image_url, profile_number, role, is_active, created_at, updated_at FROM users WHERE id = ?',
+      [id]
+    );
+    return r.rows?.[0] ?? null;
+  } catch (e) {
+    const r = await executeQuery(
+      'SELECT id, email, first_name, last_name, role, is_active, created_at, updated_at FROM users WHERE id = ?',
+      [id]
+    );
+    return r.rows?.[0] ?? null;
+  }
+}
+
 // Cleanup loginAttempts periodiek
 setInterval(() => {
   const now = Date.now();
@@ -1740,10 +1758,18 @@ app.post('/api/auth/login', loginRateLimiter, async (req, res) => {
     }
 
     // Find user by email (zonder profile_image_url i.v.m. oude DB zonder deze kolom)
-    const userResult = await executeQuery(
-      'SELECT id, email, password_hash, first_name, last_name, profile_image_url, profile_number, role, is_active FROM users WHERE email = ?',
-      [email]
-    );
+    let userResult;
+    try {
+      userResult = await executeQuery(
+        'SELECT id, email, password_hash, first_name, last_name, profile_image_url, profile_number, role, is_active FROM users WHERE email = ?',
+        [email]
+      );
+    } catch (colErr) {
+      userResult = await executeQuery(
+        'SELECT id, email, password_hash, first_name, last_name, role, is_active FROM users WHERE email = ?',
+        [email]
+      );
+    }
 
     if (userResult.rows.length === 0) {
       return res.status(401).json({
@@ -1866,10 +1892,18 @@ const handleRegister = async (req, res) => {
       console.warn('profile_number update failed (column may not exist):', pnErr.message);
     }
 
-    const userResult = await executeQuery(
-      'SELECT id, email, first_name, last_name, profile_image_url, profile_number, role FROM users WHERE id = ?',
-      [userId]
-    );
+    let userResult;
+    try {
+      userResult = await executeQuery(
+        'SELECT id, email, first_name, last_name, profile_image_url, profile_number, role FROM users WHERE id = ?',
+        [userId]
+      );
+    } catch (colErr) {
+      userResult = await executeQuery(
+        'SELECT id, email, first_name, last_name, role FROM users WHERE id = ?',
+        [userId]
+      );
+    }
     const user = userResult.rows[0];
 
     const token = jwt.sign(
@@ -1924,10 +1958,18 @@ app.get('/api/auth/verify', authenticateToken, (req, res) => {
 app.get('/api/auth/profile', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.userId;
-    const result = await executeQuery(
-      'SELECT id, email, first_name, last_name, profile_image_url, profile_number, role, created_at, updated_at FROM users WHERE id = ?',
-      [userId]
-    );
+    let result;
+    try {
+      result = await executeQuery(
+        'SELECT id, email, first_name, last_name, profile_image_url, profile_number, role, created_at, updated_at FROM users WHERE id = ?',
+        [userId]
+      );
+    } catch (colErr) {
+      result = await executeQuery(
+        'SELECT id, email, first_name, last_name, role, created_at, updated_at FROM users WHERE id = ?',
+        [userId]
+      );
+    }
     if (!result.rows.length) {
       return res.status(404).json({ error: 'User not found' });
     }
@@ -1976,10 +2018,18 @@ app.put('/api/auth/profile', authenticateToken, async (req, res) => {
 
     if (!sets.length) {
       // Geen velden om te updaten: gewoon huidige user teruggeven (geen 400)
-      const currentResult = await executeQuery(
-        'SELECT id, email, first_name, last_name, profile_image_url, profile_number, role, created_at, updated_at FROM users WHERE id = ?',
-        [userId]
-      );
+      let currentResult;
+      try {
+        currentResult = await executeQuery(
+          'SELECT id, email, first_name, last_name, profile_image_url, profile_number, role, created_at, updated_at FROM users WHERE id = ?',
+          [userId]
+        );
+      } catch (colErr) {
+        currentResult = await executeQuery(
+          'SELECT id, email, first_name, last_name, role, created_at, updated_at FROM users WHERE id = ?',
+          [userId]
+        );
+      }
       const cu = currentResult.rows?.[0];
       if (!cu) return res.status(404).json({ error: 'User not found' });
       return res.json({
