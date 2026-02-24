@@ -185,6 +185,8 @@ function getMigrationsReady() {
       try {
         await ensureProfileImageUrlColumn();
         await ensureProfileNumberColumn();
+        await ensurePrivacyStatementColumn();
+        await ensurePracticalInfoTable();
         await initializePushNotificationsTables();
         console.log('✅ Migraties voltooid');
       } catch (e) {
@@ -3516,66 +3518,54 @@ app.delete('/api/admin/events/:id', authenticateToken, requireAdmin, async (req,
 });
 
 // ===== ADMIN FOUND-LOST MODERATION =====
-// List found/lost items (optionally by status)
-app.get('/api/admin/found-lost', authenticateToken, requireAdmin, async (req, res) => {
+// ===== ADMIN PRACTICAL INFO ENDPOINTS =====
+app.get('/api/admin/practical-info', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const { status } = req.query;
-    let query = `SELECT * FROM found_lost WHERE 1=1`;
-    const params = [];
-    if (status) { 
-      params.push(status); 
-      query += ` AND status = $1`; 
-    }
-    query += ' ORDER BY created_at DESC LIMIT 200';
-    const result = await executeQuery(query, params);
-    res.json({ items: result.rows });
+    const result = await executeQuery('SELECT * FROM practical_info ORDER BY sort_order ASC, id ASC');
+    res.json({ items: result.rows || [] });
   } catch (error) {
-    console.error('List found-lost error:', error);
-    res.status(500).json({ error: 'Failed to get found-lost items', message: error.message });
+    res.status(500).json({ error: 'Failed to get practical info', message: error.message });
   }
 });
 
-// Approve
-app.post('/api/admin/found-lost/:id/approve', authenticateToken, requireAdmin, async (req, res) => {
+app.post('/api/admin/practical-info', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const { id } = req.params;
-    const result = await executeQuery(
-      `UPDATE found_lost SET status = 'approved', rejection_reason = NULL, revision_deadline = NULL, updated_at = NOW() WHERE id = $1 RETURNING *`,
-      [id]
+    const { title, subtitle, icon, content, type, url, sort_order, is_active } = req.body;
+    if (!title) return res.status(400).json({ error: 'Title is required' });
+    const result = await executeInsert(
+      'INSERT INTO practical_info (title, subtitle, icon, content, type, url, sort_order, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [title, subtitle || null, icon || 'information-circle-outline', content || null, type || 'info', url || null, sort_order || 0, is_active !== false ? 1 : 0]
     );
-    if (!result.rows.length) return res.status(404).json({ error: 'Item not found' });
-    res.json({ item: result.rows[0] });
+    res.status(201).json({ success: true, id: result.insertId });
   } catch (error) {
-    console.error('Approve found-lost error:', error);
-    res.status(500).json({ error: 'Failed to approve item', message: error.message });
+    res.status(500).json({ error: 'Failed to create practical info', message: error.message });
   }
 });
 
-// Reject (needs revision optional)
-app.post('/api/admin/found-lost/:id/reject', authenticateToken, requireAdmin, async (req, res) => {
+app.put('/api/admin/practical-info/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { reason, needs_revision = true } = req.body || {};
-    if (needs_revision) {
-      const result = await executeQuery(
-        `UPDATE found_lost SET status = 'needs_revision', rejection_reason = $1, revision_deadline = NOW() + INTERVAL '3 days', updated_at = NOW() WHERE id = $2 RETURNING *`,
-        [reason || 'Aanpassingen vereist', id]
-      );
-      if (!result.rows.length) return res.status(404).json({ error: 'Item not found' });
-      return res.json({ item: result.rows[0] });
-    } else {
-      const result = await executeQuery(
-        `UPDATE found_lost SET status = 'rejected', rejection_reason = $1, revision_deadline = NULL, updated_at = NOW() WHERE id = $2 RETURNING *`,
-        [reason || 'Afgewezen', id]
-      );
-      if (!result.rows.length) return res.status(404).json({ error: 'Item not found' });
-      return res.json({ item: result.rows[0] });
-    }
+    const { title, subtitle, icon, content, type, url, sort_order, is_active } = req.body;
+    await executeQuery(
+      'UPDATE practical_info SET title = ?, subtitle = ?, icon = ?, content = ?, type = ?, url = ?, sort_order = ?, is_active = ? WHERE id = ?',
+      [title, subtitle || null, icon || 'information-circle-outline', content || null, type || 'info', url || null, sort_order || 0, is_active !== false ? 1 : 0, id]
+    );
+    res.json({ success: true });
   } catch (error) {
-    console.error('Reject found-lost error:', error);
-    res.status(500).json({ error: 'Failed to reject item', message: error.message });
+    res.status(500).json({ error: 'Failed to update practical info', message: error.message });
   }
 });
+
+app.delete('/api/admin/practical-info/:id', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    await executeQuery('DELETE FROM practical_info WHERE id = ?', [id]);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete practical info', message: error.message });
+  }
+});
+
 
 // Get all users (admin)
 app.get('/api/admin/users', authenticateToken, async (req, res) => {
@@ -3732,6 +3722,73 @@ app.delete('/api/admin/users/:id', authenticateToken, requireAdmin, async (req, 
     if (error.code === '23503') return res.status(409).json({ error: 'Cannot delete user in use' });
     console.error('Delete user error:', error);
     res.status(500).json({ error: 'Failed to delete user', message: error.message });
+  }
+});
+
+// Privacy statement per organisatie
+app.get('/api/organizations/:id/privacy', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await executeQuery(
+      'SELECT id, name, privacy_statement FROM organizations WHERE id = ? AND is_approved = true', [id]
+    );
+    if (!result.rows?.length) return res.status(404).json({ error: 'Organisatie niet gevonden' });
+    res.json({ organization: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: 'Kon privacybeleid niet ophalen' });
+  }
+});
+
+// Praktische info (publiek)
+app.get('/api/app/practical-info', async (req, res) => {
+  try {
+    const result = await executeQuery(
+      'SELECT id, title, subtitle, icon, content, type, url, sort_order FROM practical_info WHERE is_active = true ORDER BY sort_order ASC, id ASC'
+    );
+    res.set('Cache-Control', 'public, max-age=60');
+    res.json({ items: result.rows || [] });
+  } catch (error) {
+    res.status(500).json({ error: 'Kon praktische info niet ophalen', items: [] });
+  }
+});
+
+// Delete own account (AVG/GDPR)
+app.delete('/api/auth/account', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { password } = req.body || {};
+    if (!password) {
+      return res.status(400).json({ error: 'Wachtwoord is verplicht om je account te verwijderen' });
+    }
+
+    const userResult = await executeQuery('SELECT id, password_hash, profile_image_url FROM users WHERE id = ?', [userId]);
+    const user = userResult.rows?.[0];
+    if (!user) return res.status(404).json({ error: 'Account niet gevonden' });
+
+    const bcrypt = require('bcryptjs');
+    const validPassword = await bcrypt.compare(password, user.password_hash);
+    if (!validPassword) {
+      return res.status(401).json({ error: 'Onjuist wachtwoord' });
+    }
+
+    // Verwijder alle gerelateerde data
+    await executeQuery('DELETE FROM bookmarks WHERE user_id = ?', [userId]).catch(() => {});
+    await executeQuery('DELETE FROM follows WHERE user_id = ?', [userId]).catch(() => {});
+    await executeQuery('DELETE FROM push_tokens WHERE user_id = ?', [userId]).catch(() => {});
+    await executeQuery('DELETE FROM notification_history WHERE user_id = ?', [userId]).catch(() => {});
+
+    // Verwijder profielfoto van server
+    if (user.profile_image_url) {
+      deleteOldProfileImage(user.profile_image_url).catch(() => {});
+    }
+
+    // Verwijder het account
+    await executeQuery('DELETE FROM users WHERE id = ?', [userId]);
+
+    res.json({ success: true, message: 'Account succesvol verwijderd' });
+  } catch (error) {
+    console.error('Delete account error:', error);
+    res.status(500).json({ error: 'Kon account niet verwijderen', message: error.message });
   }
 });
 
@@ -4434,6 +4491,40 @@ async function sendNotificationToFollowers(organizationId, notification, notific
 }
 
 // Ensure profile_image_url column exists in users table
+async function ensurePrivacyStatementColumn() {
+  try {
+    const result = await executeQuery(
+      "SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'organizations' AND COLUMN_NAME = 'privacy_statement'"
+    );
+    if (result.rows && result.rows.length > 0) return;
+    await executeQuery('ALTER TABLE organizations ADD COLUMN privacy_statement TEXT NULL');
+    console.log('privacy_statement kolom toegevoegd aan organizations');
+  } catch (e) {
+    if (e.code === 'ER_DUP_FIELDNAME' || (e.message && e.message.includes('Duplicate'))) return;
+    console.error('ensurePrivacyStatementColumn error:', e.message);
+  }
+}
+
+async function ensurePracticalInfoTable() {
+  try {
+    await executeQuery(`CREATE TABLE IF NOT EXISTS practical_info (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      title VARCHAR(255) NOT NULL,
+      subtitle VARCHAR(255),
+      icon VARCHAR(50) DEFAULT 'information-circle-outline',
+      content TEXT,
+      type ENUM('info','schedule','link','phone') DEFAULT 'info',
+      url VARCHAR(500),
+      sort_order INT DEFAULT 0,
+      is_active BOOLEAN DEFAULT true,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )`);
+  } catch (e) {
+    console.error('ensurePracticalInfoTable error:', e.message);
+  }
+}
+
 async function ensureProfileImageUrlColumn() {
   try {
     const result = await executeQuery(

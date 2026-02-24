@@ -121,6 +121,8 @@ $allowedAlterPatterns = [
     'CREATE TABLE IF NOT EXISTS BOOKMARKS',
     'CREATE TABLE IF NOT EXISTS FOLLOWS',
     'CREATE TABLE IF NOT EXISTS NOTIFICATION_HISTORY',
+    'CREATE TABLE IF NOT EXISTS PRACTICAL_INFO',
+    'ALTER TABLE ORGANIZATIONS ADD COLUMN PRIVACY_STATEMENT',
 ];
 $isWhitelistedMaintenance = false;
 foreach ($allowedAlterPatterns as $pattern) {
@@ -170,7 +172,7 @@ if (strpos($query, ';') !== false) {
 // SECURITY: Alleen toegestane tabellen (whitelist)
 $allowedTables = [
     'users', 'organizations', 'news', 'events', 'bookmarks', 'follows',
-    'push_tokens', 'found_lost', 'notification_history',
+    'push_tokens', 'found_lost', 'notification_history', 'practical_info',
     'information_schema'  // voor schema-checks/migraties
 ];
 
