@@ -9,7 +9,10 @@
  */
 
 // Load environment variables from .env file (if exists)
-require_once __DIR__ . '/load-env.php';
+$envLoader = __DIR__ . '/load-env.php';
+if (file_exists($envLoader)) {
+    require_once $envLoader;
+}
 
 // Enable output buffering and compression voor betere performance
 if (extension_loaded('zlib') && !ob_get_level()) {
@@ -109,21 +112,35 @@ if (!in_array($action, $allowedActions)) {
 // Alleen echt gevaarlijke operaties blokkeren, niet normale INSERT/DELETE/UPDATE
 $queryUpper = strtoupper(trim($query));
 
-// Tijdelijke, zeer specifieke whitelist voor éénmalige kolomaanpassing
-$allowedMaintenanceQuery = 'ALTER TABLE ORGANIZATIONS MODIFY COLUMN LOGO_URL MEDIUMTEXT';
-$isWhitelistedMaintenance = (
-    $action === 'execute' && 
-    stripos($queryUpper, $allowedMaintenanceQuery) !== false
-);
+// Whitelist voor veilige ALTER/CREATE operaties op de users-tabel (migraties)
+$allowedAlterPatterns = [
+    'ALTER TABLE ORGANIZATIONS MODIFY COLUMN LOGO_URL MEDIUMTEXT',
+    'ALTER TABLE USERS ADD COLUMN PROFILE_IMAGE_URL',
+    'ALTER TABLE USERS ADD COLUMN PROFILE_NUMBER',
+    'CREATE TABLE IF NOT EXISTS PUSH_TOKENS',
+    'CREATE TABLE IF NOT EXISTS BOOKMARKS',
+    'CREATE TABLE IF NOT EXISTS FOLLOWS',
+    'CREATE TABLE IF NOT EXISTS NOTIFICATION_HISTORY',
+];
+$isWhitelistedMaintenance = false;
+foreach ($allowedAlterPatterns as $pattern) {
+    if (stripos($queryUpper, $pattern) !== false) {
+        $isWhitelistedMaintenance = true;
+        break;
+    }
+}
 
-// Als het de whitelisted onderhoudsquery is, voer direct uit en sla verdere checks over
 if ($isWhitelistedMaintenance) {
     try {
         $pdo->exec($query);
-        echo json_encode(['success' => true, 'message' => 'Maintenance ALTER executed']);
+        echo json_encode(['success' => true, 'message' => 'Migration executed', 'rows' => [], 'rowCount' => 0]);
     } catch (PDOException $e) {
-        http_response_code(500);
-        echo json_encode(['error' => 'Maintenance query failed', 'message' => $e->getMessage()]);
+        if (strpos($e->getMessage(), 'Duplicate column') !== false) {
+            echo json_encode(['success' => true, 'message' => 'Column already exists', 'rows' => [], 'rowCount' => 0]);
+        } else {
+            http_response_code(500);
+            echo json_encode(['error' => 'Migration failed', 'message' => $e->getMessage()]);
+        }
     }
     exit;
 }

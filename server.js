@@ -131,6 +131,28 @@ async function getUserById(id) {
   }
 }
 
+
+// Verwijder oude profielfoto van externe server
+async function deleteOldProfileImage(imageUrl) {
+  if (!imageUrl || typeof imageUrl !== 'string') return;
+  try {
+    const match = imageUrl.match(/holwert\.appenvloed\.com\/(uploads\/\d{4}\/\d{2}\/\d{2}\/[^?#]+)/);
+    if (!match) return;
+    const filePath = match[1];
+    const form = new FormData();
+    form.append('path', filePath);
+    form.append('secret', process.env.DELETE_SECRET || 'holwert-delete-2026');
+    await axios.post('https://holwert.appenvloed.com/upload/delete.php', form, {
+      headers: { ...form.getHeaders() },
+      timeout: 10000,
+      httpsAgent: new (require('https').Agent)({ rejectUnauthorized: false })
+    });
+    console.log('🗑️ Oude profielfoto verwijderd:', filePath);
+  } catch (e) {
+    console.warn('⚠️ Kon oude profielfoto niet verwijderen:', e.message);
+  }
+}
+
 // Cleanup loginAttempts periodiek
 setInterval(() => {
   const now = Date.now();
@@ -146,6 +168,28 @@ app.use(compression()); // Compress responses for faster transfer
 app.use(cors());
 app.use(express.json({ limit: '50mb' })); // Verhoogd voor afbeelding uploads
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// Wacht op database-migraties voor elke request (Vercel serverless cold start)
+let _migrationsReady = null;
+function getMigrationsReady() {
+  if (!_migrationsReady) {
+    _migrationsReady = (async () => {
+      try {
+        await ensureProfileImageUrlColumn();
+        await ensureProfileNumberColumn();
+        await initializePushNotificationsTables();
+        console.log('✅ Migraties voltooid');
+      } catch (e) {
+        console.error('Migraties fout:', e?.message || e);
+      }
+    })();
+  }
+  return _migrationsReady;
+}
+app.use(async (req, res, next) => {
+  await getMigrationsReady();
+  next();
+});
 
 // Multer configuration for image uploads
 const storage = multer.memoryStorage();
@@ -174,9 +218,9 @@ const dbConfig = {
   connectionLimit: 10,
   queueLimit: 0,
   charset: 'utf8mb4',
-  connectTimeout: 5000, // 5 seconden timeout voor connectie
-  acquireTimeout: 5000, // 5 seconden timeout voor het krijgen van een connectie
-  timeout: 10000 // 10 seconden timeout voor queries
+  connectTimeout: 2000, // 2 seconden timeout voor connectie
+  acquireTimeout: 2000, // 2 seconden timeout
+  timeout: 5000 // 5 seconden timeout voor queries
 };
 
 // Log database config (zonder password)
@@ -263,6 +307,9 @@ async function executeQueryViaProxy(query, params = [], action = 'execute') {
   }
 }
 
+// Flag: zodra directe MySQL faalt, alleen proxy gebruiken (voorkomt herhaalde timeouts)
+let _useProxyOnly = false;
+
 // Helper function voor query execution (MySQL compatible)
 // Probeert eerst direct MySQL, fallback naar PHP proxy
 async function executeQuery(query, params = []) {
@@ -272,8 +319,17 @@ async function executeQuery(query, params = []) {
   // Converteer ILIKE naar LIKE (case-insensitive)
   mysqlQuery = mysqlQuery.replace(/ILIKE/gi, 'LIKE');
   
+  const queryUpper = mysqlQuery.trim().toUpperCase();
+  let proxyAction = 'execute';
+  if (queryUpper.startsWith('INSERT')) proxyAction = 'insert';
+  else if (queryUpper.startsWith('UPDATE')) proxyAction = 'update';
+  else if (queryUpper.startsWith('DELETE')) proxyAction = 'delete';
+
+  if (_useProxyOnly) {
+    return await executeQueryViaProxy(mysqlQuery, params, proxyAction);
+  }
+
   try {
-    // Probeer direct MySQL
     if (params && params.length > 0) {
       const [result] = await pool.execute(mysqlQuery, params);
       return {
@@ -288,22 +344,9 @@ async function executeQuery(query, params = []) {
       };
     }
   } catch (error) {
-    // Als direct MySQL faalt, gebruik PHP proxy
     if (error.code === 'ETIMEDOUT' || error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
-      console.log('[MySQL] Direct connection failed, using PHP proxy...');
-      
-      // Detect query type voor juiste action
-      const queryUpper = mysqlQuery.trim().toUpperCase();
-      let proxyAction = 'execute'; // default voor SELECT
-      
-      if (queryUpper.startsWith('INSERT')) {
-        proxyAction = 'insert';
-      } else if (queryUpper.startsWith('UPDATE')) {
-        proxyAction = 'update';
-      } else if (queryUpper.startsWith('DELETE')) {
-        proxyAction = 'delete';
-      }
-      
+      console.log('[MySQL] Direct connection failed, switching to proxy-only mode');
+      _useProxyOnly = true;
       return await executeQueryViaProxy(mysqlQuery, params, proxyAction);
     }
     throw error;
@@ -316,8 +359,11 @@ async function executeInsert(query, params = []) {
   mysqlQuery = mysqlQuery.replace(/RETURNING\s+id/gi, '');
   mysqlQuery = mysqlQuery.replace(/RETURNING\s+\*/gi, '');
   
+  if (_useProxyOnly) {
+    return await executeQueryViaProxy(mysqlQuery, params, 'insert');
+  }
+
   try {
-    // Probeer direct MySQL
     if (params && params.length > 0) {
       const [result] = await pool.execute(mysqlQuery, params);
       const insertId = result.insertId;
@@ -335,9 +381,9 @@ async function executeInsert(query, params = []) {
       };
     }
   } catch (error) {
-    // Als direct MySQL faalt, gebruik PHP proxy
     if (error.code === 'ETIMEDOUT' || error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
-      console.log('[MySQL] Direct connection failed, using PHP proxy for INSERT...');
+      console.log('[MySQL] Direct connection failed, switching to proxy-only mode');
+      _useProxyOnly = true;
       return await executeQueryViaProxy(mysqlQuery, params, 'insert');
     }
     throw error;
@@ -465,6 +511,53 @@ app.get('/api/setup-admin', async (req, res) => {
 });
 
 // Health check
+app.get('/api/debug/columns', async (req, res) => {
+  const log = [];
+  try {
+    // Skip migrations, test directly
+    log.push('Testing basic query...');
+    try {
+      const basic = await executeQuery('SELECT id, email, first_name, last_name FROM users LIMIT 1');
+      log.push('Basic query OK: ' + JSON.stringify(basic.rows?.[0] ?? null));
+    } catch (e) { log.push('Basic query FAIL: ' + e.message); }
+
+    log.push('Testing information_schema...');
+    try {
+      const cols = await executeQuery(
+        "SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'"
+      );
+      const colNames = (cols.rows || []).map(c => c.COLUMN_NAME || c.column_name);
+      log.push('Columns: ' + colNames.join(', '));
+
+      if (!colNames.includes('profile_image_url')) {
+        log.push('Attempting ALTER TABLE...');
+        try {
+          await executeQuery('ALTER TABLE users ADD COLUMN profile_image_url TEXT NULL');
+          log.push('ALTER TABLE profile_image_url: OK');
+        } catch (ae) {
+          log.push('ALTER TABLE profile_image_url FAIL: ' + ae.message);
+        }
+      }
+
+      if (!colNames.includes('profile_number')) {
+        log.push('Attempting ALTER TABLE profile_number...');
+        try {
+          await executeQuery("ALTER TABLE users ADD COLUMN profile_number VARCHAR(10) NULL");
+          log.push('ALTER TABLE profile_number: OK');
+        } catch (ae) {
+          log.push('ALTER TABLE profile_number FAIL: ' + ae.message);
+        }
+      }
+
+    } catch (e) { log.push('information_schema FAIL: ' + e.message); }
+
+    res.json({ log });
+  } catch (e) {
+    log.push('Fatal: ' + e.message);
+    res.json({ error: e.message, log });
+  }
+});
+
 app.get('/api/health', async (req, res) => {
   try {
     // Test database connection
@@ -2014,7 +2107,14 @@ app.put('/api/auth/profile', authenticateToken, async (req, res) => {
     if (last_name !== undefined) { sets.push(`last_name = ${push(last_name)}`); }
     const imageUrl = profile_image_url ?? profile_picture;
     const hasImageUpdate = imageUrl !== undefined;
-    if (hasImageUpdate) { sets.push(`profile_image_url = ${push(imageUrl)}`); }
+    let oldImageUrl = null;
+    if (hasImageUpdate) {
+      sets.push(`profile_image_url = ${push(imageUrl)}`);
+      try {
+        const oldResult = await executeQuery('SELECT profile_image_url FROM users WHERE id = ?', [userId]);
+        oldImageUrl = oldResult.rows?.[0]?.profile_image_url ?? null;
+      } catch (e) { /* kolom bestaat mogelijk niet */ }
+    }
 
     if (!sets.length) {
       // Geen velden om te updaten: gewoon huidige user teruggeven (geen 400)
@@ -2080,6 +2180,11 @@ app.put('/api/auth/profile', authenticateToken, async (req, res) => {
     }
     const user = fetchResult.rows[0];
     const profilePic = user.profile_image_url ?? imageUrl ?? null;
+
+    if (hasImageUpdate && oldImageUrl && oldImageUrl !== profilePic) {
+      deleteOldProfileImage(oldImageUrl).catch(() => {});
+    }
+
     res.json({
       user: {
         id: user.id,
@@ -4323,36 +4428,33 @@ async function sendNotificationToFollowers(organizationId, notification, notific
 // Ensure profile_image_url column exists in users table
 async function ensureProfileImageUrlColumn() {
   try {
-    const [cols] = await pool.execute(
-      `SELECT COLUMN_NAME FROM information_schema.COLUMNS 
-       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'profile_image_url'`
+    const result = await executeQuery(
+      "SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'profile_image_url'"
     );
-    if (cols && cols.length > 0) {
+    if (result.rows && result.rows.length > 0) {
       return;
     }
     await executeQuery('ALTER TABLE users ADD COLUMN profile_image_url TEXT NULL AFTER last_name');
     console.log('✅ profile_image_url kolom toegevoegd aan users');
   } catch (e) {
-    if (e.code === 'ER_DUP_FIELDNAME') return;
+    if (e.code === 'ER_DUP_FIELDNAME' || (e.message && e.message.includes('Duplicate'))) return;
     console.error('ensureProfileImageUrlColumn error:', e.message);
   }
 }
 
 async function ensureProfileNumberColumn() {
   try {
-    const [cols] = await pool.execute(
-      `SELECT COLUMN_NAME FROM information_schema.COLUMNS 
-       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'profile_number'`
+    const result = await executeQuery(
+      "SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'profile_number'"
     );
-    if (cols && cols.length > 0) {
+    if (result.rows && result.rows.length > 0) {
       return;
     }
     await executeQuery('ALTER TABLE users ADD COLUMN profile_number VARCHAR(10) NULL AFTER profile_image_url');
-    // Backfill: geef bestaande gebruikers een profielnummer op basis van hun id
     await executeQuery("UPDATE users SET profile_number = LPAD(id, 4, '0') WHERE profile_number IS NULL");
     console.log('✅ profile_number kolom toegevoegd en backfill voltooid');
   } catch (e) {
-    if (e.code === 'ER_DUP_FIELDNAME') return;
+    if (e.code === 'ER_DUP_FIELDNAME' || (e.message && e.message.includes('Duplicate'))) return;
     console.error('ensureProfileNumberColumn error:', e.message);
   }
 }
@@ -4412,24 +4514,16 @@ async function initializePushNotificationsTables() {
   }
 }
 
-// Start server direct; migraties draaien op de achtergrond (geen block meer bij cold start)
-function startServer() {
+
+
+
+
+// Lokale dev: listen
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
   app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
   });
-  // Migraties asynchroon op achtergrond – blokkeert eerste request niet meer
-  (async () => {
-    try {
-      await ensureProfileImageUrlColumn();
-      await ensureProfileNumberColumn();
-      await initializePushNotificationsTables();
-      console.log('✅ Migraties achtergrond voltooid');
-    } catch (e) {
-      console.error('Migraties achtergrond fout:', e?.message || e);
-    }
-  })();
 }
-startServer();
 
 module.exports = app;
