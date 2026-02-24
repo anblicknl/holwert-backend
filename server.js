@@ -71,7 +71,8 @@ if (!JWT_SECRET) {
 
 // PHP Proxy URL (fallback als direct MySQL niet werkt)
 const PHP_PROXY_URL = process.env.PHP_PROXY_URL || 'https://holwert.appenvloed.com/admin/db-proxy.php';
-const PHP_PROXY_API_KEY = process.env.PHP_PROXY_API_KEY || 'holwert-db-proxy-2026-secure-key-change-in-production';
+const PHP_PROXY_API_KEY = process.env.PHP_PROXY_API_KEY;
+if (!PHP_PROXY_API_KEY) console.warn('⚠️ PHP_PROXY_API_KEY niet geconfigureerd');
 
 // ===== SIMPLE RATE LIMITING (no external deps) =====
 const loginAttempts = new Map();
@@ -141,7 +142,7 @@ async function deleteOldProfileImage(imageUrl) {
     const filePath = match[1];
     const form = new FormData();
     form.append('path', filePath);
-    form.append('secret', process.env.DELETE_SECRET || 'holwert-delete-2026');
+    form.append('secret', process.env.DELETE_SECRET || '');
     await axios.post('https://holwert.appenvloed.com/upload/delete.php', form, {
       headers: { ...form.getHeaders() },
       timeout: 10000,
@@ -165,7 +166,14 @@ setInterval(() => {
 
 // ===== Middleware =====
 app.use(compression()); // Compress responses for faster transfer
-app.use(cors());
+app.use(cors({
+  origin: [
+    'https://holwert.appenvloed.com',
+    /^https?:\/\/localhost(:\d+)?$/,
+    /^exp:\/\//,
+  ],
+  credentials: true
+}));
 app.use(express.json({ limit: '50mb' })); // Verhoogd voor afbeelding uploads
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
@@ -456,7 +464,7 @@ app.get('/api/setup-admin', async (req, res) => {
           role: 'admin' 
         },
         JWT_SECRET,
-        { expiresIn: '7d' }
+        { expiresIn: '24h' }
       );
       
       res.json({ 
@@ -489,7 +497,7 @@ app.get('/api/setup-admin', async (req, res) => {
           role: 'admin' 
         },
         JWT_SECRET,
-        { expiresIn: '7d' }
+        { expiresIn: '24h' }
       );
       
       res.json({ 
@@ -630,7 +638,7 @@ const authenticateToken = (req, res, next) => {
 const requireAdmin = (req, res, next) => {
   const roleRaw = req.user && req.user.role;
   const role = typeof roleRaw === 'string' ? roleRaw.toLowerCase() : undefined;
-  const allowed = ['admin', 'superadmin', 'editor', 'user'];
+  const allowed = ['admin', 'superadmin', 'editor'];
   if (!role || !allowed.includes(role)) {
     return res.status(403).json({ error: 'Admin privileges required' });
   }
@@ -1901,7 +1909,7 @@ app.post('/api/auth/login', loginRateLimiter, async (req, res) => {
         role: user.role 
       },
       JWT_SECRET,
-      { expiresIn: '7d' }
+      { expiresIn: '24h' }
     );
 
     // Return success response (profile_picture null zolang kolom niet bestaat)
@@ -2002,7 +2010,7 @@ const handleRegister = async (req, res) => {
     const token = jwt.sign(
       { userId: user.id, email: user.email, role: user.role },
       JWT_SECRET,
-      { expiresIn: '7d' }
+      { expiresIn: '24h' }
     );
 
     res.status(201).json({
@@ -2706,7 +2714,7 @@ app.get('/api/admin/organizations/:id', authenticateToken, async (req, res) => {
     // Check admin privileges
     const roleRaw = req.user && req.user.role;
     const role = typeof roleRaw === 'string' ? roleRaw.toLowerCase() : undefined;
-    const allowed = ['admin', 'superadmin', 'editor', 'user'];
+    const allowed = ['admin', 'superadmin', 'editor'];
     if (!role || !allowed.includes(role)) {
       console.log(`[GET /api/admin/organizations/:id] Access denied for role: ${role}`);
       return res.status(403).json({ error: 'Admin privileges required' });
