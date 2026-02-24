@@ -187,6 +187,7 @@ function getMigrationsReady() {
         await ensureProfileNumberColumn();
         await ensurePrivacyStatementColumn();
         await ensurePracticalInfoTable();
+        await ensureContentPagesTable();
         await initializePushNotificationsTables();
         console.log('✅ Migraties voltooid');
       } catch (e) {
@@ -3566,6 +3567,52 @@ app.delete('/api/admin/practical-info/:id', authenticateToken, requireAdmin, asy
   }
 });
 
+// ── Content Pages (admin) ────────────────────────────────────
+app.get('/api/admin/content-pages', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const result = await executeQuery('SELECT * FROM content_pages ORDER BY slug ASC');
+    res.json({ pages: result.rows || [] });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to get content pages', message: error.message });
+  }
+});
+
+app.put('/api/admin/content-pages/:slug', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { slug } = req.params;
+    const { title, content } = req.body;
+    if (!title) return res.status(400).json({ error: 'Title is required' });
+    const existing = await executeQuery('SELECT id FROM content_pages WHERE slug = ?', [slug]);
+    if (existing.rows && existing.rows.length > 0) {
+      await executeQuery(
+        'UPDATE content_pages SET title = ?, content = ? WHERE slug = ?',
+        [title, content || '', slug]
+      );
+    } else {
+      await executeInsert(
+        'INSERT INTO content_pages (slug, title, content) VALUES (?, ?, ?)',
+        [slug, title, content || '']
+      );
+    }
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update content page', message: error.message });
+  }
+});
+
+// ── Content Pages (public) ───────────────────────────────────
+app.get('/api/app/content-pages/:slug', async (req, res) => {
+  try {
+    const { slug } = req.params;
+    const result = await executeQuery('SELECT slug, title, content, updated_at FROM content_pages WHERE slug = ?', [slug]);
+    if (!result.rows || result.rows.length === 0) {
+      return res.status(404).json({ error: 'Page not found' });
+    }
+    res.json({ page: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to get content page', message: error.message });
+  }
+});
 
 // Get all users (admin)
 app.get('/api/admin/users', authenticateToken, async (req, res) => {
@@ -4522,6 +4569,35 @@ async function ensurePracticalInfoTable() {
     )`);
   } catch (e) {
     console.error('ensurePracticalInfoTable error:', e.message);
+  }
+}
+
+async function ensureContentPagesTable() {
+  try {
+    await executeQuery(`CREATE TABLE IF NOT EXISTS content_pages (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      slug VARCHAR(100) NOT NULL UNIQUE,
+      title VARCHAR(255) NOT NULL,
+      content LONGTEXT,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )`);
+    // Seed default pages if they don't exist
+    const existing = await executeQuery('SELECT slug FROM content_pages');
+    const slugs = (existing.rows || []).map(r => r.slug);
+    if (!slugs.includes('privacy')) {
+      await executeInsert(
+        "INSERT INTO content_pages (slug, title, content) VALUES (?, ?, ?)",
+        ['privacy', 'Privacybeleid', '<h2>Privacybeleid Dorpsbelang Holwert</h2><p>Dit privacybeleid wordt binnenkort aangevuld.</p>']
+      );
+    }
+    if (!slugs.includes('terms')) {
+      await executeInsert(
+        "INSERT INTO content_pages (slug, title, content) VALUES (?, ?, ?)",
+        ['terms', 'Gebruiksvoorwaarden', '<h2>Gebruiksvoorwaarden Dorpsapp Holwert</h2><p>Deze voorwaarden worden binnenkort aangevuld.</p>']
+      );
+    }
+  } catch (e) {
+    console.error('ensureContentPagesTable error:', e.message);
   }
 }
 

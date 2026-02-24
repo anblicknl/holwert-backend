@@ -65,6 +65,14 @@ class HolwertAdmin {
             });
         }
 
+        // Add Practical Info button
+        const addPracticalBtn = document.getElementById('addPracticalBtn');
+        if (addPracticalBtn) {
+            addPracticalBtn.addEventListener('click', () => {
+                this.showPracticalModal(null);
+            });
+        }
+
         // Users section tabs (Dorpsbewoners / Organisaties)
         document.querySelectorAll('.users-tab').forEach(tab => {
             tab.addEventListener('click', (e) => {
@@ -408,8 +416,8 @@ class HolwertAdmin {
             case 'events':
                 this.loadEvents();
                 break;
-            case 'found-lost':
-                this.loadFoundLost();
+            case 'practical':
+                this.loadPracticalInfo();
                 break;
             case 'moderation':
                 this.loadModeration();
@@ -3831,15 +3839,450 @@ class HolwertAdmin {
         document.body.appendChild(modalOverlay);
     }
 
-    async loadFoundLost() {
-        const container = document.getElementById('foundLostContent');
+    async loadPracticalInfo() {
+        const container = document.getElementById('practicalContent');
+        const tbody = document.getElementById('practicalTableBody');
+        if (!tbody) return;
+
+        this.showLoader('practicalContent', 'Praktische info laden...');
+        try {
+            const res = await fetch(`${this.apiBaseUrl}/admin/practical-info`, {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+
+            if (!res.ok) throw new Error('Server error ' + res.status);
+            const data = await res.json();
+            const items = data.items || [];
+
+            if (items.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="empty-message">Nog geen items. Klik "Nieuw item" om te beginnen.</td></tr>';
+            } else {
+                const typeLabels = { info: 'Info', schedule: 'Schema', link: 'Link', phone: 'Telefoon' };
+                tbody.innerHTML = items.map(item => `
+                    <tr>
+                        <td>${item.sort_order || 0}</td>
+                        <td><i class="fas fa-${this.ionToFa(item.icon)}"></i> ${item.icon || '-'}</td>
+                        <td>
+                            <strong>${this.escapeHtml(item.title)}</strong>
+                            ${item.subtitle ? '<br><small class="text-muted">' + this.escapeHtml(item.subtitle) + '</small>' : ''}
+                        </td>
+                        <td><span class="badge badge-${item.type || 'info'}">${typeLabels[item.type] || item.type}</span></td>
+                        <td>${item.is_active ? '<span class="status-active">Actief</span>' : '<span class="status-inactive">Inactief</span>'}</td>
+                        <td>
+                            <button class="btn btn-sm btn-secondary" onclick="admin.showPracticalModal(${item.id})" title="Bewerken">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button class="btn btn-sm btn-danger" onclick="admin.deletePracticalItem(${item.id}, '${this.escapeHtml(item.title)}')" title="Verwijderen">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `).join('');
+            }
+            this.hideLoader('practicalContent');
+        } catch (error) {
+            console.error('Error loading practical info:', error);
+            tbody.innerHTML = '<tr><td colspan="6" class="empty-message">Fout bij laden: ' + error.message + '</td></tr>';
+            this.hideLoader('practicalContent');
+        }
+    }
+
+    ionToFa(ionIcon) {
+        const map = {
+            'information-circle-outline': 'info-circle',
+            'call-outline': 'phone',
+            'link-outline': 'link',
+            'calendar-outline': 'calendar',
+            'trash-outline': 'trash',
+            'map-outline': 'map-marker-alt',
+            'bus-outline': 'bus',
+            'medkit-outline': 'medkit',
+            'school-outline': 'graduation-cap',
+            'restaurant-outline': 'utensils',
+            'cart-outline': 'shopping-cart',
+            'home-outline': 'home',
+            'people-outline': 'users',
+            'newspaper-outline': 'newspaper',
+            'settings-outline': 'cog',
+            'alert-circle-outline': 'exclamation-circle',
+            'time-outline': 'clock',
+            'location-outline': 'map-pin',
+        };
+        return map[ionIcon] || 'circle';
+    }
+
+    escapeHtml(str) {
+        if (!str) return '';
+        return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+    }
+
+    async showPracticalModal(itemId) {
+        let item = null;
+        if (itemId) {
+            try {
+                const res = await fetch(`${this.apiBaseUrl}/admin/practical-info`, {
+                    headers: { 'Authorization': `Bearer ${this.token}` }
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    item = (data.items || []).find(i => i.id === itemId);
+                }
+            } catch (e) {
+                console.error('Error fetching item for edit:', e);
+            }
+        }
+
+        const isEdit = !!item;
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.style.display = 'flex';
+        overlay.innerHTML = `
+            <div class="modal-content large">
+                <div class="modal-header">
+                    <h3>${isEdit ? 'Item bewerken' : 'Nieuw praktisch item'}</h3>
+                    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <form id="practicalForm" class="event-form">
+                        <input type="hidden" id="practicalId" value="${isEdit ? item.id : ''}">
+
+                        <div class="form-row">
+                            <div class="form-group" style="flex:2">
+                                <label for="practicalTitle">Titel *</label>
+                                <input type="text" id="practicalTitle" placeholder="Bijv. Huisarts" required value="${isEdit ? this.escapeHtml(item.title) : ''}">
+                            </div>
+                            <div class="form-group" style="flex:1">
+                                <label for="practicalSortOrder">Volgorde</label>
+                                <input type="number" id="practicalSortOrder" placeholder="0" value="${isEdit ? (item.sort_order || 0) : 0}">
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="practicalSubtitle">Ondertitel</label>
+                            <input type="text" id="practicalSubtitle" placeholder="Bijv. Praktijk Holwerd" value="${isEdit && item.subtitle ? this.escapeHtml(item.subtitle) : ''}">
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="practicalType">Type</label>
+                                <select id="practicalType">
+                                    <option value="info" ${isEdit && item.type === 'info' ? 'selected' : ''}>Info (alleen tekst)</option>
+                                    <option value="link" ${isEdit && item.type === 'link' ? 'selected' : ''}>Link (opent URL)</option>
+                                    <option value="phone" ${isEdit && item.type === 'phone' ? 'selected' : ''}>Telefoon (belt nummer)</option>
+                                    <option value="schedule" ${isEdit && item.type === 'schedule' ? 'selected' : ''}>Schema (tekst)</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="practicalIcon">Icoon (Ionicons naam)</label>
+                                <input type="text" id="practicalIcon" placeholder="information-circle-outline" value="${isEdit ? (item.icon || 'information-circle-outline') : 'information-circle-outline'}">
+                                <small class="form-hint">Bijv: call-outline, link-outline, map-outline, medkit-outline, bus-outline</small>
+                            </div>
+                        </div>
+
+                        <div class="form-group" id="practicalUrlGroup">
+                            <label for="practicalUrl" id="practicalUrlLabel">URL / Telefoonnummer</label>
+                            <input type="text" id="practicalUrl" placeholder="https://... of 0512-123456" value="${isEdit && item.url ? this.escapeHtml(item.url) : ''}">
+                            <small class="form-hint">Bij type "Link": volledige URL. Bij type "Telefoon": telefoonnummer.</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="practicalContent">Inhoud / Extra tekst</label>
+                            <textarea id="practicalContent" rows="4" placeholder="Optionele extra informatie...">${isEdit && item.content ? this.escapeHtml(item.content) : ''}</textarea>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="practicalActive" ${!isEdit || item.is_active ? 'checked' : ''}>
+                                <span>Actief (zichtbaar in de app)</span>
+                            </label>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">
+                        Annuleren
+                    </button>
+                    <button class="btn btn-primary" onclick="admin.savePracticalItem()">
+                        ${isEdit ? 'Bijwerken' : 'Toevoegen'}
+                    </button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+    }
+
+    async savePracticalItem() {
+        const id = document.getElementById('practicalId').value;
+        const title = document.getElementById('practicalTitle').value.trim();
+        const subtitle = document.getElementById('practicalSubtitle').value.trim();
+        const type = document.getElementById('practicalType').value;
+        const icon = document.getElementById('practicalIcon').value.trim() || 'information-circle-outline';
+        const url = document.getElementById('practicalUrl').value.trim();
+        const content = document.getElementById('practicalContent').value.trim();
+        const sort_order = parseInt(document.getElementById('practicalSortOrder').value) || 0;
+        const is_active = document.getElementById('practicalActive').checked;
+
+        if (!title) {
+            this.showNotification('Titel is verplicht', 'error');
+            return;
+        }
+
+        const payload = { title, subtitle, icon, content, type, url, sort_order, is_active };
+
+        try {
+            this.showLoader(null, 'Opslaan...');
+            const isEdit = !!id;
+            const endpoint = isEdit
+                ? `${this.apiBaseUrl}/admin/practical-info/${id}`
+                : `${this.apiBaseUrl}/admin/practical-info`;
+
+            const res = await fetch(endpoint, {
+                method: isEdit ? 'PUT' : 'POST',
+                headers: {
+                    'Authorization': `Bearer ${this.token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
+
+            this.hideLoader();
+
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.message || err.error || 'Server error');
+            }
+
+            const modal = document.querySelector('.modal-overlay');
+            if (modal) modal.remove();
+
+            this.showNotification(isEdit ? 'Item bijgewerkt!' : 'Item toegevoegd!', 'success');
+            this.loadPracticalInfo();
+        } catch (error) {
+            this.hideLoader();
+            this.showNotification('Fout bij opslaan: ' + error.message, 'error');
+        }
+    }
+
+    async deletePracticalItem(id, title) {
+        if (!confirm(`Weet je zeker dat je "${title}" wilt verwijderen?`)) return;
+
+        try {
+            this.showLoader(null, 'Verwijderen...');
+            const res = await fetch(`${this.apiBaseUrl}/admin/practical-info/${id}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            this.hideLoader();
+
+            if (!res.ok) throw new Error('Server error ' + res.status);
+
+            this.showNotification('Item verwijderd', 'success');
+            this.loadPracticalInfo();
+        } catch (error) {
+            this.hideLoader();
+            this.showNotification('Fout bij verwijderen: ' + error.message, 'error');
+        }
+    }
+
+    async loadContentPages() {
+        const container = document.getElementById('contentPagesContainer');
         if (!container) return;
-        this.showLoader('foundLostContent', 'Gevonden/Verloren laden...');
-        // Simulate loading for consistency
-        setTimeout(() => {
-            container.innerHTML = '<p class="text-muted">Gevonden/Verloren sectie - Wordt geïmplementeerd</p>';
-            this.hideLoader('foundLostContent');
-        }, 500);
+
+        this.showLoader('contentPagesContainer', 'Content pagina\'s laden...');
+        try {
+            const res = await fetch(`${this.apiBaseUrl}/admin/content-pages`, {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+
+            if (!res.ok) throw new Error('Server error ' + res.status);
+            const data = await res.json();
+            const pages = data.pages || [];
+
+            const slugLabels = {
+                'privacy': { icon: 'shield-alt', label: 'Privacybeleid' },
+                'terms': { icon: 'file-contract', label: 'Gebruiksvoorwaarden' }
+            };
+
+            if (pages.length === 0) {
+                container.innerHTML = '<p class="text-muted">Nog geen content pagina\'s gevonden. Ze worden automatisch aangemaakt bij de eerste keer laden.</p>';
+            } else {
+                container.innerHTML = pages.map(page => {
+                    const meta = slugLabels[page.slug] || { icon: 'file-alt', label: page.title };
+                    const updatedAt = page.updated_at ? new Date(page.updated_at).toLocaleDateString('nl-NL', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'onbekend';
+                    return `
+                        <div class="content-page-card" style="background:#fff; border-radius:12px; padding:24px; margin-bottom:20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                                <div>
+                                    <h3 style="margin:0; font-size:1.1rem;">
+                                        <i class="fas fa-${meta.icon}" style="color:#3B82F6; margin-right:8px;"></i>
+                                        ${this.escapeHtml(page.title)}
+                                    </h3>
+                                    <small style="color:#888;">Slug: ${page.slug} &bull; Laatst bijgewerkt: ${updatedAt}</small>
+                                </div>
+                                <button class="btn btn-primary btn-sm" onclick="admin.editContentPage('${page.slug}')">
+                                    <i class="fas fa-edit"></i> Bewerken
+                                </button>
+                            </div>
+                            <div class="content-preview" style="max-height:150px; overflow:hidden; border:1px solid #eee; border-radius:8px; padding:12px; font-size:0.85rem; color:#555; position:relative;">
+                                ${page.content || '<em>Nog geen inhoud</em>'}
+                                <div style="position:absolute; bottom:0; left:0; right:0; height:40px; background:linear-gradient(transparent, white);"></div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+            this.hideLoader('contentPagesContainer');
+        } catch (error) {
+            console.error('Error loading content pages:', error);
+            container.innerHTML = '<p class="text-muted">Fout bij laden: ' + error.message + '</p>';
+            this.hideLoader('contentPagesContainer');
+        }
+    }
+
+    async editContentPage(slug) {
+        let page = null;
+        try {
+            const res = await fetch(`${this.apiBaseUrl}/admin/content-pages`, {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            if (res.ok) {
+                const data = await res.json();
+                page = (data.pages || []).find(p => p.slug === slug);
+            }
+        } catch (e) {
+            console.error('Error fetching content page:', e);
+        }
+
+        if (!page) {
+            this.showNotification('Pagina niet gevonden', 'error');
+            return;
+        }
+
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.style.display = 'flex';
+        overlay.innerHTML = `
+            <div class="modal-content large" style="max-width:900px; max-height:90vh;">
+                <div class="modal-header">
+                    <h3><i class="fas fa-edit"></i> ${this.escapeHtml(page.title)} bewerken</h3>
+                    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="modal-body" style="overflow-y:auto;">
+                    <form id="contentPageForm" class="event-form">
+                        <input type="hidden" id="cpSlug" value="${page.slug}">
+
+                        <div class="form-group">
+                            <label for="cpTitle">Titel</label>
+                            <input type="text" id="cpTitle" value="${this.escapeHtml(page.title)}" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="cpContent">Inhoud (HTML)</label>
+                            <div style="display:flex; gap:8px; margin-bottom:8px;">
+                                <button type="button" class="btn btn-secondary btn-sm" onclick="admin.insertHtmlTag('h2')">H2</button>
+                                <button type="button" class="btn btn-secondary btn-sm" onclick="admin.insertHtmlTag('h3')">H3</button>
+                                <button type="button" class="btn btn-secondary btn-sm" onclick="admin.insertHtmlTag('p')">Alinea</button>
+                                <button type="button" class="btn btn-secondary btn-sm" onclick="admin.insertHtmlTag('strong')">Vet</button>
+                                <button type="button" class="btn btn-secondary btn-sm" onclick="admin.insertHtmlTag('ul')">Lijst</button>
+                                <button type="button" class="btn btn-secondary btn-sm" onclick="admin.insertHtmlTag('a')">Link</button>
+                            </div>
+                            <textarea id="cpContent" rows="20" style="font-family:monospace; font-size:0.85rem; line-height:1.5;">${this.escapeHtml(page.content || '')}</textarea>
+                        </div>
+
+                        <details style="margin-top:8px;">
+                            <summary style="cursor:pointer; color:#666; font-size:0.85rem;">Voorbeeld weergave</summary>
+                            <div id="cpPreview" style="border:1px solid #ddd; border-radius:8px; padding:16px; margin-top:8px; max-height:300px; overflow-y:auto; font-size:0.9rem; line-height:1.6;"></div>
+                        </details>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">
+                        Annuleren
+                    </button>
+                    <button class="btn btn-primary" onclick="admin.saveContentPage()">
+                        <i class="fas fa-save"></i> Opslaan
+                    </button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+
+        const textarea = document.getElementById('cpContent');
+        const preview = document.getElementById('cpPreview');
+        if (textarea && preview) {
+            preview.innerHTML = textarea.value;
+            textarea.addEventListener('input', () => {
+                preview.innerHTML = textarea.value;
+            });
+        }
+    }
+
+    insertHtmlTag(tag) {
+        const textarea = document.getElementById('cpContent');
+        if (!textarea) return;
+
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        const selected = textarea.value.substring(start, end);
+        let insertion = '';
+
+        switch (tag) {
+            case 'h2': insertion = `<h2>${selected || 'Koptekst'}</h2>`; break;
+            case 'h3': insertion = `<h3>${selected || 'Subkop'}</h3>`; break;
+            case 'p': insertion = `<p>${selected || 'Tekst hier...'}</p>`; break;
+            case 'strong': insertion = `<strong>${selected || 'vette tekst'}</strong>`; break;
+            case 'ul': insertion = `<ul>\n  <li>${selected || 'Item 1'}</li>\n  <li>Item 2</li>\n</ul>`; break;
+            case 'a': insertion = `<a href="https://">${selected || 'linktekst'}</a>`; break;
+            default: insertion = `<${tag}>${selected}</${tag}>`;
+        }
+
+        textarea.value = textarea.value.substring(0, start) + insertion + textarea.value.substring(end);
+        textarea.focus();
+        textarea.selectionStart = textarea.selectionEnd = start + insertion.length;
+        textarea.dispatchEvent(new Event('input'));
+    }
+
+    async saveContentPage() {
+        const slug = document.getElementById('cpSlug').value;
+        const title = document.getElementById('cpTitle').value.trim();
+        const contentVal = document.getElementById('cpContent').value;
+
+        if (!title) {
+            this.showNotification('Titel is verplicht', 'error');
+            return;
+        }
+
+        try {
+            this.showLoader(null, 'Opslaan...');
+            const res = await fetch(`${this.apiBaseUrl}/admin/content-pages/${slug}`, {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `Bearer ${this.token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ title, content: contentVal })
+            });
+
+            this.hideLoader();
+
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.message || err.error || 'Server error');
+            }
+
+            const modal = document.querySelector('.modal-overlay');
+            if (modal) modal.remove();
+
+            this.showNotification('Pagina opgeslagen!', 'success');
+            this.loadContentPages();
+        } catch (error) {
+            this.hideLoader();
+            this.showNotification('Fout bij opslaan: ' + error.message, 'error');
+        }
     }
 
     async loadModeration() {

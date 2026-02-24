@@ -795,3 +795,64 @@ input, select, textarea {
     }
 }
 
+/* Practical Info Styles */
+.status-active {
+    color: #28a745;
+    font-weight: 600;
+}
+
+.status-inactive {
+    color: #999;
+    font-weight: 500;
+}
+
+.badge {
+    display: inline-block;
+    padding: 0.2rem 0.6rem;
+    border-radius: 10px;
+    font-size: 0.72rem;
+    font-weight: 500;
+    text-transform: capitalize;
+}
+
+.badge-info {
+    background: #e3f2fd;
+    color: #1976d2;
+}
+
+.badge-link {
+    background: #e8f5e9;
+    color: #388e3c;
+}
+
+.badge-phone {
+    background: #fff3e0;
+    color: #f57c00;
+}
+
+.badge-schedule {
+    background: #f3e5f5;
+    color: #7b1fa2;
+}
+
+.btn-sm {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.8rem;
+    border-radius: 4px;
+}
+
+.form-row {
+    display: flex;
+    gap: 1rem;
+}
+
+.form-row .form-group {
+    flex: 1;
+}
+
+.form-hint {
+    display: block;
+    color: #888;
+    font-size: 0.75rem;
+    margin-top: 0.25rem;
+}

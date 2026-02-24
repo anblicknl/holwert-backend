@@ -123,6 +123,7 @@ $allowedAlterPatterns = [
     'CREATE TABLE IF NOT EXISTS NOTIFICATION_HISTORY',
     'CREATE TABLE IF NOT EXISTS PRACTICAL_INFO',
     'ALTER TABLE ORGANIZATIONS ADD COLUMN PRIVACY_STATEMENT',
+    'CREATE TABLE IF NOT EXISTS CONTENT_PAGES',
 ];
 $isWhitelistedMaintenance = false;
 foreach ($allowedAlterPatterns as $pattern) {
@@ -173,6 +174,7 @@ if (strpos($query, ';') !== false) {
 $allowedTables = [
     'users', 'organizations', 'news', 'events', 'bookmarks', 'follows',
     'push_tokens', 'found_lost', 'notification_history', 'practical_info',
+    'content_pages',
     'information_schema'  // voor schema-checks/migraties
 ];
 
