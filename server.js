@@ -3571,7 +3571,27 @@ app.delete('/api/admin/practical-info/:id', authenticateToken, requireAdmin, asy
 app.get('/api/admin/content-pages', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const result = await executeQuery('SELECT * FROM content_pages ORDER BY slug ASC');
-    res.json({ pages: result.rows || [] });
+    let pages = result.rows || [];
+
+    // Als er nog geen pagina's zijn, toon in ieder geval de twee standaard-pagina's
+    if (!pages || pages.length === 0) {
+      pages = [
+        {
+          slug: 'privacy',
+          title: 'Privacybeleid (app)',
+          content: '',
+          updated_at: null,
+        },
+        {
+          slug: 'terms',
+          title: 'Gebruiksvoorwaarden (app)',
+          content: '',
+          updated_at: null,
+        },
+      ];
+    }
+
+    res.json({ pages });
   } catch (error) {
     res.status(500).json({ error: 'Failed to get content pages', message: error.message });
   }

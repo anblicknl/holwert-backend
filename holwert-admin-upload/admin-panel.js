@@ -1193,6 +1193,9 @@ class HolwertAdmin {
             </div>
         `;
         document.body.appendChild(overlay);
+        // Activeer juiste icoon-knop op basis van huidige waarde
+        const initialIcon = isEdit && item && item.icon ? item.icon : 'information-circle-outline';
+        this.setPracticalIcon(initialIcon);
     }
 
     async saveOrganization() {
@@ -3840,7 +3843,7 @@ class HolwertAdmin {
     }
 
     async loadPracticalInfo() {
-        const container = document.getElementById('practicalContent');
+        const container = document.getElementById('practicalItemContent');
         const tbody = document.getElementById('practicalTableBody');
         if (!tbody) return;
 
@@ -3975,9 +3978,61 @@ class HolwertAdmin {
                                 </select>
                             </div>
                             <div class="form-group">
-                                <label for="practicalIcon">Icoon (Ionicons naam)</label>
-                                <input type="text" id="practicalIcon" placeholder="information-circle-outline" value="${isEdit ? (item.icon || 'information-circle-outline') : 'information-circle-outline'}">
-                                <small class="form-hint">Bijv: call-outline, link-outline, map-outline, medkit-outline, bus-outline</small>
+                                <label for="practicalIcon">Icoon</label>
+                                <input type="text" id="practicalIcon" placeholder="information-circle-outline" value="${isEdit ? (item.icon || 'information-circle-outline') : 'information-circle-outline'}" style="margin-bottom:8px;">
+                                <div class="icon-choices">
+                                    <!-- Basis -->
+                                    <button type="button" class="icon-choice" data-icon="information-circle-outline" onclick="admin.setPracticalIcon('information-circle-outline')" title="Info">
+                                        <i class="fas fa-info-circle"></i>
+                                    </button>
+                                    <button type="button" class="icon-choice" data-icon="alert-circle-outline" onclick="admin.setPracticalIcon('alert-circle-outline')" title="Let op / melding">
+                                        <i class="fas fa-exclamation-circle"></i>
+                                    </button>
+                                    <!-- Contact -->
+                                    <button type="button" class="icon-choice" data-icon="call-outline" onclick="admin.setPracticalIcon('call-outline')" title="Telefoon">
+                                        <i class="fas fa-phone"></i>
+                                    </button>
+                                    <button type="button" class="icon-choice" data-icon="link-outline" onclick="admin.setPracticalIcon('link-outline')" title="Website / link">
+                                        <i class="fas fa-link"></i>
+                                    </button>
+                                    <button type="button" class="icon-choice" data-icon="mail-outline" onclick="admin.setPracticalIcon('mail-outline')" title="E-mail">
+                                        <i class="fas fa-envelope"></i>
+                                    </button>
+                                    <!-- Locatie & vervoer -->
+                                    <button type="button" class="icon-choice" data-icon="map-outline" onclick="admin.setPracticalIcon('map-outline')" title="Locatie / route">
+                                        <i class="fas fa-map-marker-alt"></i>
+                                    </button>
+                                    <button type="button" class="icon-choice" data-icon="bus-outline" onclick="admin.setPracticalIcon('bus-outline')" title="Vervoer / bus">
+                                        <i class="fas fa-bus"></i>
+                                    </button>
+                                    <!-- Voorzieningen -->
+                                    <button type="button" class="icon-choice" data-icon="home-outline" onclick="admin.setPracticalIcon('home-outline')" title="Gebouw / locatie">
+                                        <i class="fas fa-home"></i>
+                                    </button>
+                                    <button type="button" class="icon-choice" data-icon="medkit-outline" onclick="admin.setPracticalIcon('medkit-outline')" title="Zorg / EHBO">
+                                        <i class="fas fa-briefcase-medical"></i>
+                                    </button>
+                                    <button type="button" class="icon-choice" data-icon="school-outline" onclick="admin.setPracticalIcon('school-outline')" title="School / onderwijs">
+                                        <i class="fas fa-school"></i>
+                                    </button>
+                                    <button type="button" class="icon-choice" data-icon="restaurant-outline" onclick="admin.setPracticalIcon('restaurant-outline')" title="Horeca / eten">
+                                        <i class="fas fa-utensils"></i>
+                                    </button>
+                                    <button type="button" class="icon-choice" data-icon="cart-outline" onclick="admin.setPracticalIcon('cart-outline')" title="Winkels / boodschappen">
+                                        <i class="fas fa-shopping-cart"></i>
+                                    </button>
+                                    <!-- Mensen & activiteiten -->
+                                    <button type="button" class="icon-choice" data-icon="people-outline" onclick="admin.setPracticalIcon('people-outline')" title="Groep / vereniging">
+                                        <i class="fas fa-users"></i>
+                                    </button>
+                                    <button type="button" class="icon-choice" data-icon="calendar-outline" onclick="admin.setPracticalIcon('calendar-outline')" title="Agenda / tijden">
+                                        <i class="fas fa-calendar-alt"></i>
+                                    </button>
+                                    <button type="button" class="icon-choice" data-icon="newspaper-outline" onclick="admin.setPracticalIcon('newspaper-outline')" title="Nieuws / info">
+                                        <i class="fas fa-newspaper"></i>
+                                    </button>
+                                </div>
+                                <small class="form-hint">Kies een icoon of vul handmatig een Ionicons naam in (bijv. information-circle-outline).</small>
                             </div>
                         </div>
 
@@ -3988,8 +4043,8 @@ class HolwertAdmin {
                         </div>
 
                         <div class="form-group">
-                            <label for="practicalContent">Inhoud / Extra tekst</label>
-                            <textarea id="practicalContent" rows="4" placeholder="Optionele extra informatie...">${isEdit && item.content ? this.escapeHtml(item.content) : ''}</textarea>
+                            <label for="practicalItemContent">Inhoud / Extra tekst</label>
+                            <textarea id="practicalItemContent" rows="4" placeholder="Optionele extra informatie...">${isEdit && item.content ? this.escapeHtml(item.content) : ''}</textarea>
                         </div>
 
                         <div class="form-group">
@@ -4013,6 +4068,19 @@ class HolwertAdmin {
         document.body.appendChild(overlay);
     }
 
+    setPracticalIcon(icon) {
+        const input = document.getElementById('practicalIcon');
+        if (input) {
+            input.value = icon;
+        }
+        const buttons = document.querySelectorAll('.icon-choice');
+        buttons.forEach(btn => btn.classList.remove('selected'));
+        const active = document.querySelector(`.icon-choice[data-icon=\"${icon}\"]`);
+        if (active) {
+            active.classList.add('selected');
+        }
+    }
+
     async savePracticalItem() {
         const id = document.getElementById('practicalId').value;
         const title = document.getElementById('practicalTitle').value.trim();
@@ -4020,7 +4088,7 @@ class HolwertAdmin {
         const type = document.getElementById('practicalType').value;
         const icon = document.getElementById('practicalIcon').value.trim() || 'information-circle-outline';
         const url = document.getElementById('practicalUrl').value.trim();
-        const content = document.getElementById('practicalContent').value.trim();
+        const content = document.getElementById('practicalItemContent').value.trim();
         const sort_order = parseInt(document.getElementById('practicalSortOrder').value) || 0;
         const is_active = document.getElementById('practicalActive').checked;
 
@@ -4403,6 +4471,7 @@ class HolwertAdmin {
     showUserModal(user) {
         const modal = document.createElement('div');
         modal.className = 'modal-overlay';
+        modal.style.display = 'flex';
         modal.innerHTML = `
             <div class="modal-content">
                 <div class="modal-header">
@@ -4577,6 +4646,7 @@ class HolwertAdmin {
     showEditUserModal(user) {
         const modal = document.createElement('div');
         modal.className = 'modal-overlay';
+        modal.style.display = 'flex';
         modal.innerHTML = `
             <div class="modal-content modal-large">
                 <div class="modal-header">

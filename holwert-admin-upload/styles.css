@@ -856,3 +856,233 @@ input, select, textarea {
     font-size: 0.75rem;
     margin-top: 0.25rem;
 }
+
+/* User Avatar Styles */
+.user-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.user-avatar .avatar-img {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    object-fit: cover;
+    display: block;
+}
+
+.avatar-placeholder {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: #e2e8f0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #94a3b8;
+    font-size: 18px;
+}
+
+/* Desktop/Mobile view toggle */
+.mobile-view {
+    display: none;
+}
+
+.desktop-view {
+    display: block;
+}
+
+@media (max-width: 768px) {
+    .desktop-view {
+        display: none;
+    }
+    .mobile-view {
+        display: block;
+    }
+}
+
+/* User cards (mobile) */
+.user-card {
+    background: #fff;
+    border-radius: 10px;
+    padding: 14px;
+    margin-bottom: 10px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.user-card-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.user-badges {
+    display: flex;
+    gap: 6px;
+    margin-top: 4px;
+}
+
+/* Profile image preview in user edit modal */
+.profile-image-section .preview-img,
+.profile-image-section img,
+.current-image-preview img {
+    max-width: 80px;
+    max-height: 80px;
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    object-fit: cover;
+    display: block;
+    margin: 0;
+}
+
+.current-image-preview {
+    margin-top: 6px;
+}
+
+.preview-placeholder {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: #e2e8f0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: #94a3b8;
+    font-size: 24px;
+    gap: 4px;
+}
+
+.preview-placeholder span {
+    font-size: 11px;
+}
+
+.profile-image-section {
+    display: flex;
+    gap: 24px;
+    align-items: flex-start;
+}
+
+.image-options {
+    flex: 1;
+}
+
+.option-tabs {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.tab-pane {
+    display: none;
+}
+
+.tab-pane.active {
+    display: block;
+}
+
+.profile-image-section .upload-preview img {
+    max-width: 80px;
+    max-height: 80px;
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+/* User profile modal - view */
+.user-profile {
+    display: flex;
+    gap: 24px;
+    align-items: flex-start;
+}
+
+.profile-avatar {
+    flex-shrink: 0;
+}
+
+.profile-avatar img,
+.profile-avatar .profile-img {
+    width: 90px;
+    height: 90px;
+    border-radius: 50%;
+    object-fit: cover;
+    display: block;
+    border: 2px solid #e2e8f0;
+}
+
+.profile-placeholder {
+    width: 90px;
+    height: 90px;
+    border-radius: 50%;
+    background: #e2e8f0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #94a3b8;
+    font-size: 32px;
+}
+
+.profile-info h4 {
+    margin: 0 0 12px 0;
+    font-size: 1.2rem;
+}
+
+.detail-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 6px;
+    font-size: 0.9rem;
+}
+
+.detail-row label {
+    font-weight: 600;
+    color: #555;
+    min-width: 100px;
+}
+
+/* Icon picker for Practical items */
+.icon-choices {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.icon-choice {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    border: 1px solid #e2e8f0;
+    background: #f8fafc;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: #64748b;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.05s ease;
+}
+
+.icon-choice i {
+    font-size: 14px;
+}
+
+.icon-choice:hover {
+    background: #e0f2fe;
+    border-color: #38bdf8;
+    color: #0369a1;
+}
+
+.icon-choice.selected {
+    background: #2563eb;
+    border-color: #1d4ed8;
+    color: #ffffff;
+    transform: translateY(-1px);
+}
