@@ -130,16 +130,61 @@ if ($isWhitelistedMaintenance) {
 
 // Alleen echt gevaarlijke operaties blokkeren, ongeacht action type
 // INSERT, UPDATE, DELETE zijn toegestaan via hun respectievelijke actions
-$trulyDangerous = ['DROP TABLE', 'DROP DATABASE', 'TRUNCATE TABLE', 'ALTER TABLE', 'CREATE TABLE'];
+$trulyDangerous = ['DROP TABLE', 'DROP DATABASE', 'TRUNCATE TABLE', 'ALTER TABLE', 'CREATE TABLE', 'GRANT ', 'REVOKE '];
 foreach ($trulyDangerous as $dangerous) {
     if (strpos($queryUpper, $dangerous) !== false) {
-        // Alleen ALTER TABLE en CREATE TABLE blokkeren (behalve whitelisted maintenance)
-        if (strpos($dangerous, 'ALTER TABLE') !== false || strpos($dangerous, 'CREATE TABLE') !== false) {
+        // ALTER/CREATE blokkeren (behalve whitelisted maintenance); GRANT/REVOKE altijd blokkeren
+        if (strpos($dangerous, 'ALTER TABLE') !== false || strpos($dangerous, 'CREATE TABLE') !== false
+            || strpos($dangerous, 'GRANT ') !== false || strpos($dangerous, 'REVOKE ') !== false) {
             http_response_code(403);
             echo json_encode(['error' => 'Forbidden - Dangerous query detected: ' . $dangerous]);
             exit;
         }
     }
+}
+
+// SECURITY: Geen multi-statement (alleen één query per request)
+if (strpos($query, ';') !== false) {
+    http_response_code(403);
+    echo json_encode(['error' => 'Forbidden - Multiple statements not allowed']);
+    exit;
+}
+
+// SECURITY: Alleen toegestane tabellen (whitelist)
+$allowedTables = [
+    'users', 'organizations', 'news', 'events', 'bookmarks', 'follows',
+    'push_tokens', 'found_lost', 'notification_history',
+    'information_schema'  // voor schema-checks/migraties
+];
+
+function extractTableNames($sql) {
+    $tables = [];
+    // FROM table, JOIN table, INSERT INTO table, UPDATE table, DELETE FROM table (eventueel met backticks)
+    if (preg_match_all('/(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|FROM|JOIN)\s+`?(\w+)`?/i', $sql, $m)) {
+        foreach ($m[1] as $t) {
+            $t = strtolower($t);
+            if (!in_array($t, $tables)) {
+                $tables[] = $t;
+            }
+        }
+    }
+    return $tables;
+}
+
+function tablesAllowed($sql, $allowedTables) {
+    $found = extractTableNames($sql);
+    foreach ($found as $t) {
+        if (!in_array($t, $allowedTables)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+if (!empty($query) && !tablesAllowed($query, $allowedTables)) {
+    http_response_code(403);
+    echo json_encode(['error' => 'Forbidden - Query references disallowed table(s)']);
+    exit;
 }
 
 try {
@@ -222,6 +267,21 @@ try {
             $queries = $input['queries'] ?? [];
             if (empty($queries) || !is_array($queries)) {
                 throw new Exception('Queries array is required for batch action');
+            }
+            // Zelfde security-checks per batch-query: geen multi-statement, alleen whitelisted tabellen
+            foreach ($queries as $batchQuery) {
+                $q = $batchQuery['query'] ?? '';
+                if (empty($q)) continue;
+                if (strpos($q, ';') !== false) {
+                    http_response_code(403);
+                    echo json_encode(['error' => 'Forbidden - Multiple statements not allowed in batch']);
+                    exit;
+                }
+                if (!tablesAllowed($q, $allowedTables)) {
+                    http_response_code(403);
+                    echo json_encode(['error' => 'Forbidden - Batch query references disallowed table(s)']);
+                    exit;
+                }
             }
             
             $results = [];

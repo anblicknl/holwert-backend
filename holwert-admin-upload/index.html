@@ -144,9 +144,19 @@
             <section id="users" class="content-section">
                 <div class="section-header">
                     <h2><i class="fas fa-users"></i> Gebruikers</h2>
-                    <button id="addUserBtn" class="btn btn-primary">
-                        <i class="fas fa-plus"></i> Nieuwe Gebruiker
-                    </button>
+                    <div class="users-header-actions">
+                        <div class="users-tabs">
+                            <button type="button" class="users-tab active" data-users-tab="dorpsbewoners">
+                                <i class="fas fa-user"></i> Dorpsbewoners
+                            </button>
+                            <button type="button" class="users-tab" data-users-tab="organisaties">
+                                <i class="fas fa-building"></i> Organisaties
+                            </button>
+                        </div>
+                        <button id="addUserBtn" class="btn btn-primary" style="margin-left: auto;">
+                            <i class="fas fa-plus"></i> Nieuwe Gebruiker
+                        </button>
+                    </div>
                 </div>
                 <div id="usersContent">
                     <!-- Users content will be loaded here by JavaScript -->
@@ -321,6 +331,6 @@
         console.log('📅 Timestamp:', new Date().toISOString());
         console.log('🔧 VERSION: IMAGE-PREVIEW-STYLING-FINAL');
     </script>
-    <script src="admin-panel.js?v=1767126100"></script>
+    <script src="admin-panel.js?v=1739289600"></script>
 </body>
 </html>

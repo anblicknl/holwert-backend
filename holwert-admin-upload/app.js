@@ -50,6 +50,14 @@ class HolwertAdmin {
             });
         }
 
+        // Add User button
+        const addUserBtn = document.getElementById('addUserBtn');
+        if (addUserBtn) {
+            addUserBtn.addEventListener('click', () => {
+                this.showCreateUserModal();
+            });
+        }
+
         // Navigation
         const navLinks = document.querySelectorAll('.nav-item');
         navLinks.forEach(link => {
@@ -863,6 +871,94 @@ class HolwertAdmin {
                 `).join('')}
             </div>
         `;
+    }
+
+    showCreateUserModal() {
+        const self = this;
+        const modal = document.createElement('div');
+        modal.className = 'modal-overlay';
+        modal.style.display = 'flex';
+        modal.innerHTML = `
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Nieuwe Dorpsbewoner</h3>
+                    <button type="button" class="modal-close">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <form id="createUserForm" class="edit-form">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="createFirstName">Voornaam *</label>
+                                <input type="text" id="createFirstName" name="first_name" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="createLastName">Achternaam *</label>
+                                <input type="text" id="createLastName" name="last_name" required>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="createEmail">E-mail *</label>
+                            <input type="email" id="createEmail" name="email" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="createPassword">Wachtwoord *</label>
+                            <input type="password" id="createPassword" name="password" required minlength="6">
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-modal-close>Annuleren</button>
+                    <button type="button" class="btn btn-primary" id="createUserSubmitBtn">Aanmaken</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        modal.querySelector('.modal-close').addEventListener('click', () => modal.remove());
+        modal.querySelector('[data-modal-close]').addEventListener('click', () => modal.remove());
+        modal.querySelector('#createUserSubmitBtn').addEventListener('click', function(e) {
+            e.preventDefault();
+            self.saveNewUser();
+        });
+        modal.querySelector('.modal-content').addEventListener('click', (e) => e.stopPropagation());
+        modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+    }
+
+    async saveNewUser() {
+        try {
+            const first_name = document.getElementById('createFirstName')?.value?.trim();
+            const last_name = document.getElementById('createLastName')?.value?.trim();
+            const email = document.getElementById('createEmail')?.value?.trim();
+            const password = document.getElementById('createPassword')?.value;
+            if (!first_name || !last_name || !email || !password || password.length < 6) {
+                this.showNotification('Vul alle velden in. Wachtwoord minimaal 6 tekens.', 'error');
+                return;
+            }
+            if (!this.token) {
+                this.showNotification('Niet ingelogd. Log opnieuw in.', 'error');
+                return;
+            }
+            const res = await fetch(`${this.apiBaseUrl}/admin/users`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.token}`
+                },
+                body: JSON.stringify({ first_name, last_name, email, password, role: 'user', is_active: true })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok) {
+                this.showNotification('Gebruiker succesvol aangemaakt', 'success');
+                document.querySelector('.modal-overlay')?.remove();
+                this.loadUsers();
+            } else {
+                const msg = data.error || data.message || `HTTP ${res.status}`;
+                this.showNotification(msg, 'error');
+            }
+        } catch (e) {
+            this.showNotification('Fout: ' + (e?.message || e), 'error');
+        }
     }
 
     // Organization management

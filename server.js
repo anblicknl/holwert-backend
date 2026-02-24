@@ -62,7 +62,68 @@ setInterval(() => {
   }
 }, 60000);
 
-// Middleware
+// ===== JWT & SECURITY CONFIG =====
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  // Fail fast if JWT_SECRET is not configured – we never want to run with een hardcoded fallback
+  throw new Error('[SECURITY] JWT_SECRET environment variable is required but not set');
+}
+
+// PHP Proxy URL (fallback als direct MySQL niet werkt)
+const PHP_PROXY_URL = process.env.PHP_PROXY_URL || 'https://holwert.appenvloed.com/admin/db-proxy.php';
+const PHP_PROXY_API_KEY = process.env.PHP_PROXY_API_KEY || 'holwert-db-proxy-2026-secure-key-change-in-production';
+
+// ===== SIMPLE RATE LIMITING (no external deps) =====
+const loginAttempts = new Map();
+const LOGIN_WINDOW_MS = 15 * 60 * 1000; // 15 minuten
+const LOGIN_MAX_ATTEMPTS = 10; // max 10 pogingen per window
+
+function getClientIp(req) {
+  const forwarded = req.headers['x-forwarded-for'];
+  if (typeof forwarded === 'string' && forwarded.length > 0) {
+    return forwarded.split(',')[0].trim();
+  }
+  if (Array.isArray(forwarded) && forwarded.length > 0) {
+    return forwarded[0].split(',')[0].trim();
+  }
+  return req.ip || req.connection?.remoteAddress || 'unknown';
+}
+
+function loginRateLimiter(req, res, next) {
+  const ip = getClientIp(req);
+  const now = Date.now();
+  const existing = loginAttempts.get(ip) || { count: 0, first: now };
+
+  // Reset window als het oude window voorbij is
+  if (now - existing.first > LOGIN_WINDOW_MS) {
+    existing.count = 0;
+    existing.first = now;
+  }
+
+  existing.count += 1;
+  loginAttempts.set(ip, existing);
+
+  if (existing.count > LOGIN_MAX_ATTEMPTS) {
+    return res.status(429).json({
+      error: 'Te veel mislukte inlogpogingen, probeer het later opnieuw',
+      retry_after_seconds: Math.ceil((LOGIN_WINDOW_MS - (now - existing.first)) / 1000)
+    });
+  }
+
+  return next();
+}
+
+// Cleanup loginAttempts periodiek
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, data] of loginAttempts.entries()) {
+    if (now - data.first > LOGIN_WINDOW_MS) {
+      loginAttempts.delete(ip);
+    }
+  }
+}, LOGIN_WINDOW_MS);
+
+// ===== Middleware =====
 app.use(compression()); // Compress responses for faster transfer
 app.use(cors());
 app.use(express.json({ limit: '50mb' })); // Verhoogd voor afbeelding uploads
@@ -113,13 +174,6 @@ const pool = mysql.createPool(dbConfig);
 
 // Export pool for use in routes
 module.exports.pool = pool;
-
-// JWT Secret
-const JWT_SECRET = process.env.JWT_SECRET || 'holwert-secret-key-2024';
-
-// PHP Proxy URL (fallback als direct MySQL niet werkt)
-const PHP_PROXY_URL = process.env.PHP_PROXY_URL || 'https://holwert.appenvloed.com/admin/db-proxy.php';
-const PHP_PROXY_API_KEY = process.env.PHP_PROXY_API_KEY || 'holwert-db-proxy-2026-secure-key-change-in-production';
 
 // Helper om query via PHP proxy uit te voeren
 async function executeQueryViaProxy(query, params = [], action = 'execute') {
@@ -176,9 +230,16 @@ async function executeQueryViaProxy(query, params = [], action = 'execute') {
     };
   } catch (error) {
     console.error('[PHP Proxy] Error:', error.message);
-    if (error.response) {
+    if (error.response?.data) {
       console.error('[PHP Proxy] Response status:', error.response.status);
       console.error('[PHP Proxy] Response data:', error.response.data);
+      const proxyMsg = error.response.data.message || error.response.data.error;
+      if (proxyMsg) {
+        const err = new Error(proxyMsg);
+        err.code = error.response.data.code;
+        err.originalError = error;
+        throw err;
+      }
     }
     throw error;
   }
@@ -668,7 +729,7 @@ app.get('/api/app/bootstrap', async (req, res) => {
       return String(input).replace(/<[^>]*>/g, ' ').replace(/<[^>]*$/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').trim();
     };
     const newsRows = (newsResult.rows || []).map((article) => {
-      const cleanExcerpt = stripHtml(article.excerpt).slice(0, 180);
+      const cleanExcerpt = stripHtml(article.excerpt).slice(0, 120);
       return { ...article, excerpt: cleanExcerpt };
     });
 
@@ -808,7 +869,7 @@ app.get('/api/news', async (req, res) => {
 
     // Lijst licht houden: bij minimal geen image_variants (app gebruikt image_url)
     const processedNews = result.rows.map(article => {
-      const cleanExcerpt = minimalMode ? stripHtml(article.excerpt).slice(0, 180) : article.excerpt;
+      const cleanExcerpt = minimalMode ? stripHtml(article.excerpt).slice(0, 120) : article.excerpt;
       const item = { ...article, excerpt: cleanExcerpt };
       if (!minimalMode) {
         item.image_variants = {
@@ -897,6 +958,18 @@ async function ensureBookmarksTable() {
   }
 }
 
+// Fast bookmark count for profile stats
+app.get('/api/app/bookmarks/count', authenticateToken, async (req, res) => {
+  try {
+    await ensureBookmarksTable();
+    const userId = req.user.userId;
+    const result = await executeQuery('SELECT COUNT(*) as count FROM bookmarks WHERE user_id = ?', [userId]);
+    res.json({ count: result.rows?.[0]?.count ?? 0 });
+  } catch (error) {
+    res.json({ count: 0 });
+  }
+});
+
 // List bookmarks for current user (optionally with joined news)
 app.get('/api/app/bookmarks', authenticateToken, async (req, res) => {
   try {
@@ -913,12 +986,12 @@ app.get('/api/app/bookmarks', authenticateToken, async (req, res) => {
         ORDER BY b.created_at DESC
         LIMIT 100
       `, [userId]);
-      return res.json({ bookmarks: result });
+      return res.json({ bookmarks: result.rows || [] });
     } else {
       const result = await executeQuery(`
         SELECT news_id, created_at FROM bookmarks WHERE user_id = ? ORDER BY created_at DESC LIMIT 500
       `, [userId]);
-      return res.json({ bookmarks: result });
+      return res.json({ bookmarks: result.rows || [] });
     }
   } catch (error) {
     console.error('Get bookmarks error:', error);
@@ -1288,6 +1361,54 @@ app.get('/api/news/count', async (req, res) => {
   }
 });
 
+// Light "head" voor eerste paint – MOET vóór /api/news/:id staan zodat "head" niet als id wordt gezien
+app.get('/api/news/head', async (req, res) => {
+  try {
+    await ensureBookmarksTable();
+    const limit = Math.min(parseInt(req.query.limit, 10) || 7, 20);
+    let userId = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const decoded = jwt.verify(authHeader.substring(7), JWT_SECRET);
+        userId = decoded.userId;
+      } catch (e) { /* ignore */ }
+    }
+    const newsParams = [];
+    const newsQuery = `
+      SELECT n.id, n.title,
+        COALESCE(n.excerpt, LEFT(COALESCE(n.content, ''), 500)) as excerpt,
+        n.image_url, n.created_at, n.updated_at,
+        COALESCE(n.published_at, n.created_at) as published_at,
+        n.organization_id, o.name as organization_name, o.logo_url as organization_logo,
+        o.brand_color as organization_brand_color
+        ${userId ? ', CASE WHEN b.user_id IS NOT NULL THEN true ELSE false END as is_bookmarked' : ', false as is_bookmarked'}
+      FROM news n
+      LEFT JOIN organizations o ON n.organization_id = o.id
+      ${userId ? 'LEFT JOIN bookmarks b ON b.news_id = n.id AND b.user_id = ?' : ''}
+      WHERE n.is_published = true
+      ORDER BY COALESCE(n.published_at, n.created_at) DESC LIMIT ?`;
+    if (userId) newsParams.push(userId);
+    newsParams.push(limit);
+
+    const newsResult = await executeQuery(newsQuery, newsParams);
+    const stripHtml = (input) => {
+      if (!input) return '';
+      return String(input).replace(/<[^>]*>/g, ' ').replace(/<[^>]*$/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').trim();
+    };
+    const newsRows = (newsResult.rows || []).map((article) => {
+      const cleanExcerpt = stripHtml(article.excerpt).slice(0, 120);
+      return { ...article, excerpt: cleanExcerpt };
+    });
+
+    res.set('Cache-Control', 'public, max-age=30');
+    res.json({ news: newsRows });
+  } catch (error) {
+    console.error('News head error:', error);
+    res.status(500).json({ error: 'News head failed', message: error.message });
+  }
+});
+
 // Get single published news (public, with optional bookmark status if authenticated)
 app.get('/api/news/:id', async (req, res) => {
   try {
@@ -1607,7 +1728,7 @@ app.put('/api/news/:id', authenticateToken, async (req, res) => {
 // ===== AUTH ENDPOINTS =====
 
 // Login endpoint
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', loginRateLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
     
@@ -1618,9 +1739,9 @@ app.post('/api/auth/login', async (req, res) => {
       });
     }
 
-    // Find user by email
+    // Find user by email (zonder profile_image_url i.v.m. oude DB zonder deze kolom)
     const userResult = await executeQuery(
-      'SELECT id, email, password_hash, first_name, last_name, role, is_active FROM users WHERE email = $1',
+      'SELECT id, email, password_hash, first_name, last_name, profile_image_url, profile_number, role, is_active FROM users WHERE email = ?',
       [email]
     );
 
@@ -1664,7 +1785,7 @@ app.post('/api/auth/login', async (req, res) => {
       { expiresIn: '7d' }
     );
 
-    // Return success response
+    // Return success response (profile_picture null zolang kolom niet bestaat)
     res.json({
       message: 'Login successful',
       token: token,
@@ -1673,6 +1794,9 @@ app.post('/api/auth/login', async (req, res) => {
         email: user.email,
         first_name: user.first_name,
         last_name: user.last_name,
+        profile_picture: user.profile_image_url ?? null,
+        profile_image_url: user.profile_image_url ?? null,
+        profile_number: user.profile_number ?? null,
         role: user.role
       }
     });
@@ -1686,6 +1810,106 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
+// Register handler (gebruikt voor beide route-varianten i.v.m. Vercel path-handling)
+const handleRegister = async (req, res) => {
+  try {
+    const { email, password, first_name, last_name, phone } = req.body;
+
+    if (!email || !password || !first_name || !last_name) {
+      return res.status(400).json({
+        error: 'Email, wachtwoord, voornaam en achternaam zijn verplicht',
+        field: 'general'
+      });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({
+        error: 'Wachtwoord moet minimaal 6 tekens zijn',
+        field: 'password'
+      });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({
+        error: 'Ongeldig e-mailadres',
+        field: 'email'
+      });
+    }
+
+    const existing = await executeQuery('SELECT id FROM users WHERE email = ?', [email]);
+    if (existing.rows.length > 0) {
+      return res.status(409).json({
+        error: 'Dit e-mailadres is al geregistreerd',
+        field: 'email'
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const insertResult = await executeInsert(
+      `INSERT INTO users (email, password_hash, first_name, last_name, role, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [email.trim(), hashedPassword, first_name.trim(), last_name.trim(), 'user', true]
+    );
+
+    const userId = insertResult.insertId || insertResult.rows?.[0]?.id;
+    if (!userId) {
+      return res.status(500).json({ error: 'Registratie mislukt', message: 'Kon gebruiker niet aanmaken' });
+    }
+
+    // Genereer profielnummer
+    const profileNumber = String(userId).padStart(4, '0');
+    try {
+      await executeQuery('UPDATE users SET profile_number = ? WHERE id = ?', [profileNumber, userId]);
+    } catch (pnErr) {
+      console.warn('profile_number update failed (column may not exist):', pnErr.message);
+    }
+
+    const userResult = await executeQuery(
+      'SELECT id, email, first_name, last_name, profile_image_url, profile_number, role FROM users WHERE id = ?',
+      [userId]
+    );
+    const user = userResult.rows[0];
+
+    const token = jwt.sign(
+      { userId: user.id, email: user.email, role: user.role },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.status(201).json({
+      message: 'Account aangemaakt',
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        first_name: user.first_name,
+        last_name: user.last_name,
+        profile_picture: user.profile_image_url || null,
+        profile_image_url: user.profile_image_url || null,
+        profile_number: user.profile_number ?? null,
+        role: user.role
+      }
+    });
+  } catch (error) {
+    const isDuplicateEmail = error.code === '23505' || error.code === 'ER_DUP_ENTRY' || error.errno === 1062 ||
+      error.code === '23000' || error.code === 23000 ||
+      (error.message && (error.message.includes('Duplicate entry') || error.message.includes('1062')));
+    if (isDuplicateEmail) {
+      return res.status(409).json({ error: 'Dit e-mailadres is al geregistreerd', field: 'email' });
+    }
+    console.error('Register error:', error);
+    res.status(500).json({
+      error: 'Registratie mislukt',
+      message: error.message
+    });
+  }
+};
+
+app.post('/api/auth/register', loginRateLimiter, handleRegister);
+app.post('/auth/register', loginRateLimiter, handleRegister);
+
 // Verify token and return current user info (for debugging roles)
 app.get('/api/auth/verify', authenticateToken, (req, res) => {
     res.json({
@@ -1694,6 +1918,136 @@ app.get('/api/auth/verify', authenticateToken, (req, res) => {
     role: req.user && req.user.role ? req.user.role : null,
     issuedAt: new Date().toISOString()
   });
+});
+
+// Get current user profile (authenticated, zonder profile_image_url in SELECT i.v.m. oude DB)
+app.get('/api/auth/profile', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const result = await executeQuery(
+      'SELECT id, email, first_name, last_name, profile_image_url, profile_number, role, created_at, updated_at FROM users WHERE id = ?',
+      [userId]
+    );
+    if (!result.rows.length) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    const user = result.rows[0];
+    res.json({
+      user: {
+        id: user.id,
+        email: user.email,
+        first_name: user.first_name,
+        last_name: user.last_name,
+        profile_picture: user.profile_image_url ?? null,
+        profile_image_url: user.profile_image_url ?? null,
+        profile_number: user.profile_number ?? null,
+        role: user.role,
+        created_at: user.created_at,
+        updated_at: user.updated_at
+      }
+    });
+  } catch (error) {
+    console.error('Get profile error:', error);
+    res.status(500).json({ error: 'Failed to get profile', message: error.message });
+  }
+});
+
+// Update current user profile (authenticated, own profile only)
+app.put('/api/auth/profile', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    let raw = req.body;
+    if (typeof raw === 'string') { try { raw = JSON.parse(raw); } catch(e) { raw = {}; } }
+    raw = raw || {};
+    const first_name = raw.first_name;
+    const last_name = raw.last_name;
+    const profile_image_url = raw.profile_image_url ?? raw.profileImageUrl ?? raw.imageUrl ?? raw.url;
+    const profile_picture = raw.profile_picture ?? raw.profilePicture ?? profile_image_url;
+
+    const sets = [];
+    const params = [];
+    const push = (v) => { params.push(v); return '?'; };
+
+    if (first_name !== undefined) { sets.push(`first_name = ${push(first_name)}`); }
+    if (last_name !== undefined) { sets.push(`last_name = ${push(last_name)}`); }
+    const imageUrl = profile_image_url ?? profile_picture;
+    const hasImageUpdate = imageUrl !== undefined;
+    if (hasImageUpdate) { sets.push(`profile_image_url = ${push(imageUrl)}`); }
+
+    if (!sets.length) {
+      // Geen velden om te updaten: gewoon huidige user teruggeven (geen 400)
+      const currentResult = await executeQuery(
+        'SELECT id, email, first_name, last_name, profile_image_url, profile_number, role, created_at, updated_at FROM users WHERE id = ?',
+        [userId]
+      );
+      const cu = currentResult.rows?.[0];
+      if (!cu) return res.status(404).json({ error: 'User not found' });
+      return res.json({
+        user: {
+          id: cu.id, email: cu.email, first_name: cu.first_name, last_name: cu.last_name,
+          profile_picture: cu.profile_image_url ?? null, profile_image_url: cu.profile_image_url ?? null,
+          profile_number: cu.profile_number ?? null, role: cu.role,
+          created_at: cu.created_at, updated_at: cu.updated_at
+        }
+      });
+    }
+
+    params.push(userId);
+    try {
+      await executeQuery(
+        `UPDATE users SET ${sets.join(', ')}, updated_at = NOW() WHERE id = ?`,
+        params
+      );
+    } catch (updateErr) {
+      // Kolom profile_image_url bestaat nog niet in oude DB: opnieuw proberen zonder dat veld
+      const msg = updateErr.message || '';
+      if (hasImageUpdate && (msg.includes('profile_image_url') || msg.includes('1054') || msg.includes('Unknown column'))) {
+        const setsFallback = [];
+        const paramsFallback = [];
+        const pushF = (v) => { paramsFallback.push(v); return '?'; };
+        if (first_name !== undefined) { setsFallback.push(`first_name = ${pushF(first_name)}`); }
+        if (last_name !== undefined) { setsFallback.push(`last_name = ${pushF(last_name)}`); }
+        if (!setsFallback.length) {
+          return res.status(400).json({ error: 'No fields to update' });
+        }
+        paramsFallback.push(userId);
+        await executeQuery(
+          `UPDATE users SET ${setsFallback.join(', ')}, updated_at = NOW() WHERE id = ?`,
+          paramsFallback
+        );
+        // Foto niet in DB opgeslagen, maar we geven de URL wel terug zodat de app hem kan tonen
+      } else {
+        throw updateErr;
+      }
+    }
+
+    const fetchResult = await executeQuery(
+      'SELECT id, email, first_name, last_name, profile_image_url, profile_number, role, created_at, updated_at FROM users WHERE id = ?',
+      [userId]
+    );
+    if (!fetchResult.rows.length) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    const user = fetchResult.rows[0];
+    const profilePic = user.profile_image_url ?? imageUrl ?? null;
+    res.json({
+      user: {
+        id: user.id,
+        email: user.email,
+        first_name: user.first_name,
+        last_name: user.last_name,
+        profile_picture: profilePic,
+        profile_image_url: profilePic,
+        profile_number: user.profile_number ?? null,
+        role: user.role,
+        created_at: user.created_at,
+        updated_at: user.updated_at
+      }
+    });
+  } catch (error) {
+    console.error('Update profile error:', error);
+    res.status(500).json({ error: 'Failed to update profile', message: error.message });
+  }
 });
 
 // ===== ADMIN ENDPOINTS =====
@@ -3160,7 +3514,7 @@ app.post('/api/admin/users', authenticateToken, requireAdmin, async (req, res) =
 app.put('/api/admin/users/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { first_name, last_name, email, password, role, is_active } = req.body;
+    const { first_name, last_name, email, password, role, is_active, profile_image_url } = req.body;
     const sets = [];
     const params = [];
     const push = (v) => { params.push(v); return `$${params.length}`; };
@@ -3169,6 +3523,7 @@ app.put('/api/admin/users/:id', authenticateToken, requireAdmin, async (req, res
     if (email !== undefined) sets.push(`email = ${push(email)}`);
     if (role !== undefined) sets.push(`role = ${push(role)}`);
     if (is_active !== undefined) sets.push(`is_active = ${push(is_active)}`);
+    if (profile_image_url !== undefined) sets.push(`profile_image_url = ${push(profile_image_url)}`);
     if (password) {
       const hashed = await bcrypt.hash(password, 10);
       sets.push(`password_hash = ${push(hashed)}`);
@@ -3183,11 +3538,17 @@ app.put('/api/admin/users/:id', authenticateToken, requireAdmin, async (req, res
     );
     
     const fetchResult = await executeQuery(
-      'SELECT id, first_name, last_name, email, role, is_active, created_at, updated_at FROM users WHERE id = $1',
+      'SELECT id, first_name, last_name, email, profile_image_url, role, is_active, created_at, updated_at FROM users WHERE id = $1',
       [id]
     );
     if (!fetchResult.rows.length) return res.status(404).json({ error: 'User not found' });
-    res.json({ user: fetchResult.rows[0] });
+    const user = fetchResult.rows[0];
+    res.json({
+      user: {
+        ...user,
+        profile_picture: user.profile_image_url || null
+      }
+    });
   } catch (error) {
     if (error.code === '23505' || error.code === 'ER_DUP_ENTRY' || error.errno === 1062) {
       return res.status(409).json({ error: 'Email already exists' });
@@ -3308,17 +3669,12 @@ app.get('/api/organizations', async (req, res) => {
     const result = await executeQuery(query, params);
     let rows = result.rows || [];
 
-    // Bij minimal: geen base64 logo's meesturen (kleine payload, snelle opstart)
+    // Bij minimal: alleen description inkorten; logo_url behouden voor weergave in app
     if (minimal === 'true') {
-      rows = rows.map((o) => {
-        const logo = o.logo_url;
-        const stripBase64 = typeof logo === 'string' && logo.startsWith('data:');
-        return {
-          ...o,
-          logo_url: stripBase64 ? null : logo,
-          description: typeof o.description === 'string' ? o.description.slice(0, 200) : o.description
-        };
-      });
+      rows = rows.map((o) => ({
+        ...o,
+        description: typeof o.description === 'string' ? o.description.slice(0, 200) : o.description
+      }));
     }
 
     // Get total count (only if not minimal, to save time)
@@ -3914,6 +4270,43 @@ async function sendNotificationToFollowers(organizationId, notification, notific
   }
 }
 
+// Ensure profile_image_url column exists in users table
+async function ensureProfileImageUrlColumn() {
+  try {
+    const [cols] = await pool.execute(
+      `SELECT COLUMN_NAME FROM information_schema.COLUMNS 
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'profile_image_url'`
+    );
+    if (cols && cols.length > 0) {
+      return;
+    }
+    await executeQuery('ALTER TABLE users ADD COLUMN profile_image_url TEXT NULL AFTER last_name');
+    console.log('✅ profile_image_url kolom toegevoegd aan users');
+  } catch (e) {
+    if (e.code === 'ER_DUP_FIELDNAME') return;
+    console.error('ensureProfileImageUrlColumn error:', e.message);
+  }
+}
+
+async function ensureProfileNumberColumn() {
+  try {
+    const [cols] = await pool.execute(
+      `SELECT COLUMN_NAME FROM information_schema.COLUMNS 
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'profile_number'`
+    );
+    if (cols && cols.length > 0) {
+      return;
+    }
+    await executeQuery('ALTER TABLE users ADD COLUMN profile_number VARCHAR(10) NULL AFTER profile_image_url');
+    // Backfill: geef bestaande gebruikers een profielnummer op basis van hun id
+    await executeQuery("UPDATE users SET profile_number = LPAD(id, 4, '0') WHERE profile_number IS NULL");
+    console.log('✅ profile_number kolom toegevoegd en backfill voltooid');
+  } catch (e) {
+    if (e.code === 'ER_DUP_FIELDNAME') return;
+    console.error('ensureProfileNumberColumn error:', e.message);
+  }
+}
+
 // Initialize push notifications tables
 async function initializePushNotificationsTables() {
   try {
@@ -3969,13 +4362,24 @@ async function initializePushNotificationsTables() {
   }
 }
 
-// Start server
-app.listen(PORT, async () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-  
-  // Initialize push notifications tables
-  await initializePushNotificationsTables();
-});
+// Start server direct; migraties draaien op de achtergrond (geen block meer bij cold start)
+function startServer() {
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  });
+  // Migraties asynchroon op achtergrond – blokkeert eerste request niet meer
+  (async () => {
+    try {
+      await ensureProfileImageUrlColumn();
+      await ensureProfileNumberColumn();
+      await initializePushNotificationsTables();
+      console.log('✅ Migraties achtergrond voltooid');
+    } catch (e) {
+      console.error('Migraties achtergrond fout:', e?.message || e);
+    }
+  })();
+}
+startServer();
 
 module.exports = app;

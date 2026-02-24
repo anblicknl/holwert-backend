@@ -8,6 +8,7 @@ class HolwertAdmin {
             : 'https://holwert-backend.vercel.app/api';
         this.token = localStorage.getItem('authToken');
         this.currentUser = null;
+        this.usersTab = 'dorpsbewoners'; // 'dorpsbewoners' | 'organisaties'
         this.init();
     }
 
@@ -60,6 +61,39 @@ class HolwertAdmin {
                 } catch (e) {
                     console.error('[Events] Fout bij openen event-modal:', e);
                     this.showNotification('Fout bij openen event-modal: ' + (e?.message || e), 'error');
+                }
+            });
+        }
+
+        // Users section tabs (Dorpsbewoners / Organisaties)
+        document.querySelectorAll('.users-tab').forEach(tab => {
+            tab.addEventListener('click', (e) => {
+                const t = e.currentTarget.getAttribute('data-users-tab');
+                this.usersTab = t;
+                document.querySelectorAll('.users-tab').forEach(el => el.classList.remove('active'));
+                e.currentTarget.classList.add('active');
+                const addUserBtn = document.getElementById('addUserBtn');
+                if (addUserBtn) {
+                    if (t === 'organisaties') {
+                        addUserBtn.innerHTML = '<i class="fas fa-plus"></i> Nieuwe Organisatie';
+                    } else {
+                        addUserBtn.innerHTML = '<i class="fas fa-plus"></i> Nieuwe Gebruiker';
+                    }
+                }
+                this.loadUsersSectionData();
+            });
+        });
+
+        // Add User button - gedrag afhankelijk van actieve tab
+        const addUserBtn = document.getElementById('addUserBtn');
+        if (addUserBtn) {
+            addUserBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (this.usersTab === 'organisaties') {
+                    this.showCreateOrganizationModal();
+                } else {
+                    this.showCreateUserModal();
                 }
             });
         }
@@ -362,7 +396,7 @@ class HolwertAdmin {
                 this.loadDashboard();
                 break;
             case 'users':
-                this.loadUsers();
+                this.loadUsersSectionData();
                 break;
             case 'organizations':
                 console.log('Loading organizations section...');
@@ -746,12 +780,24 @@ class HolwertAdmin {
         }
     }
 
+    // Users section: laad dorpsbewoners of organisaties afhankelijk van actieve tab
+    loadUsersSectionData() {
+        if (this.usersTab === 'organisaties') {
+            this.loadOrganizationsIntoUsersSection();
+        } else {
+            this.loadUsers('user');
+        }
+    }
+
     // User management
-    async loadUsers() {
+    async loadUsers(roleFilter = null) {
         try {
-            console.log('Loading users...');
+            console.log('Loading users...', roleFilter ? `(role=${roleFilter})` : '');
             this.showLoader('usersContent', 'Gebruikers laden...');
-            const response = await fetch(`${this.apiBaseUrl}/admin/users`, {
+            const url = roleFilter
+                ? `${this.apiBaseUrl}/admin/users?role=${encodeURIComponent(roleFilter)}`
+                : `${this.apiBaseUrl}/admin/users`;
+            const response = await fetch(url, {
                 headers: {
                     'Authorization': `Bearer ${this.token}`
                 }
@@ -887,6 +933,59 @@ class HolwertAdmin {
     }
 
     // Organization management
+    async loadOrganizationsIntoUsersSection() {
+        try {
+            this.showLoader('usersContent', 'Organisaties laden...');
+            const response = await fetch(`${this.apiBaseUrl}/admin/organizations`, {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            if (response.ok) {
+                const data = await response.json();
+                this.displayOrganizationsInUsersContent(data.organizations || []);
+            } else {
+                document.getElementById('usersContent').innerHTML =
+                    '<p class="text-muted">Kon organisaties niet laden.</p>';
+            }
+        } catch (error) {
+            document.getElementById('usersContent').innerHTML =
+                `<p class="text-muted">Fout: ${error.message}</p>`;
+        }
+        this.hideLoader('usersContent');
+    }
+
+    displayOrganizationsInUsersContent(organizations) {
+        const container = document.getElementById('usersContent');
+        if (!container) return;
+        if (!organizations || organizations.length === 0) {
+            container.innerHTML = '<p class="text-muted">Geen organisaties gevonden</p>';
+            return;
+        }
+        container.innerHTML = `
+            <div class="data-table-container desktop-view">
+                <table class="data-table">
+                    <thead><tr>
+                        <th>Naam</th><th>Categorie</th><th>Status</th><th>Acties</th>
+                    </tr></thead>
+                    <tbody>
+                        ${organizations.map(org => `
+                            <tr>
+                                <td><strong>${org.name || '-'}</strong></td>
+                                <td>${org.category || '-'}</td>
+                                <td><span class="status-badge ${org.is_approved ? 'status-published' : 'status-draft'}">
+                                    ${org.is_approved ? 'Goedgekeurd' : 'Niet goedgekeurd'}</span></td>
+                                <td>
+                                    <button class="btn-icon btn-view" onclick="admin.viewOrganization(${org.id})"><i class="fas fa-eye"></i></button>
+                                    <button class="btn-icon btn-edit" onclick="admin.editOrganization(${org.id})"><i class="fas fa-edit"></i></button>
+                                    <button class="btn-icon btn-delete" onclick="admin.deleteOrganization(${org.id})"><i class="fas fa-trash"></i></button>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+    }
+
     displayOrganizations(organizations) {
         const container = document.getElementById('organizationsTableBody');
         if (!container) {
@@ -1202,10 +1301,11 @@ class HolwertAdmin {
                 document.querySelector('.modal-overlay')?.remove();
             }, 500);
             
-            // Reload organizations list immediately to show the new organization
-            console.log('[saveOrganization] Reloading organizations list...');
+            // Reload organizations list
             await this.loadOrganizations();
-            console.log('[saveOrganization] Organizations list reloaded');
+            if (document.getElementById('users')?.classList.contains('active') && this.usersTab === 'organisaties') {
+                this.loadOrganizationsIntoUsersSection();
+            }
         } catch (e) {
             console.error('saveOrganization error:', e);
             this.hideLoader();
@@ -3918,6 +4018,98 @@ class HolwertAdmin {
         document.body.appendChild(modal);
     }
 
+    showCreateUserModal() {
+        const self = this;
+        const modal = document.createElement('div');
+        modal.className = 'modal-overlay';
+        modal.style.display = 'flex';
+        modal.innerHTML = `
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Nieuwe Dorpsbewoner</h3>
+                    <button type="button" class="modal-close" onclick="this.closest('.modal-overlay').remove()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <form id="createUserForm" class="edit-form">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="createFirstName">Voornaam *</label>
+                                <input type="text" id="createFirstName" name="first_name" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="createLastName">Achternaam *</label>
+                                <input type="text" id="createLastName" name="last_name" required>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="createEmail">E-mail *</label>
+                            <input type="email" id="createEmail" name="email" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="createPassword">Wachtwoord *</label>
+                            <input type="password" id="createPassword" name="password" required minlength="6">
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-modal-close>Annuleren</button>
+                    <button type="button" class="btn btn-primary" id="createUserSubmitBtn">Aanmaken</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        modal.querySelector('[data-modal-close]').addEventListener('click', () => modal.remove());
+        modal.querySelector('#createUserSubmitBtn').addEventListener('click', function(e) {
+            e.preventDefault();
+            self.saveNewUser();
+        });
+        modal.querySelector('.modal-content').addEventListener('click', (e) => e.stopPropagation());
+        modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+    }
+
+    async saveNewUser() {
+        try {
+            const first_name = document.getElementById('createFirstName')?.value?.trim();
+            const last_name = document.getElementById('createLastName')?.value?.trim();
+            const email = document.getElementById('createEmail')?.value?.trim();
+            const password = document.getElementById('createPassword')?.value;
+            if (!first_name || !last_name || !email || !password || password.length < 6) {
+                this.showNotification('Vul alle velden in. Wachtwoord minimaal 6 tekens.', 'error');
+                return;
+            }
+            if (!this.token) {
+                this.showNotification('Niet ingelogd. Log opnieuw in.', 'error');
+                return;
+            }
+            this.showLoader(null, 'Gebruiker aanmaken...');
+            const res = await fetch(`${this.apiBaseUrl}/admin/users`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.token}`
+                },
+                body: JSON.stringify({ first_name, last_name, email, password, role: 'user', is_active: true })
+            });
+            const data = await res.json().catch(() => ({}));
+            this.hideLoader();
+            if (res.ok) {
+                this.showNotification('Gebruiker succesvol aangemaakt', 'success');
+                document.querySelector('.modal-overlay')?.remove();
+                this.loadUsers('user');
+            } else {
+                const msg = res.status === 401 ? 'Sessie verlopen. Log opnieuw in.'
+                    : res.status === 403 ? 'Geen beheerdersrechten. Log in als admin.'
+                    : data.error || data.message || `Aanmaken mislukt (HTTP ${res.status})`;
+                this.showNotification(msg, 'error');
+            }
+        } catch (e) {
+            this.hideLoader();
+            this.showNotification('Fout: ' + (e?.message || e), 'error');
+        }
+    }
+
     async editUser(id) {
         try {
             const response = await fetch(`${this.apiBaseUrl}/admin/users`, {
@@ -4101,7 +4293,7 @@ class HolwertAdmin {
                 console.log('Update successful:', result);
                 this.showNotification('Gebruiker succesvol bijgewerkt', 'success');
                 document.querySelector('.modal-overlay').remove();
-                this.loadUsers(); // Refresh the users list
+                this.loadUsersSectionData(); // Refresh de actieve tab
             } else {
                 let errorMessage = 'Onbekende fout';
                 try {
