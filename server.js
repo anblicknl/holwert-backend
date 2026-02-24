@@ -2918,7 +2918,7 @@ app.put('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (
   try {
     const { id } = req.params;
     const { name, category, description, bio, is_approved, website, email, phone, whatsapp, address, 
-            facebook, instagram, twitter, linkedin, brand_color, logo_url } = req.body;
+            facebook, instagram, twitter, linkedin, brand_color, logo_url, privacy_statement } = req.body;
     const sets = [];
     const params = [];
     const push = (v) => { params.push(v); return '?'; }; // MySQL uses ? instead of $1, $2, etc.
@@ -2938,6 +2938,7 @@ app.put('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (
     if (linkedin !== undefined) sets.push(`linkedin = ${push(linkedin)}`);
     if (brand_color !== undefined) sets.push(`brand_color = ${push(brand_color)}`);
     if (logo_url !== undefined) sets.push(`logo_url = ${push(logo_url)}`);
+    if (privacy_statement !== undefined) sets.push(`privacy_statement = ${push(privacy_statement)}`);
     if (!sets.length) return res.status(400).json({ error: 'No fields to update' });
     params.push(id);
     

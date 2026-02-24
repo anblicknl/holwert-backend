@@ -419,6 +419,9 @@ class HolwertAdmin {
             case 'practical':
                 this.loadPracticalInfo();
                 break;
+            case 'content-pages':
+                this.loadContentPages();
+                break;
             case 'moderation':
                 this.loadModeration();
                 break;
@@ -1218,6 +1221,8 @@ class HolwertAdmin {
             const linkedin = document.getElementById('orgLinkedin')?.value.trim();
             const brand_color = document.getElementById('orgBrandColor').value;
             const is_approved = document.getElementById('orgApproved').checked;
+            const privacyEl = document.getElementById('orgPrivacy');
+            const privacy_statement = privacyEl && 'value' in privacyEl ? privacyEl.value : '';
 
             if (!name) {
                 this.showNotification('Naam is verplicht', 'error');
@@ -1670,7 +1675,8 @@ class HolwertAdmin {
                 twitter: twitter || null,
                 linkedin: linkedin || null,
                 brand_color,
-                is_approved
+                is_approved,
+                privacy_statement: privacy_statement || null
             };
 
             // Only add logo_url if defined (not undefined)
