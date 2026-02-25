@@ -185,6 +185,7 @@ function getMigrationsReady() {
       try {
         await ensureProfileImageUrlColumn();
         await ensureProfileNumberColumn();
+        await ensureHolwertRelationshipColumn();
         await ensurePrivacyStatementColumn();
         await ensurePracticalInfoTable();
         await ensureContentPagesTable();
@@ -1943,7 +1944,7 @@ app.post('/api/auth/login', loginRateLimiter, async (req, res) => {
 // Register handler (gebruikt voor beide route-varianten i.v.m. Vercel path-handling)
 const handleRegister = async (req, res) => {
   try {
-    const { email, password, first_name, last_name, phone } = req.body;
+    const { email, password, first_name, last_name, phone, relationship_with_holwert } = req.body;
 
     if (!email || !password || !first_name || !last_name) {
       return res.status(400).json({
@@ -1978,9 +1979,9 @@ const handleRegister = async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const insertResult = await executeInsert(
-      `INSERT INTO users (email, password_hash, first_name, last_name, role, is_active)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [email.trim(), hashedPassword, first_name.trim(), last_name.trim(), 'user', true]
+      `INSERT INTO users (email, password_hash, first_name, last_name, role, is_active, relationship_with_holwert)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [email.trim(), hashedPassword, first_name.trim(), last_name.trim(), 'user', true, relationship_with_holwert || null]
     );
 
     const userId = insertResult.insertId || insertResult.rows?.[0]?.id;
@@ -1999,7 +2000,7 @@ const handleRegister = async (req, res) => {
     let userResult;
     try {
       userResult = await executeQuery(
-        'SELECT id, email, first_name, last_name, profile_image_url, profile_number, role FROM users WHERE id = ?',
+        'SELECT id, email, first_name, last_name, profile_image_url, profile_number, relationship_with_holwert, created_at, updated_at, role FROM users WHERE id = ?',
         [userId]
       );
     } catch (colErr) {
@@ -2027,6 +2028,9 @@ const handleRegister = async (req, res) => {
         profile_picture: user.profile_image_url || null,
         profile_image_url: user.profile_image_url || null,
         profile_number: user.profile_number ?? null,
+        relationship_with_holwert: user.relationship_with_holwert ?? null,
+        created_at: user.created_at ?? null,
+        updated_at: user.updated_at ?? null,
         role: user.role
       }
     });
@@ -2065,7 +2069,7 @@ app.get('/api/auth/profile', authenticateToken, async (req, res) => {
     let result;
     try {
       result = await executeQuery(
-        'SELECT id, email, first_name, last_name, profile_image_url, profile_number, role, created_at, updated_at FROM users WHERE id = ?',
+        'SELECT id, email, first_name, last_name, profile_image_url, profile_number, role, relationship_with_holwert, created_at, updated_at FROM users WHERE id = ?',
         [userId]
       );
     } catch (colErr) {
@@ -2087,6 +2091,7 @@ app.get('/api/auth/profile', authenticateToken, async (req, res) => {
         profile_picture: user.profile_image_url ?? null,
         profile_image_url: user.profile_image_url ?? null,
         profile_number: user.profile_number ?? null,
+        relationship_with_holwert: user.relationship_with_holwert ?? null,
         role: user.role,
         created_at: user.created_at,
         updated_at: user.updated_at
@@ -3735,7 +3740,7 @@ app.post('/api/admin/users', authenticateToken, requireAdmin, async (req, res) =
 app.put('/api/admin/users/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { first_name, last_name, email, password, role, is_active, profile_image_url } = req.body;
+    const { first_name, last_name, email, password, role, is_active, profile_image_url, relationship_with_holwert, profile_number } = req.body;
     const sets = [];
     const params = [];
     const push = (v) => { params.push(v); return `$${params.length}`; };
@@ -3745,6 +3750,8 @@ app.put('/api/admin/users/:id', authenticateToken, requireAdmin, async (req, res
     if (role !== undefined) sets.push(`role = ${push(role)}`);
     if (is_active !== undefined) sets.push(`is_active = ${push(is_active)}`);
     if (profile_image_url !== undefined) sets.push(`profile_image_url = ${push(profile_image_url)}`);
+    if (relationship_with_holwert !== undefined) sets.push(`relationship_with_holwert = ${push(relationship_with_holwert)}`);
+    if (profile_number !== undefined) sets.push(`profile_number = ${push(profile_number)}`);
     if (password) {
       const hashed = await bcrypt.hash(password, 10);
       sets.push(`password_hash = ${push(hashed)}`);
@@ -3759,7 +3766,7 @@ app.put('/api/admin/users/:id', authenticateToken, requireAdmin, async (req, res
     );
     
     const fetchResult = await executeQuery(
-      'SELECT id, first_name, last_name, email, profile_image_url, role, is_active, created_at, updated_at FROM users WHERE id = $1',
+      'SELECT id, first_name, last_name, email, profile_image_url, profile_number, relationship_with_holwert, role, is_active, created_at, updated_at FROM users WHERE id = $1',
       [id]
     );
     if (!fetchResult.rows.length) return res.status(404).json({ error: 'User not found' });
@@ -4652,6 +4659,22 @@ async function ensureProfileNumberColumn() {
   } catch (e) {
     if (e.code === 'ER_DUP_FIELDNAME' || (e.message && e.message.includes('Duplicate'))) return;
     console.error('ensureProfileNumberColumn error:', e.message);
+  }
+}
+
+async function ensureHolwertRelationshipColumn() {
+  try {
+    const result = await executeQuery(
+      "SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'relationship_with_holwert'"
+    );
+    if (result.rows && result.rows.length > 0) {
+      return;
+    }
+    await executeQuery("ALTER TABLE users ADD COLUMN relationship_with_holwert VARCHAR(50) NULL");
+    console.log('✅ relationship_with_holwert kolom toegevoegd aan users');
+  } catch (e) {
+    if (e.code === 'ER_DUP_FIELDNAME' || (e.message && e.message.includes('Duplicate'))) return;
+    console.error('ensureHolwertRelationshipColumn error:', e.message);
   }
 }
 

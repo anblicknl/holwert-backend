@@ -847,6 +847,7 @@ class HolwertAdmin {
                         <tr>
                             <th>Profielfoto</th>
                             <th>Naam</th>
+                            <th>Band met Holwert</th>
                             <th>Rol</th>
                             <th>Status</th>
                             <th>Acties</th>
@@ -869,6 +870,16 @@ class HolwertAdmin {
                                     <div class="user-name">
                                         <strong>${user.first_name} ${user.last_name}</strong>
                                     </div>
+                                </td>
+                                <td>
+                                    <span class="relation-badge">${(user.relationship_with_holwert && 
+                                        {
+                                            'resident': 'Inwoner',
+                                            'former_resident': 'Oud-inwoner',
+                                            'vacation_home': 'Vakantiewoning',
+                                            'interested': 'Geïnteresseerde',
+                                            'tourist': 'Toerist'
+                                        }[user.relationship_with_holwert]) || '—'}</span>
                                 </td>
                                 <td>
                                     <span class="role-badge role-${user.role}" onclick="admin.changeUserRole(${user.id}, '${user.role}')" style="cursor: pointer;" title="Klik om rol te wijzigen">
@@ -915,6 +926,14 @@ class HolwertAdmin {
                             <div class="user-info">
                                 <div class="user-name">
                                     <strong>${user.first_name} ${user.last_name}</strong>
+                                    <div class="user-relation">${(user.relationship_with_holwert && 
+                                        {
+                                            'resident': 'Inwoner',
+                                            'former_resident': 'Oud-inwoner',
+                                            'vacation_home': 'Vakantiewoning',
+                                            'interested': 'Geïnteresseerde',
+                                            'tourist': 'Toerist'
+                                        }[user.relationship_with_holwert]) || '—'}</div>
                                 </div>
                                 <div class="user-badges">
                                     <span class="role-badge role-${user.role}" onclick="admin.changeUserRole(${user.id}, '${user.role}')" style="cursor: pointer;" title="Klik om rol te wijzigen">
@@ -1748,6 +1767,37 @@ class HolwertAdmin {
         }
     }
 
+
+    async deleteUser(id) {
+        if (!confirm('Weet je zeker dat je deze gebruiker wilt verwijderen?\n\nDit kan niet ongedaan worden gemaakt.')) {
+            return;
+        }
+
+        try {
+            this.showLoader(null, 'Gebruiker verwijderen...');
+            const res = await fetch(`${this.apiBaseUrl}/admin/users/${id}`, {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `Bearer ${this.token}`
+                }
+            });
+
+            if (!res.ok) {
+                const error = await res.json().catch(() => ({}));
+                this.hideLoader();
+                this.showNotification(`Verwijderen mislukt: ${error.error || error.message || 'Onbekende fout'}`, 'error');
+                return;
+            }
+
+            this.hideLoader();
+            this.showNotification('Gebruiker succesvol verwijderd', 'success');
+            this.loadUsersSectionData();
+        } catch (e) {
+            console.error('deleteUser error:', e);
+            this.hideLoader();
+            this.showNotification('Fout bij verwijderen: ' + (e?.message || e), 'error');
+        }
+    }
 
     // Button state management
     disableSaveButton(buttonText = 'Opslaan...') {
@@ -4569,6 +4619,23 @@ class HolwertAdmin {
                             <label for="createPassword">Wachtwoord *</label>
                             <input type="password" id="createPassword" name="password" required minlength="6">
                         </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="createRole">Rol</label>
+                                <select id="createRole" name="role">
+                                    <option value="user" selected>Gebruiker</option>
+                                    <option value="admin">Admin</option>
+                                    <option value="superadmin">Super Admin</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="createStatus">Status</label>
+                                <select id="createStatus" name="is_active">
+                                    <option value="true" selected>Actief</option>
+                                    <option value="false">Inactief</option>
+                                </select>
+                            </div>
+                        </div>
                     </form>
                 </div>
                 <div class="modal-footer">
@@ -4593,6 +4660,8 @@ class HolwertAdmin {
             const last_name = document.getElementById('createLastName')?.value?.trim();
             const email = document.getElementById('createEmail')?.value?.trim();
             const password = document.getElementById('createPassword')?.value;
+            const role = document.getElementById('createRole')?.value || 'user';
+            const is_active = (document.getElementById('createStatus')?.value || 'true') === 'true';
             if (!first_name || !last_name || !email || !password || password.length < 6) {
                 this.showNotification('Vul alle velden in. Wachtwoord minimaal 6 tekens.', 'error');
                 return;
@@ -4608,7 +4677,7 @@ class HolwertAdmin {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${this.token}`
                 },
-                body: JSON.stringify({ first_name, last_name, email, password, role: 'user', is_active: true })
+                body: JSON.stringify({ first_name, last_name, email, password, role, is_active })
             });
             const data = await res.json().catch(() => ({}));
             this.hideLoader();
@@ -4701,6 +4770,17 @@ class HolwertAdmin {
                             </div>
                         </div>
                         <div class="form-group">
+                            <label for="editRelation">Band met Holwert</label>
+                            <select id="editRelation" name="relationship_with_holwert">
+                                <option value="">(geen selectie)</option>
+                                <option value="resident" ${user.relationship_with_holwert === 'resident' ? 'selected' : ''}>Inwoner</option>
+                                <option value="former_resident" ${user.relationship_with_holwert === 'former_resident' ? 'selected' : ''}>Oud-inwoner</option>
+                                <option value="vacation_home" ${user.relationship_with_holwert === 'vacation_home' ? 'selected' : ''}>Vakantiewoning</option>
+                                <option value="interested" ${user.relationship_with_holwert === 'interested' ? 'selected' : ''}>Geïnteresseerde</option>
+                                <option value="tourist" ${user.relationship_with_holwert === 'tourist' ? 'selected' : ''}>Toerist</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
                             <label>Profielfoto</label>
                             <div class="profile-image-section">
                                 <div class="current-image">
@@ -4788,7 +4868,8 @@ class HolwertAdmin {
                 phone: formData.get('phone') || null,
                 role: formData.get('role'),
                 is_active: formData.get('is_active') === 'true',
-                profile_image_url: profileImageUrl
+                profile_image_url: profileImageUrl,
+                relationship_with_holwert: formData.get('relationship_with_holwert') || null
             };
 
             console.log('Saving user data:', { ...userData, profile_image_url: profileImageUrl ? 'base64 data' : null });
@@ -4811,7 +4892,8 @@ class HolwertAdmin {
                 const result = await response.json();
                 console.log('Update successful:', result);
                 this.showNotification('Gebruiker succesvol bijgewerkt', 'success');
-                document.querySelector('.modal-overlay').remove();
+                const form = document.getElementById('editUserForm');
+                if (form) form.closest('.modal-overlay')?.remove();
                 this.loadUsersSectionData(); // Refresh de actieve tab
             } else {
                 let errorMessage = 'Onbekende fout';
