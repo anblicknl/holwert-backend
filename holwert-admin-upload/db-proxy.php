@@ -12,6 +12,12 @@ if (!defined('DB_PROXY_API_KEY')) {
     define('DB_PROXY_API_KEY', getenv('DB_PROXY_API_KEY') ?: getenv('PHP_PROXY_API_KEY') ?: 'holwert-db-proxy-2026-secure-key-change-in-production');
 }
 
+// DB-fallback: als je host geen env vars zet, vul hieronder in (uncomment + invullen), upload, niet committen met echte waarden
+// define('DB_PROXY_HOST', 'localhost');
+// define('DB_PROXY_USER', '');
+// define('DB_PROXY_PASS', '');
+// define('DB_PROXY_NAME', '');
+
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST, OPTIONS');
@@ -19,6 +25,18 @@ header('Access-Control-Allow-Headers: Content-Type, X-API-Key');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(204);
+    exit;
+}
+
+// GET ?check=1: toon versie zodat je kunt controleren of het juiste bestand op de server staat
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['check'])) {
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode([
+        'proxy' => 'db-proxy',
+        'updated' => '2026-02-26',
+        'bookmarks_fix' => true,
+        'tables' => ['bookmarks', 'push_notification_mutes', 'follows', 'push_tokens', 'users', 'organizations', 'news', 'events', 'content_pages'],
+    ]);
     exit;
 }
 
@@ -63,15 +81,24 @@ $action = isset($input['action']) ? strtolower($input['action']) : 'execute';
 
 // Haal tabelnamen uit de query (eenvoudige detectie)
 $tables = [];
-if (preg_match_all('/\b(?:FROM|JOIN|INTO|UPDATE)\s+([a-z_][a-z0-9_]*)/i', $query, $m)) {
-    foreach ($m[1] as $t) {
-        $tables[$t] = true;
-    }
+if (preg_match_all('/\bFROM\s+([a-z_][a-z0-9_]*)/i', $query, $m)) {
+    foreach ($m[1] as $t) { $tables[$t] = true; }
+}
+if (preg_match_all('/\bJOIN\s+([a-z_][a-z0-9_]*)/i', $query, $m)) {
+    foreach ($m[1] as $t) { $tables[$t] = true; }
+}
+if (preg_match_all('/\bINTO\s+([a-z_][a-z0-9_]*)/i', $query, $m)) {
+    foreach ($m[1] as $t) { $tables[$t] = true; }
+}
+// Alleen "UPDATE table SET", niet "UPDATE col = val" (bv. ON DUPLICATE KEY UPDATE user_id = user_id)
+if (preg_match_all('/\bUPDATE\s+([a-z_][a-z0-9_]*)\s+SET/i', $query, $m)) {
+    foreach ($m[1] as $t) { $tables[$t] = true; }
 }
 if (preg_match_all('/\bDELETE\s+FROM\s+([a-z_][a-z0-9_]*)/i', $query, $m)) {
-    foreach ($m[1] as $t) {
-        $tables[$t] = true;
-    }
+    foreach ($m[1] as $t) { $tables[$t] = true; }
+}
+if (preg_match_all('/\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-z_][a-z0-9_]*)/i', $query, $m)) {
+    foreach ($m[1] as $t) { $tables[$t] = true; }
 }
 
 foreach (array_keys($tables) as $table) {
@@ -91,15 +118,15 @@ if (!extension_loaded('mysqli')) {
     exit;
 }
 
-$dbHost = getenv('DB_PROXY_HOST') ?: getenv('DB_HOST') ?: 'localhost';
-$dbUser = getenv('DB_PROXY_USER') ?: getenv('DB_USER') ?: '';
-$dbPass = getenv('DB_PROXY_PASS') ?: getenv('DB_PASSWORD') ?: '';
-$dbName = getenv('DB_PROXY_NAME') ?: getenv('DB_NAME') ?: '';
-$dbPort = (int) (getenv('DB_PROXY_PORT') ?: getenv('DB_PORT') ?: 3306);
+$dbHost = getenv('DB_PROXY_HOST') ?: getenv('DB_HOST') ?: (defined('DB_PROXY_HOST') ? DB_PROXY_HOST : 'localhost');
+$dbUser = getenv('DB_PROXY_USER') ?: getenv('DB_USER') ?: (defined('DB_PROXY_USER') ? DB_PROXY_USER : '');
+$dbPass = getenv('DB_PROXY_PASS') ?: getenv('DB_PASSWORD') ?: (defined('DB_PROXY_PASS') ? DB_PROXY_PASS : '');
+$dbName = getenv('DB_PROXY_NAME') ?: getenv('DB_NAME') ?: (defined('DB_PROXY_NAME') ? DB_PROXY_NAME : '');
+$dbPort = (int) (getenv('DB_PROXY_PORT') ?: getenv('DB_PORT') ?: (defined('DB_PROXY_PORT') ? DB_PROXY_PORT : 3306));
 
 if ($dbUser === '' || $dbName === '') {
     http_response_code(500);
-    echo json_encode(['error' => 'Server config', 'message' => 'DB-gegevens niet gezet. Zet omgevingsvariabelen (bijv. DB_PROXY_USER, DB_PROXY_NAME, DB_PROXY_PASS) op de server.']);
+    echo json_encode(['error' => 'Server config', 'message' => 'DB-gegevens niet gezet. Zet omgevingsvariabelen op de server, of vul bovenaan dit bestand de regels DB_PROXY_USER, DB_PROXY_PASS, DB_PROXY_NAME in (uncomment + invullen) en upload opnieuw.']);
     exit;
 }
 

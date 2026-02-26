@@ -1069,21 +1069,23 @@ async function ensureBookmarksTable() {
   try {
     await executeQuery(`
       CREATE TABLE IF NOT EXISTS bookmarks (
-        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        news_id INTEGER NOT NULL REFERENCES news(id) ON DELETE CASCADE,
-        created_at TIMESTAMPTZ DEFAULT NOW(),
-        PRIMARY KEY (user_id, news_id)
-      );
+        user_id INT NOT NULL,
+        news_id INT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (user_id, news_id),
+        INDEX idx_bookmarks_user (user_id),
+        INDEX idx_bookmarks_news (news_id)
+      )
     `);
   } catch (e) {
     console.error('ensureBookmarksTable error:', e);
   }
 }
 
-// Of de fout komt doordat de proxy de tabel bookmarks niet toestaat
+// Alleen de expliciete proxy-weigering (niet elke fout waarin "bookmarks" voorkomt, bv. "table doesn't exist")
 function isBookmarksTableDisallowed(error) {
   const msg = (error?.message || '') + (error?.response?.data?.message || '');
-  return /disallowed table|bookmarks/i.test(msg);
+  return /disallowed table/i.test(msg);
 }
 
 // Fast bookmark count for profile stats
