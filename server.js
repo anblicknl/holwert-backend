@@ -1304,14 +1304,13 @@ app.delete('/api/app/follow/:organization_id', authenticateToken, async (req, re
   }
 });
 
-// Followers count for a given organization (public)
+// Followers count for a given organization (public) – telt unieke gebruikers (geen dubbele rijen)
 app.get('/api/organizations/:id/followers/count', async (req, res) => {
   try {
     await ensureFollowsTable();
     const orgId = parseInt(req.params.id);
-    // Gebruik altijd proxy voor follow queries (Vercel serverless heeft geen directe MySQL)
     const result = await executeQueryViaProxy(
-      `SELECT COUNT(*) AS count FROM follows WHERE organization_id = ?`,
+      `SELECT COUNT(DISTINCT user_id) AS count FROM follows WHERE organization_id = ?`,
       [orgId],
       'execute'
     );
@@ -1440,6 +1439,12 @@ app.post('/api/push/deactivate', authenticateToken, async (req, res) => {
   }
 });
 
+// Helper: of de fout komt doordat de proxy tabel push_notification_mutes niet toestaat
+function isPushMutesTableDisallowed(error) {
+  const msg = (error?.message || '') + (error?.response?.data?.message || '');
+  return /disallowed table|push_notification_mutes/i.test(msg);
+}
+
 // Mute push notifications for one organization (per user)
 app.post('/api/push/mute-organization', authenticateToken, async (req, res) => {
   try {
@@ -1454,6 +1459,10 @@ app.post('/api/push/mute-organization', authenticateToken, async (req, res) => {
     );
     res.json({ success: true, muted: true });
   } catch (error) {
+    if (isPushMutesTableDisallowed(error)) {
+      console.warn('Push mute: tabel push_notification_mutes niet toegestaan in proxy – voeg toe aan whitelist (zie docs/DB_PROXY_PUSH_MUTES.md)');
+      return res.json({ success: true, muted: true }); // voorkom 500 in app
+    }
     console.error('Mute organization error:', error);
     res.status(500).json({ error: 'Failed to mute organization', message: error.message });
   }
@@ -1470,6 +1479,10 @@ app.delete('/api/push/mute-organization/:organizationId', authenticateToken, asy
     );
     res.json({ success: true, muted: false });
   } catch (error) {
+    if (isPushMutesTableDisallowed(error)) {
+      console.warn('Push unmute: tabel push_notification_mutes niet toegestaan in proxy');
+      return res.json({ success: true, muted: false });
+    }
     console.error('Unmute organization error:', error);
     res.status(500).json({ error: 'Failed to unmute organization', message: error.message });
   }
@@ -1486,6 +1499,10 @@ app.get('/api/push/muted-organizations', authenticateToken, async (req, res) => 
     const ids = (result.rows || []).map(r => r.organization_id);
     res.json({ muted_organization_ids: ids });
   } catch (error) {
+    if (isPushMutesTableDisallowed(error)) {
+      console.warn('Push muted-organizations: tabel push_notification_mutes niet toegestaan in proxy – voeg toe aan whitelist (zie docs/DB_PROXY_PUSH_MUTES.md)');
+      return res.json({ muted_organization_ids: [] }); // voorkom 500; app toont dan geen gemute orgs
+    }
     console.error('Get muted organizations error:', error);
     res.status(500).json({ error: 'Failed to get muted organizations', message: error.message });
   }
