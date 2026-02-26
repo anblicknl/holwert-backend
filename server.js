@@ -1440,6 +1440,57 @@ app.post('/api/push/deactivate', authenticateToken, async (req, res) => {
   }
 });
 
+// Mute push notifications for one organization (per user)
+app.post('/api/push/mute-organization', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { organization_id } = req.body;
+    if (!organization_id) {
+      return res.status(400).json({ error: 'organization_id is required' });
+    }
+    await executeQuery(
+      'INSERT IGNORE INTO push_notification_mutes (user_id, organization_id) VALUES (?, ?)',
+      [userId, organization_id]
+    );
+    res.json({ success: true, muted: true });
+  } catch (error) {
+    console.error('Mute organization error:', error);
+    res.status(500).json({ error: 'Failed to mute organization', message: error.message });
+  }
+});
+
+// Unmute push notifications for one organization
+app.delete('/api/push/mute-organization/:organizationId', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const organizationId = req.params.organizationId;
+    await executeQuery(
+      'DELETE FROM push_notification_mutes WHERE user_id = ? AND organization_id = ?',
+      [userId, organizationId]
+    );
+    res.json({ success: true, muted: false });
+  } catch (error) {
+    console.error('Unmute organization error:', error);
+    res.status(500).json({ error: 'Failed to unmute organization', message: error.message });
+  }
+});
+
+// List organizations this user has muted (for UI)
+app.get('/api/push/muted-organizations', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const result = await executeQuery(
+      'SELECT organization_id FROM push_notification_mutes WHERE user_id = ?',
+      [userId]
+    );
+    const ids = (result.rows || []).map(r => r.organization_id);
+    res.json({ muted_organization_ids: ids });
+  } catch (error) {
+    console.error('Get muted organizations error:', error);
+    res.status(500).json({ error: 'Failed to get muted organizations', message: error.message });
+  }
+});
+
 // Get user's push tokens (for debugging/management)
 app.get('/api/push/tokens', authenticateToken, async (req, res) => {
   try {
@@ -3640,6 +3691,45 @@ app.get('/api/app/content-pages/:slug', async (req, res) => {
   }
 });
 
+// Public HTML pages for store links (Privacy Policy / Terms) – content from backend
+function contentPageHtml(slug, title, content) {
+  const safeTitle = String(title || slug).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const body = content || '<p>Geen inhoud.</p>';
+  return `<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${safeTitle} – Dorpsapp Holwert</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; max-width: 720px; margin: 0 auto; padding: 24px; line-height: 1.6; color: #1f2937; }
+    h1, h2 { color: #1e3a8a; }
+    a { color: #1e3a8a; }
+  </style>
+</head>
+<body>
+  ${body}
+</body>
+</html>`;
+}
+async function serveContentPageHtml(req, res, slug, defaultTitle, errorTitle) {
+  try {
+    const result = await executeQuery('SELECT slug, title, content FROM content_pages WHERE slug = ?', [slug]);
+    if (!result.rows || result.rows.length === 0) {
+      res.status(404).set('Content-Type', 'text/html; charset=utf-8').send(contentPageHtml(slug, defaultTitle, '<p>Pagina niet gevonden.</p>'));
+      return;
+    }
+    const { title, content } = result.rows[0];
+    res.set('Content-Type', 'text/html; charset=utf-8').send(contentPageHtml(slug, title, content));
+  } catch (e) {
+    res.status(500).set('Content-Type', 'text/html; charset=utf-8').send(contentPageHtml(slug, errorTitle, '<p>Kon pagina niet laden.</p>'));
+  }
+}
+app.get('/privacy', (req, res) => serveContentPageHtml(req, res, 'privacy', 'Privacybeleid', 'Fout'));
+app.get('/terms', (req, res) => serveContentPageHtml(req, res, 'terms', 'Gebruiksvoorwaarden', 'Fout'));
+app.get('/api/privacy', (req, res) => serveContentPageHtml(req, res, 'privacy', 'Privacybeleid', 'Fout'));
+app.get('/api/terms', (req, res) => serveContentPageHtml(req, res, 'terms', 'Gebruiksvoorwaarden', 'Fout'));
+
 // Get all users (admin)
 app.get('/api/admin/users', authenticateToken, async (req, res) => {
   try {
@@ -4494,7 +4584,7 @@ async function sendNotificationToUsers(userIds, notification, notificationType) 
        FROM push_tokens pt
        WHERE pt.user_id IN (${placeholders})
        AND pt.is_active = true
-       AND JSON_EXTRACT(pt.notification_preferences, CONCAT('$.', ?)) = true`,
+       AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(pt.notification_preferences, CONCAT('$.', ?))), 'true') = 'true'`,
       [...userIds, notificationType]
     );
     
@@ -4543,7 +4633,6 @@ async function sendNotificationToUsers(userIds, notification, notificationType) 
  */
 async function sendNotificationToFollowers(organizationId, notification, notificationType) {
   try {
-    // Get all followers of this organization
     await ensureFollowsTable();
     const followersResult = await executeQuery(
       'SELECT user_id FROM follows WHERE organization_id = ?',
@@ -4555,9 +4644,22 @@ async function sendNotificationToFollowers(organizationId, notification, notific
       return;
     }
     
-    const userIds = followersResult.rows.map(row => row.user_id);
+    let userIds = followersResult.rows.map(row => row.user_id);
+    const placeholdersMute = userIds.map(() => '?').join(',');
+    const mutedResult = await executeQuery(
+      `SELECT user_id FROM push_notification_mutes WHERE organization_id = ? AND user_id IN (${placeholdersMute})`,
+      [organizationId, ...userIds]
+    );
+    const mutedSet = new Set((mutedResult.rows || []).map(r => r.user_id));
+    userIds = userIds.filter(id => !mutedSet.has(id));
+    if (mutedSet.size) {
+      console.log(`📢 Excluding ${mutedSet.size} user(s) who muted org ${organizationId}`);
+    }
+    if (userIds.length === 0) {
+      console.log(`⚠️ No users to notify after applying mutes for organization ${organizationId}`);
+      return;
+    }
     console.log(`📢 Notifying ${userIds.length} follower(s) of organization ${organizationId}`);
-    
     return await sendNotificationToUsers(userIds, notification, notificationType);
   } catch (error) {
     console.error('❌ Error sending notification to followers:', error.message);
@@ -4724,6 +4826,16 @@ async function initializePushNotificationsTables() {
         INDEX idx_notification_history_user_id (user_id),
         INDEX idx_notification_history_type (notification_type),
         INDEX idx_notification_history_sent_at (sent_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    
+    await executeQuery(`
+      CREATE TABLE IF NOT EXISTS push_notification_mutes (
+        user_id INT NOT NULL,
+        organization_id INT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (user_id, organization_id),
+        INDEX idx_mutes_org (organization_id)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
     
