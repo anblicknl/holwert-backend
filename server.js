@@ -71,8 +71,7 @@ if (!JWT_SECRET) {
 
 // PHP Proxy URL (fallback als direct MySQL niet werkt)
 const PHP_PROXY_URL = process.env.PHP_PROXY_URL || 'https://holwert.appenvloed.com/admin/db-proxy.php';
-const PHP_PROXY_API_KEY = process.env.PHP_PROXY_API_KEY;
-if (!PHP_PROXY_API_KEY) console.warn('⚠️ PHP_PROXY_API_KEY niet geconfigureerd');
+const PHP_PROXY_API_KEY = process.env.PHP_PROXY_API_KEY || 'holwert-db-proxy-2026-secure-key-change-in-production';
 
 // ===== SIMPLE RATE LIMITING (no external deps) =====
 const loginAttempts = new Map();
