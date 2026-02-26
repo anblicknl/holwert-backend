@@ -1081,6 +1081,12 @@ async function ensureBookmarksTable() {
   }
 }
 
+// Of de fout komt doordat de proxy de tabel bookmarks niet toestaat
+function isBookmarksTableDisallowed(error) {
+  const msg = (error?.message || '') + (error?.response?.data?.message || '');
+  return /disallowed table|bookmarks/i.test(msg);
+}
+
 // Fast bookmark count for profile stats
 app.get('/api/app/bookmarks/count', authenticateToken, async (req, res) => {
   try {
@@ -1089,6 +1095,9 @@ app.get('/api/app/bookmarks/count', authenticateToken, async (req, res) => {
     const result = await executeQuery('SELECT COUNT(*) as count FROM bookmarks WHERE user_id = ?', [userId]);
     res.json({ count: result.rows?.[0]?.count ?? 0 });
   } catch (error) {
+    if (isBookmarksTableDisallowed(error)) {
+      console.warn('Bookmarks: tabel niet toegestaan in proxy – voeg bookmarks toe aan whitelist (zie docs/DB_PROXY_PUSH_MUTES.md)');
+    }
     res.json({ count: 0 });
   }
 });
@@ -1117,6 +1126,13 @@ app.get('/api/app/bookmarks', authenticateToken, async (req, res) => {
       return res.json({ bookmarks: result.rows || [] });
     }
   } catch (error) {
+    if (isBookmarksTableDisallowed(error)) {
+      console.warn('Bookmarks: tabel niet toegestaan in proxy');
+      return res.status(503).json({
+        error: 'Bookmarks temporarily unavailable',
+        message: 'Database-configuratie: voeg tabel "bookmarks" toe aan de proxy-whitelist. Zie docs/DB_PROXY_PUSH_MUTES.md'
+      });
+    }
     console.error('Get bookmarks error:', error);
     res.status(500).json({ error: 'Failed to get bookmarks', message: error.message });
   }
@@ -1129,8 +1145,11 @@ app.get('/api/app/bookmarks/:news_id', authenticateToken, async (req, res) => {
     const userId = req.user.userId;
     const newsId = parseInt(req.params.news_id);
     const result = await executeQuery(`SELECT 1 FROM bookmarks WHERE user_id = ? AND news_id = ?`, [userId, newsId]);
-    res.json({ bookmarked: result.length > 0 });
+    res.json({ bookmarked: (result.rows && result.rows.length > 0) });
   } catch (error) {
+    if (isBookmarksTableDisallowed(error)) {
+      return res.json({ bookmarked: false });
+    }
     console.error('Check bookmark error:', error);
     res.status(500).json({ error: 'Failed to check bookmark', message: error.message });
   }
@@ -1149,6 +1168,13 @@ app.post('/api/app/bookmarks', authenticateToken, async (req, res) => {
     `, [userId, news_id]);
     res.status(201).json({ success: true });
   } catch (error) {
+    if (isBookmarksTableDisallowed(error)) {
+      console.warn('Bookmarks: tabel niet toegestaan in proxy – voeg bookmarks toe aan whitelist');
+      return res.status(503).json({
+        error: 'Bookmarks temporarily unavailable',
+        message: 'Opslaan werkt nog niet: tabel "bookmarks" moet in de database-proxy whitelist. Zie docs/DB_PROXY_PUSH_MUTES.md'
+      });
+    }
     console.error('Add bookmark error:', error);
     res.status(500).json({ error: 'Failed to add bookmark', message: error.message });
   }
@@ -1163,6 +1189,13 @@ app.delete('/api/app/bookmarks/:news_id', authenticateToken, async (req, res) =>
     const result = await executeQuery(`DELETE FROM bookmarks WHERE user_id = ? AND news_id = ?`, [userId, newsId]);
     res.json({ success: true, removed: result.affectedRows > 0 });
   } catch (error) {
+    if (isBookmarksTableDisallowed(error)) {
+      console.warn('Bookmarks: tabel niet toegestaan in proxy');
+      return res.status(503).json({
+        error: 'Bookmarks temporarily unavailable',
+        message: 'Database-configuratie: voeg tabel "bookmarks" toe aan de proxy-whitelist.'
+      });
+    }
     console.error('Remove bookmark error:', error);
     res.status(500).json({ error: 'Failed to remove bookmark', message: error.message });
   }
