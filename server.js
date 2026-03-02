@@ -188,6 +188,7 @@ function getMigrationsReady() {
         await ensurePrivacyStatementColumn();
         await ensurePracticalInfoTable();
         await ensureContentPagesTable();
+        await ensureAfvalkalenderTable();
         await initializePushNotificationsTables();
         console.log('✅ Migraties voltooid');
       } catch (e) {
@@ -611,6 +612,117 @@ app.get('/api/test', (req, res) => {
     message: 'Test endpoint working - FIXED VERSION',
       timestamp: new Date().toISOString()
     });
+});
+
+// ===== WEATHER PROXY (OpenWeather achter backend; API-key niet in app) =====
+const HOLWERT_LAT = 53.368;
+const HOLWERT_LON = 5.968;
+const WEATHER_CACHE_TTL = 10 * 60 * 1000; // 10 min
+let weatherCache = { current: null, forecast: null, expires: 0 };
+
+app.get('/api/weather/current', async (req, res) => {
+  try {
+    const apiKey = process.env.OPENWEATHER_API_KEY;
+    if (!apiKey) {
+      return res.status(503).json({ error: 'Weer niet beschikbaar', message: 'OpenWeather API key niet geconfigureerd' });
+    }
+    const cacheKey = 'weather:current';
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
+
+    const url = `https://api.openweathermap.org/data/2.5/weather?lat=${HOLWERT_LAT}&lon=${HOLWERT_LON}&units=metric&lang=nl&appid=${apiKey}`;
+    const response = await axios.get(url, { timeout: 10000 });
+    const d = response.data;
+    const data = {
+      temperature: d.main?.temp ?? 0,
+      feels_like: d.main?.feels_like ?? d.main?.temp ?? 0,
+      description: d.weather?.[0]?.description ?? 'Onbekend',
+      icon: d.weather?.[0]?.icon ?? '01d',
+      humidity: d.main?.humidity ?? 0,
+      wind_speed: ((d.wind?.speed ?? 0) * 3.6),
+      sunrise: d.sys?.sunrise ?? null,
+      sunset: d.sys?.sunset ?? null,
+    };
+    setCache(cacheKey, data, WEATHER_CACHE_TTL);
+    res.json(data);
+  } catch (error) {
+    const msg = error.response?.data?.message || error.message || 'Weer kon niet worden geladen';
+    const status = error.response?.status === 401 ? 502 : 502;
+    res.status(status).json({ error: 'Weer niet beschikbaar', message: msg });
+  }
+});
+
+app.get('/api/weather/forecast', async (req, res) => {
+  try {
+    const apiKey = process.env.OPENWEATHER_API_KEY;
+    if (!apiKey) {
+      return res.status(503).json({ error: 'Weer niet beschikbaar', message: 'OpenWeather API key niet geconfigureerd' });
+    }
+    const cacheKey = 'weather:forecast';
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
+
+    const [currentRes, forecastRes] = await Promise.all([
+      axios.get(`https://api.openweathermap.org/data/2.5/weather?lat=${HOLWERT_LAT}&lon=${HOLWERT_LON}&units=metric&lang=nl&appid=${apiKey}`, { timeout: 10000 }),
+      axios.get(`https://api.openweathermap.org/data/2.5/forecast?lat=${HOLWERT_LAT}&lon=${HOLWERT_LON}&units=metric&lang=nl&appid=${apiKey}`, { timeout: 10000 }),
+    ]);
+    const currentData = currentRes.data;
+    const forecastData = forecastRes.data;
+
+    const current = {
+      temperature: currentData.main?.temp ?? 0,
+      feels_like: currentData.main?.feels_like ?? currentData.main?.temp ?? 0,
+      description: currentData.weather?.[0]?.description ?? 'Onbekend',
+      icon: currentData.weather?.[0]?.icon ?? '01d',
+      humidity: currentData.main?.humidity ?? 0,
+      wind_speed: ((currentData.wind?.speed ?? 0) * 3.6),
+      sunrise: currentData.sys?.sunrise ?? null,
+      sunset: currentData.sys?.sunset ?? null,
+    };
+
+    const list = forecastData.list || [];
+    const hourly = list.slice(0, 8).map((h) => ({
+      dt: h.dt,
+      temperature: h.main?.temp ?? 0,
+      icon: h.weather?.[0]?.icon ?? '01d',
+      description: h.weather?.[0]?.description ?? '',
+      pop: h.pop != null ? Math.round(h.pop * 100) : null,
+    }));
+
+    const dailyMap = new Map();
+    list.forEach((item) => {
+      const dateKey = new Date(item.dt * 1000).toISOString().split('T')[0];
+      if (!dailyMap.has(dateKey)) dailyMap.set(dateKey, []);
+      dailyMap.get(dateKey).push(item);
+    });
+    const daily = Array.from(dailyMap.entries()).slice(0, 7).map(([dateKey, items]) => {
+      const temps = items.map((i) => i.main?.temp ?? 0);
+      const pops = items.map((i) => i.pop != null ? i.pop * 100 : 0);
+      const avgPop = pops.length ? Math.round(pops.reduce((a, b) => a + b, 0) / pops.length) : null;
+      const iconCounts = new Map();
+      items.forEach((i) => {
+        const icon = i.weather?.[0]?.icon ?? '01d';
+        iconCounts.set(icon, (iconCounts.get(icon) || 0) + 1);
+      });
+      const mostCommon = Array.from(iconCounts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '01d';
+      const mid = items[Math.floor(items.length / 2)];
+      return {
+        dt: new Date(dateKey).getTime() / 1000,
+        temp_min: Math.min(...temps),
+        temp_max: Math.max(...temps),
+        icon: mostCommon,
+        description: mid?.weather?.[0]?.description ?? '',
+        pop: avgPop,
+      };
+    });
+
+    const data = { current, hourly, daily, sunrise: current.sunrise, sunset: current.sunset };
+    setCache(cacheKey, data, WEATHER_CACHE_TTL);
+    res.json(data);
+  } catch (error) {
+    const msg = error.response?.data?.message || error.message || 'Weer kon niet worden geladen';
+    res.status(502).json({ error: 'Weer niet beschikbaar', message: msg });
+  }
 });
 
 // Middleware to verify JWT token
@@ -1535,10 +1647,11 @@ app.get('/api/push/muted-organizations', authenticateToken, async (req, res) => 
   } catch (error) {
     if (isPushMutesTableDisallowed(error)) {
       console.warn('Push muted-organizations: tabel push_notification_mutes niet toegestaan in proxy – voeg toe aan whitelist (zie docs/DB_PROXY_PUSH_MUTES.md)');
-      return res.json({ muted_organization_ids: [] }); // voorkom 500; app toont dan geen gemute orgs
+    } else {
+      console.warn('Get muted organizations error (returning empty list):', error?.message || error);
     }
-    console.error('Get muted organizations error:', error);
-    res.status(500).json({ error: 'Failed to get muted organizations', message: error.message });
+    // Altijd 200 + lege lijst bij fout, zodat organisatiepagina gewoon werkt
+    return res.json({ muted_organization_ids: [] });
   }
 });
 
@@ -3968,6 +4081,173 @@ app.get('/api/app/practical-info', async (req, res) => {
   }
 });
 
+// ----- Afvalkalender (aanpasbare datums: oud papier, containers + extra) -----
+function getDefaultAfvalkalenderConfig() {
+  const firstTuesday = new Date();
+  firstTuesday.setDate(1);
+  while (firstTuesday.getDay() !== 2) firstTuesday.setDate(firstTuesday.getDate() + 1);
+  return {
+    oudPapier: { type: 'recurring', weekday: 2, interval_weeks: 6, first_date: firstTuesday.toISOString().slice(0, 10) },
+    // containers: standaard vrijdag, groen in even weken, grijs in oneven weken
+    containers: { weekday: 5, extra_dates: [], even_label: 'groen', odd_label: 'grijs' },
+  };
+}
+
+function addDays(d, n) {
+  const out = new Date(d);
+  out.setDate(out.getDate() + n);
+  return out;
+}
+
+function toDateStr(d) {
+  return d.toISOString().slice(0, 10);
+}
+
+function computeNextOudPapierDates(config, count = 8) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const out = [];
+  if (!config || !config.oudPapier) return out;
+  const c = config.oudPapier;
+  if (c.type === 'dates' && Array.isArray(c.dates)) {
+    const sorted = c.dates.map((x) => ({ d: new Date(x), s: x })).filter((x) => !isNaN(x.d.getTime()) && x.d >= today);
+    sorted.sort((a, b) => a.d - b.d);
+    sorted.slice(0, count).forEach((x) => out.push({ date: x.s, dateStr: x.d.toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' }) }));
+    return out;
+  }
+  if (c.type === 'recurring' && c.first_date && c.interval_weeks) {
+    let d = new Date(c.first_date);
+    d.setHours(0, 0, 0, 0);
+    const intervalDays = (c.interval_weeks || 6) * 7;
+    while (d < today) d = addDays(d, intervalDays);
+    for (let i = 0; i < count; i++) {
+      out.push({ date: toDateStr(d), dateStr: d.toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' }) });
+      d = addDays(d, intervalDays);
+    }
+    return out;
+  }
+  return out;
+}
+
+function getWeekNumber(d) {
+  const onejan = new Date(d.getFullYear(), 0, 1);
+  return Math.ceil(((d - onejan) / 86400000 + onejan.getDay() + 1) / 7);
+}
+
+function computeNextContainerDates(config, count = 8) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const weekday = (config && config.containers && config.containers.weekday) ?? 5;
+  const extra = (config && config.containers && config.containers.extra_dates) || [];
+  const evenLabel = (config && config.containers && config.containers.even_label) === 'grijs' ? 'grijs' : 'groen';
+  const oddLabel = (config && config.containers && config.containers.odd_label) === 'groen'
+    ? 'groen'
+    : (evenLabel === 'groen' ? 'grijs' : 'groen');
+  const fridays = [];
+  let d = new Date(today);
+  for (let i = 0; i < 60; i++) {
+    if (d.getDay() === weekday) {
+      const weekNum = getWeekNumber(d);
+      const label = weekNum % 2 === 0 ? evenLabel : oddLabel;
+      fridays.push({ date: toDateStr(d), dateStr: d.toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' }), label });
+    }
+    if (fridays.length >= count) break;
+    d.setDate(d.getDate() + 1);
+  }
+  const extraList = extra
+    .filter((x) => x && !isNaN(new Date(x).getTime()))
+    .map((x) => ({ date: x, dateStr: new Date(x).toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' }), label: 'extra' }));
+  const combined = [...fridays, ...extraList]
+    .filter((x) => new Date(x.date) >= today)
+    .sort((a, b) => new Date(a.date) - new Date(b.date))
+    .slice(0, count);
+  return combined;
+}
+
+function isTodayOudPapier(config) {
+  const today = toDateStr(new Date());
+  const next = computeNextOudPapierDates(config, 1);
+  if (next.length === 0) return false;
+  return next[0].date === today;
+}
+
+function isTodayContainer(config) {
+  const today = toDateStr(new Date());
+  const next = computeNextContainerDates(config, 2);
+  return next.some((x) => x.date === today);
+}
+
+app.get('/api/app/afvalkalender', async (req, res) => {
+  try {
+    const row = await executeQuery('SELECT config_json FROM afvalkalender_config WHERE id = 1 LIMIT 1').then((r) => r.rows && r.rows[0]);
+    let config = row && row.config_json;
+    if (typeof config === 'string') try { config = JSON.parse(config); } catch (e) { config = null; }
+    if (!config) config = getDefaultAfvalkalenderConfig();
+    const oudPapierDates = computeNextOudPapierDates(config, 8);
+    const containerDates = computeNextContainerDates(config, 8);
+    res.set('Cache-Control', 'public, max-age=300');
+    res.json({
+      config: { oudPapier: config.oudPapier, containers: config.containers },
+      oudPapierDates,
+      containerDates,
+      isTodayOudPapier: isTodayOudPapier(config),
+      isTodayContainer: isTodayContainer(config),
+    });
+  } catch (error) {
+    const def = getDefaultAfvalkalenderConfig();
+    res.set('Cache-Control', 'public, max-age=60');
+    res.json({
+      config: def,
+      oudPapierDates: computeNextOudPapierDates(def, 8),
+      containerDates: computeNextContainerDates(def, 8),
+      isTodayOudPapier: isTodayOudPapier(def),
+      isTodayContainer: isTodayContainer(def),
+    });
+  }
+});
+
+app.get('/api/admin/afvalkalender', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const row = await executeQuery('SELECT config_json FROM afvalkalender_config WHERE id = 1 LIMIT 1').then((r) => r.rows && r.rows[0]);
+    let config = row && row.config_json;
+    if (typeof config === 'string') try { config = JSON.parse(config); } catch (e) { config = null; }
+    if (!config) config = getDefaultAfvalkalenderConfig();
+    res.json({ config });
+  } catch (error) {
+    res.json({ config: getDefaultAfvalkalenderConfig() });
+  }
+});
+
+app.put('/api/admin/afvalkalender', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const oudPapier = body.oudPapier;
+    const containers = body.containers;
+    // Bepaal mapping voor groen/grijs op basis van even/oneven weken; default: even = groen, oneven = grijs
+    const evenLabel = containers && containers.even_label === 'grijs' ? 'grijs' : 'groen';
+    const oddLabel = evenLabel === 'groen' ? 'grijs' : 'groen';
+    const config = {
+      oudPapier: oudPapier && (oudPapier.type === 'dates'
+        ? { type: 'dates', dates: Array.isArray(oudPapier.dates) ? oudPapier.dates : [] }
+        : { type: 'recurring', weekday: oudPapier.weekday ?? 2, interval_weeks: oudPapier.interval_weeks ?? 6, first_date: oudPapier.first_date || new Date().toISOString().slice(0, 10) }),
+      containers: containers
+        ? {
+            weekday: containers.weekday ?? 5,
+            extra_dates: Array.isArray(containers.extra_dates) ? containers.extra_dates : [],
+            even_label: evenLabel,
+            odd_label: oddLabel,
+          }
+        : { weekday: 5, extra_dates: [], even_label: 'groen', odd_label: 'grijs' },
+    };
+    const json = JSON.stringify(config);
+    await executeQuery('INSERT INTO afvalkalender_config (id, config_json) VALUES (1, ?) ON DUPLICATE KEY UPDATE config_json = ?, updated_at = CURRENT_TIMESTAMP', [json, json]);
+    res.json({ success: true, config });
+  } catch (error) {
+    console.error('afvalkalender put error:', error);
+    res.status(500).json({ error: 'Kon afvalkalender niet opslaan', message: error.message });
+  }
+});
+
 // Delete own account (AVG/GDPR)
 app.delete('/api/auth/account', authenticateToken, async (req, res) => {
   try {
@@ -4750,6 +5030,18 @@ async function ensurePracticalInfoTable() {
     )`);
   } catch (e) {
     console.error('ensurePracticalInfoTable error:', e.message);
+  }
+}
+
+async function ensureAfvalkalenderTable() {
+  try {
+    await executeQuery(`CREATE TABLE IF NOT EXISTS afvalkalender_config (
+      id INT PRIMARY KEY DEFAULT 1,
+      config_json JSON NOT NULL,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )`);
+  } catch (e) {
+    console.error('ensureAfvalkalenderTable error:', e.message);
   }
 }
 

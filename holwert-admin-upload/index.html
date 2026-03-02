@@ -276,6 +276,68 @@
                         </tbody>
                     </table>
                 </div>
+
+                <hr style="margin: 2rem 0; border: 0; border-top: 1px solid #e0e0e0;">
+
+                <div class="section-header">
+                    <h3 style="margin: 0; font-size: 1.25rem;"><i class="fas fa-calendar-alt"></i> Afvalkalender</h3>
+                    <button type="button" id="saveAfvalkalenderBtn" class="btn btn-primary">
+                        <i class="fas fa-save"></i> Opslaan
+                    </button>
+                </div>
+                <p class="section-description" style="color:#666; margin-bottom:1rem;">
+                    Stel de ophaaldagen in voor oud papier en containers. Deze datums worden in de app (Praktisch) getoond en bepalen wanneer weer-tips over oud papier/containers verschijnen.
+                </p>
+                <div id="afvalkalenderForm" class="afvalkalender-form">
+                    <div class="form-card">
+                        <h4><i class="fas fa-archive"></i> Oud papier</h4>
+                        <div class="form-group">
+                            <label>Type</label>
+                            <select id="afvalOudPapierType">
+                                <option value="recurring">Herhaling (bijv. elke 6 weken op dinsdag)</option>
+                                <option value="dates">Vaste lijst datums</option>
+                            </select>
+                        </div>
+                        <div id="afvalOudPapierRecurring" class="form-row">
+                            <div class="form-group">
+                                <label>Weekdag (0=zo, 1=ma, 2=di, …)</label>
+                                <input type="number" id="afvalOudPapierWeekday" min="0" max="6" value="2" placeholder="2">
+                            </div>
+                            <div class="form-group">
+                                <label>Interval (weken)</label>
+                                <input type="number" id="afvalOudPapierInterval" min="1" value="6" placeholder="6">
+                            </div>
+                            <div class="form-group">
+                                <label>Eerste ophaaldatum (YYYY-MM-DD)</label>
+                                <input type="text" id="afvalOudPapierFirstDate" placeholder="2025-02-04">
+                            </div>
+                        </div>
+                        <div id="afvalOudPapierDates" class="form-group" style="display:none;">
+                            <label>Datums (één per regel, YYYY-MM-DD)</label>
+                            <textarea id="afvalOudPapierDatesList" rows="6" placeholder="2025-02-04"></textarea>
+                        </div>
+                    </div>
+                    <div class="form-card">
+                        <h4><i class="fas fa-trash-alt"></i> Containers</h4>
+                        <div class="form-group">
+                            <label>Standaard weekdag (5 = vrijdag)</label>
+                            <input type="number" id="afvalContainersWeekday" min="0" max="6" value="5" placeholder="5">
+                        </div>
+                        <div class="form-group">
+                            <label>Extra ophaaldagen (één per regel, YYYY-MM-DD)</label>
+                            <textarea id="afvalContainersExtra" rows="3" placeholder="2025-07-04"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>Groene container in</label>
+                            <select id="afvalContainersGreenIn">
+                                <option value="even">Even weken</option>
+                                <option value="odd">Oneven weken</option>
+                            </select>
+                            <small class="text-muted">De grijze container wordt automatisch aan de andere weken gekoppeld.</small>
+                        </div>
+                    </div>
+                </div>
+                <div id="afvalkalenderMessage" class="form-message"></div>
             </section>
 
             <!-- Content Pages Section -->
@@ -328,10 +390,10 @@
     </div>
 
     <script>
-        console.log('✅ CORRECT BESTAND GELADEN: index.html met admin-panel.js');
+        console.log('✅ CORRECT BESTAND GELADEN: index.html met app.js');
         console.log('📅 Timestamp:', new Date().toISOString());
         console.log('🔧 VERSION: IMAGE-PREVIEW-STYLING-FINAL');
     </script>
-    <script src="admin-panel.js?v=1739376000"></script>
+    <script src="app.js?v=1739376000"></script>
 </body>
 </html>

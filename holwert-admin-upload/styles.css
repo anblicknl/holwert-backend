@@ -1086,3 +1086,44 @@ input, select, textarea {
     color: #ffffff;
     transform: translateY(-1px);
 }
+
+/* Afvalkalender (Content sectie) */
+.afvalkalender-form {
+    max-width: 640px;
+}
+.afvalkalender-form .form-card {
+    background: #fff;
+    border-radius: 12px;
+    padding: 1.25rem;
+    margin-bottom: 1.25rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    border: 1px solid #e0e0e0;
+}
+.afvalkalender-form .form-card h4 {
+    margin-bottom: 1rem;
+    font-size: 1.1rem;
+    color: #333;
+}
+.afvalkalender-form .form-card h4 i {
+    margin-right: 0.5rem;
+    color: #555;
+}
+.afvalkalender-form .form-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 1rem;
+}
+.form-message {
+    margin-top: 1rem;
+    padding: 0.75rem;
+    border-radius: 8px;
+    font-size: 0.95rem;
+}
+.form-message.success {
+    background: #d4edda;
+    color: #155724;
+}
+.form-message.error {
+    background: #f8d7da;
+    color: #721c24;
+}

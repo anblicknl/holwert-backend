@@ -67,6 +67,28 @@ class HolwertAdmin {
                 this.showSection(section);
             });
         });
+
+        // Praktisch (tegels) - nieuw item
+        const addPracticalBtn = document.getElementById('addPracticalBtn');
+        if (addPracticalBtn) {
+            addPracticalBtn.addEventListener('click', () => this.createPracticalItem());
+        }
+
+        // Afvalkalender (Content sectie)
+        const saveAfvalkalenderBtn = document.getElementById('saveAfvalkalenderBtn');
+        if (saveAfvalkalenderBtn) {
+            saveAfvalkalenderBtn.addEventListener('click', () => this.saveAfvalkalender());
+        }
+        const afvalOudPapierType = document.getElementById('afvalOudPapierType');
+        if (afvalOudPapierType) {
+            afvalOudPapierType.addEventListener('change', (e) => {
+                const isRecurring = e.target.value === 'recurring';
+                const recurringEl = document.getElementById('afvalOudPapierRecurring');
+                const datesEl = document.getElementById('afvalOudPapierDates');
+                if (recurringEl) recurringEl.style.display = isRecurring ? 'block' : 'none';
+                if (datesEl) datesEl.style.display = isRecurring ? 'none' : 'block';
+            });
+        }
     }
 
     checkAuth() {
@@ -371,6 +393,13 @@ class HolwertAdmin {
                 break;
             case 'moderation':
                 this.loadModeration();
+                break;
+            case 'practical':
+                this.loadPractical();
+                this.loadAfvalkalender();
+                break;
+            case 'content-pages':
+                this.loadContentPages();
                 break;
         }
     }
@@ -2570,6 +2599,331 @@ class HolwertAdmin {
 
     async loadFoundLost() {
         document.getElementById('foundLostContent').innerHTML = '<p class="text-muted">Gevonden/Verloren sectie - Wordt geïmplementeerd</p>';
+    }
+
+    // ---- Afvalkalender (Content) ----
+    async loadAfvalkalender() {
+        const msgEl = document.getElementById('afvalkalenderMessage');
+        if (msgEl) msgEl.textContent = '';
+        const typeEl = document.getElementById('afvalOudPapierType');
+        const weekdayOp = document.getElementById('afvalOudPapierWeekday');
+        const intervalOp = document.getElementById('afvalOudPapierInterval');
+        const firstDateOp = document.getElementById('afvalOudPapierFirstDate');
+        const datesListOp = document.getElementById('afvalOudPapierDatesList');
+        const weekdayCont = document.getElementById('afvalContainersWeekday');
+        const extraCont = document.getElementById('afvalContainersExtra');
+        if (!typeEl) return;
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/admin/afvalkalender`, {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            if (!response.ok) throw new Error('Kon afvalkalender niet laden');
+            const res = await response.json();
+            const c = res.config || {};
+            const op = c.oudPapier || {};
+            const cont = c.containers || {};
+            typeEl.value = op.type || 'recurring';
+            if (weekdayOp) weekdayOp.value = op.weekday ?? 2;
+            if (intervalOp) intervalOp.value = op.interval_weeks ?? 6;
+            if (firstDateOp) firstDateOp.value = op.first_date || '';
+            if (datesListOp) datesListOp.value = (op.dates || []).join('\n');
+            if (weekdayCont) weekdayCont.value = cont.weekday ?? 5;
+            if (extraCont) extraCont.value = (cont.extra_dates || []).join('\n');
+            const greenInEl = document.getElementById('afvalContainersGreenIn');
+            if (greenInEl) {
+                const evenLabel = cont.even_label === 'grijs' ? 'grijs' : 'groen';
+                const oddLabel = cont.odd_label === 'groen' ? 'groen' : (evenLabel === 'groen' ? 'grijs' : 'groen');
+                greenInEl.value = evenLabel === 'groen' ? 'even' : 'odd';
+            }
+            const isRecurring = (op.type || 'recurring') === 'recurring';
+            const recurringEl = document.getElementById('afvalOudPapierRecurring');
+            const datesEl = document.getElementById('afvalOudPapierDates');
+            if (recurringEl) recurringEl.style.display = isRecurring ? 'block' : 'none';
+            if (datesEl) datesEl.style.display = isRecurring ? 'none' : 'block';
+        } catch (error) {
+            if (msgEl) {
+                msgEl.textContent = 'Kon afvalkalender niet laden: ' + (error.message || error);
+                msgEl.className = 'form-message error';
+            }
+        }
+    }
+
+    // ---- Content-pagina's (privacy / voorwaarden) ----
+
+    async loadContentPages() {
+        const container = document.getElementById('contentPagesContainer');
+        if (!container) return;
+        container.innerHTML = '<p>Content pagina\'s laden...</p>';
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/admin/content-pages`, {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            if (!response.ok) {
+                const text = await response.text().catch(() => '');
+                console.error('Failed to load content pages:', response.status, text);
+                container.innerHTML = `<p>Fout bij laden van content pagina's (status ${response.status}).</p>`;
+                return;
+            }
+            const data = await response.json();
+            const pages = data.pages || [];
+            if (!pages.length) {
+                container.innerHTML = '<p>Geen content pagina\'s gevonden.</p>';
+                return;
+            }
+            container.innerHTML = pages.map(page => `
+                <div class="form-card" data-slug="${page.slug}">
+                    <h4>${page.title || page.slug}</h4>
+                    <p class="text-muted" style="margin-bottom: 0.75rem;">Slug: <code>${page.slug}</code></p>
+                    <div class="form-group">
+                        <label>Titel</label>
+                        <input type="text" id="contentPageTitle-${page.slug}" value="${(page.title || '').replace(/"/g, '&quot;')}">
+                    </div>
+                    <div class="form-group">
+                        <label>Tekst</label>
+                        <textarea id="contentPageContent-${page.slug}" rows="6">${page.content || ''}</textarea>
+                    </div>
+                    <button type="button" class="btn btn-primary" onclick="admin.saveContentPage('${page.slug}')">
+                        <i class="fas fa-save"></i> Opslaan
+                    </button>
+                </div>
+            `).join('');
+        } catch (error) {
+            console.error('Error loading content pages:', error);
+            container.innerHTML = '<p>Fout bij laden van content pagina\'s.</p>';
+        }
+    }
+
+    async saveContentPage(slug) {
+        const titleEl = document.getElementById(`contentPageTitle-${slug}`);
+        const contentEl = document.getElementById(`contentPageContent-${slug}`);
+        if (!titleEl || !contentEl) {
+            alert('Kan velden voor deze pagina niet vinden.');
+            return;
+        }
+        const title = titleEl.value.trim();
+        const content = contentEl.value;
+        if (!title) {
+            alert('Titel is verplicht.');
+            return;
+        }
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/admin/content-pages/${slug}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.token}`
+                },
+                body: JSON.stringify({ title, content })
+            });
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                alert('Opslaan mislukt: ' + (err.error || err.message || `status ${response.status}`));
+                return;
+            }
+            alert('Pagina opgeslagen.');
+        } catch (error) {
+            console.error('Error saving content page:', error);
+            alert('Fout bij opslaan van content pagina.');
+        }
+    }
+
+    // ---- Praktisch (tegels/kaarten) ----
+
+    async loadPractical() {
+        const tbody = document.getElementById('practicalTableBody');
+        if (!tbody) return;
+        tbody.innerHTML = '<tr><td colspan="6">Laden...</td></tr>';
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/admin/practical-info`, {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            if (!response.ok) {
+                const errText = await response.text().catch(() => '');
+                console.error('Failed to load practical info:', response.status, errText);
+                tbody.innerHTML = `<tr><td colspan="6">Fout bij laden (status ${response.status})</td></tr>`;
+                return;
+            }
+            const data = await response.json();
+            const items = data.items || [];
+            if (!items.length) {
+                tbody.innerHTML = '<tr><td colspan="6">Nog geen praktische items. Klik op \"Nieuw item\" om de eerste tegel toe te voegen.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = items.map(item => `
+                <tr>
+                    <td>${item.sort_order ?? 0}</td>
+                    <td><i class="${item.icon || 'fas fa-info-circle'}"></i></td>
+                    <td>${item.title || ''}</td>
+                    <td>${item.type || 'info'}</td>
+                    <td><span class="status-badge status-${item.is_active ? 'active' : 'inactive'}">${item.is_active ? 'Actief' : 'Inactief'}</span></td>
+                    <td>
+                        <button class="btn btn-sm btn-warning" onclick="admin.editPractical(${item.id})"><i class="fas fa-edit"></i></button>
+                        <button class="btn btn-sm btn-danger" onclick="admin.deletePractical(${item.id})"><i class="fas fa-trash"></i></button>
+                    </td>
+                </tr>
+            `).join('');
+        } catch (error) {
+            console.error('Error loading practical info:', error);
+            tbody.innerHTML = '<tr><td colspan="6">Fout bij laden praktische info</td></tr>';
+        }
+    }
+
+    async createPracticalItem() {
+        try {
+            const title = prompt('Titel van de tegel (verplicht):');
+            if (!title) return;
+            const subtitle = prompt('Subtitel (optioneel):', '');
+            const icon = prompt('Icoon (bijv. \"fas fa-info-circle\"):', 'fas fa-info-circle') || 'fas fa-info-circle';
+            const type = prompt('Type (bijv. \"info\" of \"link\"):', 'info') || 'info';
+            const url = type === 'link' ? (prompt('Link-URL (optioneel):', '') || '') : '';
+            const sortStr = prompt('Volgorde (0 = bovenaan):', '0') || '0';
+            const sort_order = parseInt(sortStr, 10) || 0;
+            const isActive = confirm('Tegel direct actief maken in de app?');
+
+            const body = { title, subtitle, icon, content: null, type, url, sort_order, is_active: isActive };
+            const response = await fetch(`${this.apiBaseUrl}/admin/practical-info`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.token}`
+                },
+                body: JSON.stringify(body)
+            });
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                alert('Opslaan mislukt: ' + (err.error || err.message || `status ${response.status}`));
+                return;
+            }
+            await this.loadPractical();
+        } catch (error) {
+            console.error('Error creating practical item:', error);
+            alert('Fout bij aanmaken praktische tegel.');
+        }
+    }
+
+    async editPractical(id) {
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/admin/practical-info`, {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            if (!response.ok) {
+                alert('Kon praktische items niet laden voor bewerken.');
+                return;
+            }
+            const data = await response.json();
+            const items = data.items || [];
+            const item = items.find(x => x.id === id);
+            if (!item) {
+                alert('Item niet gevonden.');
+                return;
+            }
+
+            const title = prompt('Titel van de tegel:', item.title || '') ?? item.title;
+            if (!title) return;
+            const subtitle = prompt('Subtitel (optioneel):', item.subtitle || '') ?? item.subtitle;
+            const icon = prompt('Icoon (bijv. \"fas fa-info-circle\"):', item.icon || 'fas fa-info-circle') || item.icon;
+            const type = prompt('Type (bijv. \"info\" of \"link\"):', item.type || 'info') || item.type;
+            const url = type === 'link'
+                ? (prompt('Link-URL (optioneel):', item.url || '') ?? item.url)
+                : (item.url || '');
+            const sortStr = prompt('Volgorde (0 = bovenaan):', String(item.sort_order ?? 0)) || String(item.sort_order ?? 0);
+            const sort_order = parseInt(sortStr, 10) || 0;
+            const isActive = confirm('Tegel actief maken in de app? (OK = ja, Annuleren = nee)');
+
+            const body = { title, subtitle, icon, content: item.content || null, type, url, sort_order, is_active: isActive };
+            const saveResp = await fetch(`${this.apiBaseUrl}/admin/practical-info/${id}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.token}`
+                },
+                body: JSON.stringify(body)
+            });
+            if (!saveResp.ok) {
+                const err = await saveResp.json().catch(() => ({}));
+                alert('Opslaan mislukt: ' + (err.error || err.message || `status ${saveResp.status}`));
+                return;
+            }
+            await this.loadPractical();
+        } catch (error) {
+            console.error('Error editing practical item:', error);
+            alert('Fout bij bewerken praktische tegel.');
+        }
+    }
+
+    async deletePractical(id) {
+        if (!confirm('Weet je zeker dat je deze tegel wilt verwijderen?')) {
+            return;
+        }
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/admin/practical-info/${id}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                alert('Verwijderen mislukt: ' + (err.error || err.message || `status ${response.status}`));
+                return;
+            }
+            await this.loadPractical();
+        } catch (error) {
+            console.error('Error deleting practical item:', error);
+            alert('Fout bij verwijderen praktische tegel.');
+        }
+    }
+
+    async saveAfvalkalender() {
+        const msgEl = document.getElementById('afvalkalenderMessage');
+        if (msgEl) msgEl.textContent = '';
+        const type = document.getElementById('afvalOudPapierType').value;
+        const oudPapier = type === 'dates'
+            ? {
+                type: 'dates',
+                dates: document.getElementById('afvalOudPapierDatesList').value.split('\n').map(s => s.trim()).filter(Boolean)
+            }
+            : {
+                type: 'recurring',
+                weekday: parseInt(document.getElementById('afvalOudPapierWeekday').value, 10) || 2,
+                interval_weeks: parseInt(document.getElementById('afvalOudPapierInterval').value, 10) || 6,
+                first_date: document.getElementById('afvalOudPapierFirstDate').value.trim() || new Date().toISOString().slice(0, 10)
+            };
+        const extraText = document.getElementById('afvalContainersExtra').value.split('\n').map(s => s.trim()).filter(Boolean);
+        const greenInEl = document.getElementById('afvalContainersGreenIn');
+        const greenIn = greenInEl && greenInEl.value === 'odd' ? 'odd' : 'even';
+        const even_label = greenIn === 'odd' ? 'grijs' : 'groen';
+        const odd_label = even_label === 'groen' ? 'grijs' : 'groen';
+        const containers = {
+            weekday: parseInt(document.getElementById('afvalContainersWeekday').value, 10) || 5,
+            extra_dates: extraText,
+            even_label,
+            odd_label
+        };
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/admin/afvalkalender`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.token}`
+                },
+                body: JSON.stringify({ oudPapier, containers })
+            });
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                throw new Error(err.error || err.message || 'Opslaan mislukt');
+            }
+            if (msgEl) {
+                msgEl.textContent = 'Afvalkalender opgeslagen. De app toont de nieuwe datums na vernieuwen.';
+                msgEl.className = 'form-message success';
+            }
+            this.showNotification('Afvalkalender opgeslagen. De app toont de nieuwe datums na vernieuwen.', 'success');
+        } catch (error) {
+            if (msgEl) {
+                msgEl.textContent = 'Opslaan mislukt: ' + (error.message || error);
+                msgEl.className = 'form-message error';
+            }
+            // Extra feedback als het message-element om wat voor reden dan ook niet zichtbaar is
+            alert('Opslaan afvalkalender mislukt: ' + (error.message || error));
+        }
     }
 
     async loadModeration() {

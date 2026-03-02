@@ -12,11 +12,18 @@ if (!defined('DB_PROXY_API_KEY')) {
     define('DB_PROXY_API_KEY', getenv('DB_PROXY_API_KEY') ?: getenv('PHP_PROXY_API_KEY') ?: 'holwert-db-proxy-2026-secure-key-change-in-production');
 }
 
-// DB-fallback: als je host geen env vars zet, vul hieronder in (uncomment + invullen), upload, niet committen met echte waarden
-// define('DB_PROXY_HOST', 'localhost');
-// define('DB_PROXY_USER', '');
-// define('DB_PROXY_PASS', '');
-// define('DB_PROXY_NAME', '');
+// DB: env vars > credentials-bestand > fallback uit oorspronkelijke proxy (commit 0508d6f)
+if (is_file(__DIR__ . '/db-proxy-credentials.php')) {
+    require __DIR__ . '/db-proxy-credentials.php';
+}
+$hasDbFromEnvOrFile = getenv('DB_PROXY_USER') || getenv('DB_USER') || (defined('DB_PROXY_USER') && DB_PROXY_USER !== '');
+if (!$hasDbFromEnvOrFile) {
+    if (!defined('DB_PROXY_HOST')) define('DB_PROXY_HOST', 'localhost');
+    if (!defined('DB_PROXY_PORT')) define('DB_PROXY_PORT', 3306);
+    if (!defined('DB_PROXY_USER')) define('DB_PROXY_USER', 'db_holwert');
+    if (!defined('DB_PROXY_PASS')) define('DB_PROXY_PASS', 'h0lwert.2026');
+    if (!defined('DB_PROXY_NAME')) define('DB_PROXY_NAME', 'appenvlo_holwert');
+}
 
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
@@ -33,9 +40,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['check'])) {
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode([
         'proxy' => 'db-proxy',
-        'updated' => '2026-02-26',
-        'bookmarks_fix' => true,
-        'tables' => ['bookmarks', 'push_notification_mutes', 'follows', 'push_tokens', 'users', 'organizations', 'news', 'events', 'content_pages'],
+        'version' => '2026-02-26-v2',
+        'tables' => ['bookmarks', 'push_notification_mutes', 'follows', 'push_tokens', 'users', 'organizations', 'news', 'events', 'content_pages', 'practical_info'],
     ]);
     exit;
 }
@@ -73,6 +79,8 @@ $allowedTables = [
     'news',
     'events',
     'content_pages',
+    'practical_info',
+    'afvalkalender_config',
 ];
 
 $query = $input['query'];
@@ -101,15 +109,19 @@ if (preg_match_all('/\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-z_][a-z0-9_
     foreach ($m[1] as $t) { $tables[$t] = true; }
 }
 
+$rejected = [];
 foreach (array_keys($tables) as $table) {
     if (!in_array($table, $allowedTables, true)) {
-        http_response_code(403);
-        echo json_encode([
-            'error' => 'Forbidden - Query references disallowed table(s)',
-            'message' => 'Forbidden - Query references disallowed table(s)',
-        ]);
-        exit;
+        $rejected[] = $table;
     }
+}
+if (count($rejected) > 0) {
+    http_response_code(403);
+    echo json_encode([
+        'error' => 'Forbidden - Query references disallowed table(s)',
+        'message' => 'Forbidden - Tabel(s) niet toegestaan: ' . implode(', ', $rejected),
+    ]);
+    exit;
 }
 
 if (!extension_loaded('mysqli')) {
@@ -126,7 +138,7 @@ $dbPort = (int) (getenv('DB_PROXY_PORT') ?: getenv('DB_PORT') ?: (defined('DB_PR
 
 if ($dbUser === '' || $dbName === '') {
     http_response_code(500);
-    echo json_encode(['error' => 'Server config', 'message' => 'DB-gegevens niet gezet. Zet omgevingsvariabelen op de server, of vul bovenaan dit bestand de regels DB_PROXY_USER, DB_PROXY_PASS, DB_PROXY_NAME in (uncomment + invullen) en upload opnieuw.']);
+    echo json_encode(['error' => 'Server config', 'message' => 'DB-gegevens ontbreken. Maak db-proxy-credentials.php van db-proxy-credentials.sample.php, vul user/pass/name in, upload naast db-proxy.php. Of zet env vars op de server.']);
     exit;
 }
 
