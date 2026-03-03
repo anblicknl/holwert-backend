@@ -1810,6 +1810,98 @@ app.get('/api/news/:id', async (req, res) => {
   }
 });
 
+// Public share page for a single news article with Open Graph meta tags
+app.get('/news/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await executeQuery(
+      `SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt, n.image_url,
+              COALESCE(n.published_at, n.created_at) as published_at
+       FROM news n
+       WHERE n.id = ? AND n.is_published = true
+       LIMIT 1`,
+      [id]
+    );
+    if (!result.rows || result.rows.length === 0) {
+      return res.status(404).set('Content-Type', 'text/html; charset=utf-8').send('<!doctype html><html><head><meta charset="utf-8"><title>Bericht niet gevonden</title></head><body><h1>Bericht niet gevonden</h1><p>Dit nieuwsbericht bestaat niet (meer).</p></body></html>');
+    }
+    const article = result.rows[0];
+    const title = article.title || 'Nieuws uit Holwert';
+    const description =
+      article.excerpt ||
+      (article.content ? String(article.content).replace(/<[^>]+>/g, '').slice(0, 200) : 'Nieuws uit Holwert.');
+    const image = article.image_url || '';
+    const url = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
+
+    const iosStoreUrl = 'https://apps.apple.com/nl/app/idXXXXXXXXX'; // TODO: vervang door echte App Store-link
+    const androidStoreUrl = 'https://play.google.com/store/apps/details?id=com.holwert.dorpsapp';
+    const appDeepLink = `holwert://news/${id}`;
+
+    const html = `<!doctype html>
+<html lang="nl">
+  <head>
+    <meta charset="utf-8" />
+    <title>${title}</title>
+    <meta name="description" content="${description}" />
+    <meta property="og:type" content="article" />
+    <meta property="og:title" content="${title}" />
+    <meta property="og:description" content="${description}" />
+    <meta property="og:url" content="${url}" />
+    ${image ? `<meta property="og:image" content="${image}" />` : ''}
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="${title}" />
+    <meta name="twitter:description" content="${description}" />
+    ${image ? `<meta name="twitter:image" content="${image}" />` : ''}
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; padding: 24px; background: #f5f5f5; color: #222; }
+      .card { max-width: 720px; margin: 0 auto; background: #fff; border-radius: 16px; padding: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.08); }
+      h1 { font-size: 26px; margin-bottom: 12px; }
+      .meta { font-size: 14px; color: #666; margin-bottom: 16px; }
+      img { max-width: 100%; border-radius: 12px; margin-bottom: 16px; }
+      .content { font-size: 16px; line-height: 1.6; }
+      .badge { display: inline-block; padding: 4px 10px; border-radius: 999px; background: #2563EB; color: #fff; font-size: 12px; margin-bottom: 12px; }
+      .store-hint { margin-top: 24px; font-size: 14px; color: #555; }
+      .store-buttons { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; }
+      .btn { display: inline-flex; align-items: center; justify-content: center; padding: 10px 16px; border-radius: 999px; font-size: 14px; text-decoration: none; border: none; cursor: pointer; }
+      .btn-primary { background: #2563EB; color: #fff; }
+      .btn-outline { background: #fff; color: #2563EB; border: 1px solid #2563EB; }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <div class="badge">Holwert Dorpsapp</div>
+      <h1>${title}</h1>
+      ${
+        article.published_at
+          ? `<div class="meta">${new Date(article.published_at).toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div>`
+          : ''
+      }
+      ${image ? `<img src="${image}" alt="${title}" />` : ''}
+      <div class="content">
+        ${article.content || ''}
+      </div>
+      <div class="store-hint">
+        <p>Dit bericht staat in de Holwert Dorpsapp.</p>
+        <div class="store-buttons">
+          <a class="btn btn-primary" href="${appDeepLink}">Open in de app</a>
+          <a class="btn btn-outline" href="${androidStoreUrl}" target="_blank" rel="noopener">Open in Google Play</a>
+          <a class="btn btn-outline" href="${iosStoreUrl}" target="_blank" rel="noopener">Binnenkort in de App Store</a>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>`;
+    res.status(200).set('Content-Type', 'text/html; charset=utf-8').send(html);
+  } catch (error) {
+    console.error('Share news page error:', error);
+    res
+      .status(500)
+      .set('Content-Type', 'text/html; charset=utf-8')
+      .send('<!doctype html><html><head><meta charset="utf-8"><title>Fout</title></head><body><h1>Er ging iets mis</h1><p>Het nieuwsbericht kon niet geladen worden.</p></body></html>');
+  }
+});
+
 // Create news article with workflow logic
 app.post('/api/news', authenticateToken, async (req, res) => {
   try {
@@ -2991,7 +3083,8 @@ app.get('/api/admin/organizations', authenticateToken, async (req, res) => {
         o.name, 
         o.description, 
         o.is_approved, 
-        o.created_at
+        o.created_at,
+        o.logo_url
       FROM organizations o
       WHERE 1=1
     `;

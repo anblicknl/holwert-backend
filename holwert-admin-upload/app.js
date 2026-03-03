@@ -8,6 +8,11 @@ class HolwertAdmin {
             : 'https://holwert-backend.vercel.app/api';
         this.token = localStorage.getItem('authToken');
         this.currentUser = null;
+
+        // Gebruikers-tab state (Dorpsbewoners / Organisaties)
+        this.currentUsersTab = 'dorpsbewoners';
+        this.allUsersCache = [];
+
         this.init();
     }
 
@@ -55,6 +60,56 @@ class HolwertAdmin {
         if (addUserBtn) {
             addUserBtn.addEventListener('click', () => {
                 this.showCreateUserModal();
+            });
+        }
+
+        // Add Event button
+        const addEventBtn = document.getElementById('addEventBtn');
+        if (addEventBtn) {
+            addEventBtn.addEventListener('click', () => {
+                console.log('[Admin] + Nieuw evenement klik geregistreerd');
+                this.openCreateEventModal();
+            });
+        }
+
+        // Users tabs (Dorpsbewoners / Organisaties)
+        const userTabs = document.querySelectorAll('.users-tab');
+        if (userTabs && userTabs.length) {
+            userTabs.forEach(tab => {
+                tab.addEventListener('click', () => {
+                    const tabKey = tab.getAttribute('data-users-tab') || 'dorpsbewoners';
+                    console.log('[Admin] Users tab klik:', tabKey);
+                    this.currentUsersTab = tabKey;
+
+                    // Active styling
+                    userTabs.forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+
+                    // Herteken gebruikerslijst op basis van geselecteerde tab
+                    this.updateUsersView();
+                });
+            });
+        }
+
+        // Organizations table actions (edit/delete) via event delegation
+        const organizationsTableBody = document.getElementById('organizationsTableBody');
+        if (organizationsTableBody) {
+            organizationsTableBody.addEventListener('click', (e) => {
+                const editBtn = e.target.closest('.organization-edit-btn');
+                const deleteBtn = e.target.closest('.organization-delete-btn');
+                if (editBtn && editBtn.dataset.orgId) {
+                    const orgId = parseInt(editBtn.dataset.orgId, 10);
+                    console.log('[Admin] Edit organization klik geregistreerd, id =', orgId);
+                    if (!isNaN(orgId)) {
+                        this.editOrganization(orgId);
+                    }
+                } else if (deleteBtn && deleteBtn.dataset.orgId) {
+                    const orgId = parseInt(deleteBtn.dataset.orgId, 10);
+                    console.log('[Admin] Delete organization klik geregistreerd, id =', orgId);
+                    if (!isNaN(orgId)) {
+                        this.deleteOrganization(orgId);
+                    }
+                }
             });
         }
 
@@ -778,7 +833,8 @@ class HolwertAdmin {
             if (response.ok) {
                 const data = await response.json();
                 console.log('Users loaded:', data);
-                this.displayUsers(data.users);
+                this.allUsersCache = Array.isArray(data.users) ? data.users : [];
+                this.updateUsersView();
             } else {
                 console.error('Failed to load users:', response.status);
                 const error = await response.json();
@@ -787,6 +843,39 @@ class HolwertAdmin {
         } catch (error) {
             console.error('Error loading users:', error);
         }
+    }
+
+    updateUsersView() {
+        const users = Array.isArray(this.allUsersCache) ? [...this.allUsersCache] : [];
+        if (!users.length) {
+            this.displayUsers([]);
+            return;
+        }
+
+        let filtered;
+        if (this.currentUsersTab === 'organisaties') {
+            // Toon hier beheerders / organisatie-accounts (alles wat geen gewone dorpsbewoner is)
+            filtered = users.filter(u => (u.role || '').toLowerCase() !== 'user');
+        } else {
+            // Dorpsbewoners: alleen echte app-gebruikers
+            filtered = users.filter(u => (u.role || '').toLowerCase() === 'user');
+        }
+
+        // Zorg dat super-admins niet in Dorpsbewoners verschijnen
+        if (this.currentUsersTab === 'dorpsbewoners') {
+            filtered = filtered.filter(u => (u.role || '').toLowerCase() !== 'superadmin');
+        }
+
+        // Sorteer alfabetisch op volledige naam
+        filtered.sort((a, b) => {
+            const nameA = `${a.first_name || ''} ${a.last_name || ''}`.trim().toLowerCase();
+            const nameB = `${b.first_name || ''} ${b.last_name || ''}`.trim().toLowerCase();
+            if (nameA < nameB) return -1;
+            if (nameA > nameB) return 1;
+            return 0;
+        });
+
+        this.displayUsers(filtered);
     }
 
     displayUsers(users) {
@@ -999,26 +1088,43 @@ class HolwertAdmin {
         }
 
         if (!organizations || organizations.length === 0) {
-            container.innerHTML = '<tr><td colspan="5" class="empty-message">Geen organisaties gevonden</td></tr>';
+            container.innerHTML = '<tr><td colspan="6" class="empty-message">Geen organisaties gevonden</td></tr>';
             return;
         }
 
         container.innerHTML = organizations.map(org => `
             <tr>
+                <td>
+                    <div class="user-avatar">
+                        ${
+                            org.logo_url
+                                ? `<img src="${org.logo_url}" alt="Logo ${org.name || ''}" class="avatar-img">`
+                                : `<div class="avatar-placeholder">
+                                        <i class="fas fa-building"></i>
+                                   </div>`
+                        }
+                    </div>
+                </td>
                 <td>${org.name || '-'}</td>
                 <td>${org.category || 'Geen categorie'}</td>
                 <td>${org.user_count || 0}</td>
                 <td>
-                    <span class="status-badge ${org.is_active ? 'status-published' : 'status-draft'}">
-                        ${org.is_active ? 'Actief' : 'Inactief'}
+                    <span class="status-badge ${org.is_approved ? 'status-published' : 'status-draft'}">
+                        ${org.is_approved ? 'Goedgekeurd' : 'In afwachting'}
                     </span>
                 </td>
                 <td>
                     <div class="action-buttons">
-                        <button class="btn-icon btn-edit" onclick="admin.editOrganization(${org.id})" title="Bewerken">
+                        <button 
+                            class="btn-icon btn-edit organization-edit-btn" 
+                            data-org-id="${org.id}" 
+                            title="Bewerken">
                             <i class="fas fa-edit"></i>
                         </button>
-                        <button class="btn-icon btn-delete" onclick="admin.deleteOrganization(${org.id})" title="Verwijderen">
+                        <button 
+                            class="btn-icon btn-delete organization-delete-btn" 
+                            data-org-id="${org.id}" 
+                            title="Verwijderen">
                             <i class="fas fa-trash"></i>
                         </button>
                     </div>
@@ -1047,7 +1153,15 @@ class HolwertAdmin {
                 console.log('Organizations count:', data.organizations ? data.organizations.length : 0);
                 
                 if (data.organizations && data.organizations.length > 0) {
-                    this.displayOrganizations(data.organizations);
+                    // Sorteer alfabetisch op naam, zoals gewenst in de admin
+                    const sorted = [...data.organizations].sort((a, b) => {
+                        const nameA = (a.name || '').toLowerCase();
+                        const nameB = (b.name || '').toLowerCase();
+                        if (nameA < nameB) return -1;
+                        if (nameA > nameB) return 1;
+                        return 0;
+                    });
+                    this.displayOrganizations(sorted);
                 } else {
                     console.log('No organizations found in response');
                     const container = document.getElementById('organizationsTableBody');
@@ -1089,9 +1203,133 @@ class HolwertAdmin {
         // TODO: Implementeer create organization modal (zoals bij nieuws/events)
     }
 
-    editOrganization(id) {
-        this.showNotification('Organisatie bewerken functie is nog niet geïmplementeerd', 'info');
-        // TODO: Implementeer edit organization modal
+    async editOrganization(id) {
+        try {
+            console.log('[Admin] editOrganization gestart, id =', id);
+            const response = await fetch(`${this.apiBaseUrl}/admin/organizations/${id}`, {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            console.log('[Admin] editOrganization response status:', response.status, 'ok:', response.ok);
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                console.error('[Admin] editOrganization error response:', err);
+                this.showNotification(err.error || 'Organisatie laden mislukt', 'error');
+                return;
+            }
+            const data = await response.json();
+            console.log('[Admin] editOrganization data:', data);
+            const org = data.organization;
+            if (!org) {
+                console.error('[Admin] editOrganization: geen organization in response');
+                this.showNotification('Organisatie niet gevonden', 'error');
+                return;
+            }
+            const modal = document.createElement('div');
+            modal.className = 'modal-overlay';
+            // Zelfde patroon als nieuws/gebruiker-modals: direct zichtbaar maken
+            modal.style.display = 'flex';
+            modal.innerHTML = `
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h3>Organisatie bewerken</h3>
+                        <button class="modal-close" data-modal-close><i class="fas fa-times"></i></button>
+                    </div>
+                    <div class="modal-body">
+                        <form id="editOrganizationForm">
+                            <div class="form-group">
+                                <label for="editOrgName">Naam *</label>
+                                <input type="text" id="editOrgName" value="${(org.name || '').replace(/"/g, '&quot;')}" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="editOrgCategory">Categorie</label>
+                                <input type="text" id="editOrgCategory" value="${(org.category || '').replace(/"/g, '&quot;')}" placeholder="bijv. Vereniging">
+                            </div>
+                            <div class="form-group">
+                                <label for="editOrgDescription">Beschrijving</label>
+                                <textarea id="editOrgDescription" rows="3">${(org.description || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
+                            </div>
+                            <div class="form-group">
+                                <label for="editOrgBio">Bio</label>
+                                <textarea id="editOrgBio" rows="2">${(org.bio || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
+                            </div>
+                            <div class="form-group">
+                                <label for="editOrgEmail">E-mail</label>
+                                <input type="email" id="editOrgEmail" value="${(org.email || '').replace(/"/g, '&quot;')}">
+                            </div>
+                            <div class="form-group">
+                                <label for="editOrgWebsite">Website</label>
+                                <input type="url" id="editOrgWebsite" value="${(org.website || '').replace(/"/g, '&quot;')}" placeholder="https://">
+                            </div>
+                            <div class="form-group">
+                                <label for="editOrgPhone">Telefoon</label>
+                                <input type="text" id="editOrgPhone" value="${(org.phone || '').replace(/"/g, '&quot;')}">
+                            </div>
+                            <div class="form-group">
+                                <label for="editOrgAddress">Adres</label>
+                                <input type="text" id="editOrgAddress" value="${(org.address || '').replace(/"/g, '&quot;')}">
+                            </div>
+                            <div class="form-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="editOrgApproved" ${org.is_approved ? 'checked' : ''}>
+                                    Goedgekeurd (zichtbaar in app)
+                                </label>
+                            </div>
+                        </form>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-modal-close>Annuleren</button>
+                        <button type="button" class="btn btn-primary" id="editOrganizationSubmitBtn">Opslaan</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            console.log('[Admin] editOrganization: modal toegevoegd aan DOM');
+            modal.querySelectorAll('.modal-close, [data-modal-close]').forEach(el => {
+                el.addEventListener('click', () => modal.remove());
+            });
+            modal.querySelector('.modal-content').addEventListener('click', (e) => e.stopPropagation());
+            modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+            modal.querySelector('#editOrganizationSubmitBtn').addEventListener('click', async () => {
+                console.log('[Admin] editOrganization: Opslaan-knop geklikt');
+                const name = document.getElementById('editOrgName').value.trim();
+                if (!name) {
+                    this.showNotification('Naam is verplicht', 'error');
+                    return;
+                }
+                const body = {
+                    name,
+                    category: document.getElementById('editOrgCategory').value.trim() || undefined,
+                    description: document.getElementById('editOrgDescription').value.trim() || undefined,
+                    bio: document.getElementById('editOrgBio').value.trim() || undefined,
+                    email: document.getElementById('editOrgEmail').value.trim() || undefined,
+                    website: document.getElementById('editOrgWebsite').value.trim() || undefined,
+                    phone: document.getElementById('editOrgPhone').value.trim() || undefined,
+                    address: document.getElementById('editOrgAddress').value.trim() || undefined,
+                    is_approved: document.getElementById('editOrgApproved').checked
+                };
+                const res = await fetch(`${this.apiBaseUrl}/admin/organizations/${id}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${this.token}`
+                    },
+                    body: JSON.stringify(body)
+                });
+                console.log('[Admin] editOrganization save response status:', res.status, 'ok:', res.ok);
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    console.error('[Admin] editOrganization save error response:', err);
+                    this.showNotification(err.error || 'Opslaan mislukt', 'error');
+                    return;
+                }
+                this.showNotification('Organisatie bijgewerkt', 'success');
+                modal.remove();
+                this.loadOrganizations();
+            });
+        } catch (e) {
+            console.error('editOrganization error:', e);
+            this.showNotification(e.message || 'Fout bij laden organisatie', 'error');
+        }
     }
 
     deleteOrganization(id) {
