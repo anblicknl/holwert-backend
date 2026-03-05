@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Organisatieportaal - Holwert Dorpsapp</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <!-- Login (zelfde stijl als admin) -->
+    <div id="loginScreen" class="screen active">
+        <div class="login-container">
+            <div class="login-header">
+                <div class="logo-icon">
+                    <img src="logo.svg" alt="Holwert Logo" onerror="this.style.display='none'; this.nextElementSibling?.classList?.remove('hide');">
+                    <i class="fas fa-building hide" style="font-size:48px; color:#333;"></i>
+                </div>
+                <h1>Organisatieportaal</h1>
+                <p>Holwert Dorpsapp – beheer je nieuws, agenda en profiel</p>
+            </div>
+            <form id="loginForm" class="login-form">
+                <div class="form-group">
+                    <label for="email">E-mailadres</label>
+                    <input type="email" id="email" name="email" placeholder="contact@organisatie.nl" required>
+                </div>
+                <div class="form-group">
+                    <label for="password">Wachtwoord</label>
+                    <input type="password" id="password" name="password" placeholder="••••••••" required>
+                </div>
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-arrow-right"></i>
+                    <span>Inloggen</span>
+                </button>
+            </form>
+            <div id="loginError" class="error-message"></div>
+        </div>
+    </div>
+
+    <!-- Hoofdscherm (alleen Nieuws, Agenda, Organisatie profiel) -->
+    <div id="mainScreen" class="screen">
+        <header class="header">
+            <div class="header-left">
+                <img src="logo.svg" alt="Logo" onerror="this.style.display='none'" style="height:32px; margin-right:12px;">
+                <h1>Organisatieportaal</h1>
+            </div>
+            <div class="header-right">
+                <span id="userInfo" class="user-info"></span>
+                <button id="logoutBtn" class="btn btn-secondary"><i class="fas fa-sign-out-alt"></i> Uitloggen</button>
+            </div>
+        </header>
+
+        <nav class="sidebar">
+            <ul class="nav-menu">
+                <li class="nav-item active" data-section="news"><i class="fas fa-newspaper"></i><span>Nieuws</span></li>
+                <li class="nav-item" data-section="events"><i class="fas fa-calendar"></i><span>Agenda</span></li>
+                <li class="nav-item" data-section="profile"><i class="fas fa-building"></i><span>Organisatie profiel</span></li>
+            </ul>
+        </nav>
+
+        <main class="main-content">
+            <section id="news" class="content-section active">
+                <div class="section-header">
+                    <h2><i class="fas fa-newspaper"></i> Nieuws</h2>
+                    <button type="button" id="addNewsBtn" class="btn btn-primary"><i class="fas fa-plus"></i> Nieuw artikel</button>
+                </div>
+                <div id="newsList" class="table-container"></div>
+            </section>
+
+            <section id="events" class="content-section">
+                <div class="section-header">
+                    <h2><i class="fas fa-calendar"></i> Agenda</h2>
+                    <button type="button" id="addEventBtn" class="btn btn-primary"><i class="fas fa-plus"></i> Nieuw evenement</button>
+                </div>
+                <div id="eventsList" class="table-container"></div>
+            </section>
+
+            <section id="profile" class="content-section">
+                <div class="section-header">
+                    <h2><i class="fas fa-building"></i> Organisatie profiel</h2>
+                    <button type="button" id="saveProfileBtn" class="btn btn-primary"><i class="fas fa-save"></i> Opslaan</button>
+                </div>
+                <div id="profileForm" class="profile-form"></div>
+                <div class="section-header" style="margin-top:2rem;">
+                    <h2><i class="fas fa-shield-alt"></i> Privacy statement</h2>
+                </div>
+                <div id="privacyForm" class="profile-form"></div>
+            </section>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

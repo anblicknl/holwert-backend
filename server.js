@@ -782,6 +782,17 @@ const requireAdmin = (req, res, next) => {
   next();
 };
 
+// Alleen voor organisatie-portal: user moet organizationId in JWT hebben
+const requireOrgPortal = (req, res, next) => {
+  const orgId = req.user && (req.user.organizationId ?? req.user.organization_id);
+  if (!orgId) {
+    return res.status(403).json({ error: 'Geen organisatie gekoppeld aan dit account. Log in via het organisatieportaal of neem contact op met de beheerder.' });
+  }
+  req.organizationId = parseInt(orgId, 10);
+  if (isNaN(req.organizationId)) return res.status(403).json({ error: 'Ongeldige organisatie' });
+  next();
+};
+
 // ===== FIXED IMAGE UPLOAD TO EXTERNAL SERVER =====
 app.post('/api/upload', authenticateToken, upload.single('image'), async (req, res) => {
   try {
@@ -2191,18 +2202,25 @@ app.post('/api/auth/login', loginRateLimiter, async (req, res) => {
       });
     }
 
-    // Find user by email (zonder profile_image_url i.v.m. oude DB zonder deze kolom)
+    // Find user by email (inclusief organization_id indien kolom bestaat)
     let userResult;
     try {
       userResult = await executeQuery(
-        'SELECT id, email, password_hash, first_name, last_name, profile_image_url, profile_number, role, is_active FROM users WHERE email = ?',
+        'SELECT id, email, password_hash, first_name, last_name, profile_image_url, profile_number, role, is_active, organization_id FROM users WHERE email = ?',
         [email]
       );
     } catch (colErr) {
-      userResult = await executeQuery(
-        'SELECT id, email, password_hash, first_name, last_name, role, is_active FROM users WHERE email = ?',
-        [email]
-      );
+      try {
+        userResult = await executeQuery(
+          'SELECT id, email, password_hash, first_name, last_name, profile_image_url, profile_number, role, is_active FROM users WHERE email = ?',
+          [email]
+        );
+      } catch (e2) {
+        userResult = await executeQuery(
+          'SELECT id, email, password_hash, first_name, last_name, role, is_active FROM users WHERE email = ?',
+          [email]
+        );
+      }
     }
 
     if (userResult.rows.length === 0) {
@@ -2234,18 +2252,21 @@ app.post('/api/auth/login', loginRateLimiter, async (req, res) => {
       });
     }
 
-    // Generate JWT token
+    const organizationId = user.organization_id != null ? parseInt(user.organization_id, 10) : null;
+
+    // Generate JWT token (organization_id voor org-portal)
     const token = jwt.sign(
-      { 
-        userId: user.id, 
-        email: user.email, 
-        role: user.role 
+      {
+        userId: user.id,
+        email: user.email,
+        role: user.role,
+        ...(organizationId != null && !isNaN(organizationId) ? { organizationId } : {})
       },
       JWT_SECRET,
       { expiresIn: '24h' }
     );
 
-    // Return success response (profile_picture null zolang kolom niet bestaat)
+    // Return success response
     res.json({
       message: 'Login successful',
       token: token,
@@ -2257,7 +2278,8 @@ app.post('/api/auth/login', loginRateLimiter, async (req, res) => {
         profile_picture: user.profile_image_url ?? null,
         profile_image_url: user.profile_image_url ?? null,
         profile_number: user.profile_number ?? null,
-        role: user.role
+        role: user.role,
+        ...(organizationId != null && !isNaN(organizationId) ? { organization_id: organizationId } : {})
       }
     });
 
@@ -4079,17 +4101,17 @@ app.get('/api/admin/users', authenticateToken, async (req, res) => {
 // Create user (admin)
 app.post('/api/admin/users', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const { first_name, last_name, email, password, role = 'user', is_active = true } = req.body;
+    const { first_name, last_name, email, password, role = 'user', is_active = true, organization_id } = req.body;
     if (!first_name || !last_name || !email || !password) {
       return res.status(400).json({ error: 'first_name, last_name, email, password are required' });
     }
     const hashed = await bcrypt.hash(password, 10);
-    
-    // MySQL: gebruik password_hash + insertId i.p.v. RETURNING
+    const orgId = organization_id != null && organization_id !== '' ? parseInt(organization_id, 10) : null;
+
     const insertResult = await executeInsert(
-      `INSERT INTO users (first_name, last_name, email, password_hash, role, is_active)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [first_name, last_name, email, hashed, role, is_active]
+      `INSERT INTO users (first_name, last_name, email, password_hash, role, is_active, organization_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [first_name, last_name, email, hashed, role, is_active, orgId]
     );
     
     const userId = insertResult.insertId || insertResult.rows?.[0]?.id;
@@ -4116,33 +4138,34 @@ app.post('/api/admin/users', authenticateToken, requireAdmin, async (req, res) =
 app.put('/api/admin/users/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { first_name, last_name, email, password, role, is_active, profile_image_url, relationship_with_holwert, profile_number } = req.body;
+    const { first_name, last_name, email, password, role, is_active, profile_image_url, relationship_with_holwert, profile_number, organization_id } = req.body;
     const sets = [];
     const params = [];
-    const push = (v) => { params.push(v); return `$${params.length}`; };
-    if (first_name !== undefined) sets.push(`first_name = ${push(first_name)}`);
-    if (last_name !== undefined) sets.push(`last_name = ${push(last_name)}`);
-    if (email !== undefined) sets.push(`email = ${push(email)}`);
-    if (role !== undefined) sets.push(`role = ${push(role)}`);
-    if (is_active !== undefined) sets.push(`is_active = ${push(is_active)}`);
-    if (profile_image_url !== undefined) sets.push(`profile_image_url = ${push(profile_image_url)}`);
-    if (relationship_with_holwert !== undefined) sets.push(`relationship_with_holwert = ${push(relationship_with_holwert)}`);
-    if (profile_number !== undefined) sets.push(`profile_number = ${push(profile_number)}`);
+    const push = (v) => { params.push(v); return '?'; };
+    if (first_name !== undefined) { sets.push('first_name = ?'); params.push(first_name); }
+    if (last_name !== undefined) { sets.push('last_name = ?'); params.push(last_name); }
+    if (email !== undefined) { sets.push('email = ?'); params.push(email); }
+    if (role !== undefined) { sets.push('role = ?'); params.push(role); }
+    if (is_active !== undefined) { sets.push('is_active = ?'); params.push(is_active); }
+    if (profile_image_url !== undefined) { sets.push('profile_image_url = ?'); params.push(profile_image_url); }
+    if (relationship_with_holwert !== undefined) { sets.push('relationship_with_holwert = ?'); params.push(relationship_with_holwert); }
+    if (profile_number !== undefined) { sets.push('profile_number = ?'); params.push(profile_number); }
+    if (organization_id !== undefined) { sets.push('organization_id = ?'); params.push(organization_id === '' || organization_id == null ? null : parseInt(organization_id, 10)); }
     if (password) {
       const hashed = await bcrypt.hash(password, 10);
-      sets.push(`password_hash = ${push(hashed)}`);
+      sets.push('password_hash = ?');
+      params.push(hashed);
     }
     if (!sets.length) return res.status(400).json({ error: 'No fields to update' });
     params.push(id);
-    
-    // MySQL: geen RETURNING, dus update + fetch
+
     await executeQuery(
-      `UPDATE users SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${params.length}`,
+      `UPDATE users SET ${sets.join(', ')}, updated_at = NOW() WHERE id = ?`,
       params
     );
-    
+
     const fetchResult = await executeQuery(
-      'SELECT id, first_name, last_name, email, profile_image_url, profile_number, relationship_with_holwert, role, is_active, created_at, updated_at FROM users WHERE id = $1',
+      'SELECT id, first_name, last_name, email, profile_image_url, profile_number, relationship_with_holwert, role, is_active, organization_id, created_at, updated_at FROM users WHERE id = ?',
       [id]
     );
     if (!fetchResult.rows.length) return res.status(404).json({ error: 'User not found' });
@@ -4173,6 +4196,238 @@ app.delete('/api/admin/users/:id', authenticateToken, requireAdmin, async (req, 
     if (error.code === '23503') return res.status(409).json({ error: 'Cannot delete user in use' });
     console.error('Delete user error:', error);
     res.status(500).json({ error: 'Failed to delete user', message: error.message });
+  }
+});
+
+// ===== ORGANISATIE-PORTAL (uitgeklede admin voor één organisatie) =====
+// Vereist: user met organization_id in JWT (super-admin koppelt user aan org in admin).
+
+app.get('/api/org/me', authenticateToken, requireOrgPortal, async (req, res) => {
+  try {
+    const orgId = req.organizationId;
+    const orgResult = await executeQuery(
+      `SELECT id, name, category, description, bio, is_approved, website, email, phone, whatsapp, address,
+       facebook, instagram, twitter, linkedin, brand_color, logo_url, privacy_statement, created_at, updated_at
+       FROM organizations WHERE id = ?`,
+      [orgId]
+    );
+    if (!orgResult.rows?.length) {
+      return res.status(404).json({ error: 'Organisatie niet gevonden' });
+    }
+    res.json({
+      user: { id: req.user.userId, email: req.user.email, role: req.user.role, organization_id: orgId },
+      organization: orgResult.rows[0]
+    });
+  } catch (error) {
+    console.error('GET /api/org/me error:', error);
+    res.status(500).json({ error: 'Failed to load', message: error.message });
+  }
+});
+
+app.get('/api/org/profile', authenticateToken, requireOrgPortal, async (req, res) => {
+  try {
+    const orgId = req.organizationId;
+    const result = await executeQuery(
+      `SELECT id, name, category, description, bio, website, email, phone, whatsapp, address,
+       facebook, instagram, twitter, linkedin, brand_color, logo_url, privacy_statement, is_approved, created_at, updated_at
+       FROM organizations WHERE id = ?`,
+      [orgId]
+    );
+    if (!result.rows?.length) return res.status(404).json({ error: 'Organisatie niet gevonden' });
+    res.json({ organization: result.rows[0] });
+  } catch (error) {
+    console.error('GET /api/org/profile error:', error);
+    res.status(500).json({ error: 'Failed to load profile', message: error.message });
+  }
+});
+
+app.put('/api/org/profile', authenticateToken, requireOrgPortal, async (req, res) => {
+  try {
+    const orgId = req.organizationId;
+    const raw = req.body || {};
+    const allowed = ['description', 'bio', 'website', 'email', 'phone', 'whatsapp', 'address', 'facebook', 'instagram', 'twitter', 'linkedin', 'brand_color', 'logo_url', 'privacy_statement'];
+    const sets = [];
+    const values = [];
+    allowed.forEach((key) => {
+      if (raw[key] !== undefined) {
+        sets.push(`${key} = ?`);
+        values.push(raw[key]);
+      }
+    });
+    if (sets.length === 0) return res.status(400).json({ error: 'Geen velden om bij te werken' });
+    values.push(orgId);
+    await executeQuery(`UPDATE organizations SET ${sets.join(', ')}, updated_at = NOW() WHERE id = ?`, values);
+    const updated = await executeQuery(
+      `SELECT id, name, category, description, bio, website, email, phone, whatsapp, address,
+       facebook, instagram, twitter, linkedin, brand_color, logo_url, privacy_statement, is_approved, updated_at
+       FROM organizations WHERE id = ?`,
+      [orgId]
+    );
+    res.json({ organization: updated.rows[0] });
+  } catch (error) {
+    console.error('PUT /api/org/profile error:', error);
+    res.status(500).json({ error: 'Failed to update profile', message: error.message });
+  }
+});
+
+// Nieuws voor eigen organisatie
+app.get('/api/org/news', authenticateToken, requireOrgPortal, async (req, res) => {
+  try {
+    const { page = 1, limit = 20, status } = req.query;
+    const offset = (page - 1) * limit;
+    const orgId = req.organizationId;
+    let query = `SELECT n.id, n.title, n.excerpt, n.category, n.custom_category, n.image_url, n.is_published, COALESCE(n.published_at, n.created_at) as published_at, n.organization_id, n.created_at, n.updated_at
+      FROM news n WHERE n.organization_id = ?`;
+    const params = [orgId];
+    if (status === 'published') { query += ` AND n.is_published = true`; }
+    else if (status === 'pending') { query += ` AND n.is_published = false`; }
+    query += ` ORDER BY n.created_at DESC LIMIT ? OFFSET ?`;
+    params.push(parseInt(limit), parseInt(offset));
+    const result = await executeQuery(query, params);
+    const countResult = await executeQuery(
+      `SELECT COUNT(*) as total FROM news n WHERE n.organization_id = ?${status === 'published' ? ' AND n.is_published = true' : ''}${status === 'pending' ? ' AND n.is_published = false' : ''}`,
+      [orgId]
+    );
+    res.json({
+      news: result.rows,
+      pagination: { page: parseInt(page), limit: parseInt(limit), total: parseInt(countResult.rows[0].total), pages: Math.ceil(countResult.rows[0].total / limit) }
+    });
+  } catch (error) {
+    console.error('GET /api/org/news error:', error);
+    res.status(500).json({ error: 'Failed to load news', message: error.message });
+  }
+});
+
+app.get('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req, res) => {
+  try {
+    const orgId = req.organizationId;
+    const result = await executeQuery(
+      'SELECT id, title, content, excerpt, category, custom_category, image_url, is_published, COALESCE(published_at, created_at) as published_at, organization_id, author_id, created_at, updated_at FROM news WHERE id = ? AND organization_id = ?',
+      [req.params.id, orgId]
+    );
+    if (!result.rows?.length) return res.status(404).json({ error: 'Artikel niet gevonden' });
+    res.json({ article: result.rows[0] });
+  } catch (error) {
+    console.error('GET /api/org/news/:id error:', error);
+    res.status(500).json({ error: 'Failed to load article', message: error.message });
+  }
+});
+
+app.post('/api/org/news', authenticateToken, requireOrgPortal, async (req, res) => {
+  try {
+    const orgId = req.organizationId;
+    const userId = req.user.userId;
+    const { title, content, excerpt, category, custom_category, image_url, is_published } = req.body || {};
+    if (!title) return res.status(400).json({ error: 'title is required' });
+    const result = await executeInsert(
+      'INSERT INTO news (title, content, excerpt, author_id, organization_id, image_url, category, custom_category, is_published, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())',
+      [title || '', content || '', excerpt || null, userId, orgId, image_url || null, category || null, custom_category || null, is_published === true]
+    );
+    const id = result.insertId || (result.rows && result.rows[0] && result.rows[0].id);
+    const row = await executeQuery('SELECT id, title, excerpt, is_published, organization_id, created_at FROM news WHERE id = ?', [id]);
+    res.status(201).json({ article: row.rows[0] });
+  } catch (error) {
+    console.error('POST /api/org/news error:', error);
+    res.status(500).json({ error: 'Failed to create article', message: error.message });
+  }
+});
+
+app.put('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req, res) => {
+  try {
+    const orgId = req.organizationId;
+    const id = parseInt(req.params.id);
+    const { title, content, excerpt, category, custom_category, image_url, is_published } = req.body || {};
+    const existing = await executeQuery('SELECT id FROM news WHERE id = ? AND organization_id = ?', [id, orgId]);
+    if (!existing.rows?.length) return res.status(404).json({ error: 'Artikel niet gevonden' });
+    await executeQuery(
+      'UPDATE news SET title = ?, content = ?, excerpt = ?, category = ?, custom_category = ?, image_url = ?, is_published = ?, updated_at = NOW() WHERE id = ?',
+      [title ?? '', content ?? '', excerpt ?? null, category ?? null, custom_category ?? null, image_url ?? null, is_published === true, id]
+    );
+    const row = await executeQuery('SELECT id, title, excerpt, is_published, updated_at FROM news WHERE id = ?', [id]);
+    res.json({ article: row.rows[0] });
+  } catch (error) {
+    console.error('PUT /api/org/news/:id error:', error);
+    res.status(500).json({ error: 'Failed to update article', message: error.message });
+  }
+});
+
+// Agenda (events) voor eigen organisatie
+app.get('/api/org/events', authenticateToken, requireOrgPortal, async (req, res) => {
+  try {
+    const { page = 1, limit = 20, status } = req.query;
+    const offset = (page - 1) * limit;
+    const orgId = req.organizationId;
+    let query = `SELECT e.id, e.title, e.description, e.event_date, e.end_date, e.location, e.status, e.price, e.image_url, e.organization_id, e.created_at, e.updated_at
+      FROM events e WHERE e.organization_id = ?`;
+    const params = [orgId];
+    if (status === 'scheduled') { query += ` AND (e.status = 'scheduled' OR e.status IS NULL)`; }
+    if (status === 'cancelled') { query += ` AND e.status = 'cancelled'`; }
+    query += ` ORDER BY e.event_date DESC LIMIT ? OFFSET ?`;
+    params.push(parseInt(limit), parseInt(offset));
+    const result = await executeQuery(query, params);
+    const countResult = await executeQuery(
+      `SELECT COUNT(*) as total FROM events e WHERE e.organization_id = ?${status === 'scheduled' ? " AND (e.status = 'scheduled' OR e.status IS NULL)" : ''}${status === 'cancelled' ? " AND e.status = 'cancelled'" : ''}`,
+      [orgId]
+    );
+    res.json({
+      events: result.rows,
+      pagination: { page: parseInt(page), limit: parseInt(limit), total: parseInt(countResult.rows[0].total), pages: Math.ceil(countResult.rows[0].total / limit) }
+    });
+  } catch (error) {
+    console.error('GET /api/org/events error:', error);
+    res.status(500).json({ error: 'Failed to load events', message: error.message });
+  }
+});
+
+app.get('/api/org/events/:id', authenticateToken, requireOrgPortal, async (req, res) => {
+  try {
+    const orgId = req.organizationId;
+    const result = await executeQuery(
+      'SELECT id, title, description, event_date, end_date, location, status, price, image_url, organization_id, created_at, updated_at FROM events WHERE id = ? AND organization_id = ?',
+      [req.params.id, orgId]
+    );
+    if (!result.rows?.length) return res.status(404).json({ error: 'Evenement niet gevonden' });
+    res.json({ event: result.rows[0] });
+  } catch (error) {
+    console.error('GET /api/org/events/:id error:', error);
+    res.status(500).json({ error: 'Failed to load event', message: error.message });
+  }
+});
+
+app.post('/api/org/events', authenticateToken, requireOrgPortal, async (req, res) => {
+  try {
+    const orgId = req.organizationId;
+    const { title, description, event_date, end_date, location, status, price, image_url } = req.body || {};
+    if (!title) return res.status(400).json({ error: 'title is required' });
+    const result = await executeInsert(
+      'INSERT INTO events (title, description, event_date, end_date, location, organization_id, status, price, image_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())',
+      [title || '', description || null, event_date || null, end_date || null, location || null, orgId, status || 'scheduled', price ?? null, image_url || null]
+    );
+    const id = result.insertId || (result.rows && result.rows[0] && result.rows[0].id);
+    const row = await executeQuery('SELECT id, title, event_date, organization_id, created_at FROM events WHERE id = ?', [id]);
+    res.status(201).json({ event: row.rows[0] });
+  } catch (error) {
+    console.error('POST /api/org/events error:', error);
+    res.status(500).json({ error: 'Failed to create event', message: error.message });
+  }
+});
+
+app.put('/api/org/events/:id', authenticateToken, requireOrgPortal, async (req, res) => {
+  try {
+    const orgId = req.organizationId;
+    const id = parseInt(req.params.id);
+    const { title, description, event_date, end_date, location, status, price, image_url } = req.body || {};
+    const existing = await executeQuery('SELECT id FROM events WHERE id = ? AND organization_id = ?', [id, orgId]);
+    if (!existing.rows?.length) return res.status(404).json({ error: 'Evenement niet gevonden' });
+    await executeQuery(
+      'UPDATE events SET title = ?, description = ?, event_date = ?, end_date = ?, location = ?, status = ?, price = ?, image_url = ?, updated_at = NOW() WHERE id = ?',
+      [title ?? '', description ?? null, event_date ?? null, end_date ?? null, location ?? null, status ?? 'scheduled', price ?? null, image_url ?? null, id]
+    );
+    const row = await executeQuery('SELECT id, title, event_date, status, updated_at FROM events WHERE id = ?', [id]);
+    res.json({ event: row.rows[0] });
+  } catch (error) {
+    console.error('PUT /api/org/events/:id error:', error);
+    res.status(500).json({ error: 'Failed to update event', message: error.message });
   }
 });
 
