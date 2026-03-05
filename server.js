@@ -113,6 +113,28 @@ function loginRateLimiter(req, res, next) {
   return next();
 }
 
+// Rate limiter voor publieke organisatie-registratie (max 5 per 15 min per IP)
+const orgRegisterAttempts = new Map();
+const ORG_REGISTER_WINDOW_MS = 15 * 60 * 1000;
+const ORG_REGISTER_MAX = 5;
+function orgRegisterRateLimiter(req, res, next) {
+  const ip = getClientIp(req);
+  const now = Date.now();
+  const existing = orgRegisterAttempts.get(ip) || { count: 0, first: now };
+  if (now - existing.first > ORG_REGISTER_WINDOW_MS) {
+    existing.count = 0;
+    existing.first = now;
+  }
+  existing.count += 1;
+  orgRegisterAttempts.set(ip, existing);
+  if (existing.count > ORG_REGISTER_MAX) {
+    return res.status(429).json({
+      error: 'Te veel registraties. Probeer het later opnieuw.',
+      retry_after_seconds: Math.ceil((ORG_REGISTER_WINDOW_MS - (now - existing.first)) / 1000)
+    });
+  }
+  return next();
+}
 
 // Helper: haal user op met fallback als kolommen niet bestaan
 async function getUserById(id) {
@@ -3063,6 +3085,13 @@ app.get('/api/admin/organizations/:id', authenticateToken, async (req, res) => {
 // Get all organizations (admin) - OPTIMIZED: Caching + combined queries
 app.get('/api/admin/organizations', authenticateToken, async (req, res) => {
   try {
+    const roleRaw = req.user && req.user.role;
+    const role = typeof roleRaw === 'string' ? roleRaw.toLowerCase() : undefined;
+    const allowed = ['admin', 'superadmin', 'editor'];
+    if (!role || !allowed.includes(role)) {
+      return res.status(403).json({ error: 'Admin privileges required' });
+    }
+
     const { page = 1, limit = 20, status } = req.query;
     const offset = (page - 1) * limit;
     
@@ -4521,6 +4550,66 @@ app.get('/api/organizations', async (req, res) => {
     console.error('Get organizations error:', error);
     res.status(500).json({
       error: 'Failed to get organizations',
+      message: error.message
+    });
+  }
+});
+
+// Publieke organisatie-registratie (bv. formulier op holwert.appenvloed.com)
+// Maakt een organisatie aan met is_approved = false; verschijnt in admin voor moderatie.
+app.post('/api/organizations/register', orgRegisterRateLimiter, async (req, res) => {
+  try {
+    const {
+      name, category, description, bio,
+      website, email, phone, whatsapp, address
+    } = req.body || {};
+
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'Naam van de organisatie is verplicht' });
+    }
+
+    const result = await executeInsert(
+      `INSERT INTO organizations (
+        name, category, description, bio, is_approved,
+        website, email, phone, whatsapp, address,
+        facebook, instagram, twitter, linkedin,
+        brand_color, logo_url, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [
+        name.trim(),
+        (category && typeof category === 'string') ? category.trim() : null,
+        (description && typeof description === 'string') ? description.trim() : null,
+        (bio && typeof bio === 'string') ? bio.trim() : null,
+        false, // is_approved = false: wacht op goedkeuring in admin
+        (website && typeof website === 'string') ? website.trim() : null,
+        (email && typeof email === 'string') ? email.trim() : null,
+        (phone && typeof phone === 'string') ? String(phone).trim() : null,
+        (whatsapp && typeof whatsapp === 'string') ? String(whatsapp).trim() : null,
+        (address && typeof address === 'string') ? address.trim() : null,
+        null, null, null, null, null, null
+      ]
+    );
+
+    const id = result.insertId || (result.rows && result.rows[0] && result.rows[0].id);
+    if (!id) {
+      return res.status(500).json({ error: 'Registratie mislukt', message: 'Kon organisatie niet aanmaken' });
+    }
+
+    invalidateCache('/api/admin/organizations');
+    invalidateCache('/api/admin/stats');
+    invalidateCache('/api/admin/moderation/count');
+    invalidateCache('/api/admin/pending');
+
+    console.log('[POST /api/organizations/register] New organization registered:', { id, name: name.trim() });
+    res.status(201).json({
+      success: true,
+      message: 'Organisatie aangemeld. Deze wordt zichtbaar in de app na goedkeuring door de beheerder.',
+      id
+    });
+  } catch (error) {
+    console.error('Organization register error:', error);
+    res.status(500).json({
+      error: 'Registratie mislukt',
       message: error.message
     });
   }
