@@ -1331,6 +1331,37 @@ class HolwertAdmin {
         }
     }
 
+    /** Logo naar CDN via backend-upload; `organizationId` bepaalt de server-map (twee cijfers). */
+    async uploadOrganizationLogo(organizationId, file) {
+        if (!this.token || !organizationId || !file) return null;
+        const compressedBase64 = await this.compressNewsImage(file);
+        if (compressedBase64.length > 4 * 1024 * 1024) {
+            throw new Error('Afbeelding is te groot (max. ca. 4 MB na compressie).');
+        }
+        const uploadRes = await fetch(`${this.apiBaseUrl}/upload/image`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${this.token}`
+            },
+            body: JSON.stringify({
+                imageData: compressedBase64,
+                filename: `org-logo-${organizationId}-${Date.now()}.jpg`,
+                organizationId
+            })
+        });
+        if (!uploadRes.ok) {
+            let msg = `HTTP ${uploadRes.status}`;
+            try {
+                const j = await uploadRes.json();
+                msg = j.message || j.error || msg;
+            } catch (_) { /* */ }
+            throw new Error(msg);
+        }
+        const uploadJson = await uploadRes.json();
+        return uploadJson.imageUrl || null;
+    }
+
     showCreateOrganizationModal() {
         const self = this;
         if (!this.token) {
@@ -1341,7 +1372,7 @@ class HolwertAdmin {
         modal.className = 'modal-overlay';
         modal.style.display = 'flex';
         modal.innerHTML = `
-            <div class="modal-content">
+            <div class="modal-content modal-large">
                 <div class="modal-header">
                     <h3>Nieuwe organisatie</h3>
                     <button type="button" class="modal-close" data-modal-close aria-label="Sluiten"><i class="fas fa-times"></i></button>
@@ -1377,8 +1408,45 @@ class HolwertAdmin {
                             <input type="text" id="createOrgPhone" placeholder="Telefoonnummer">
                         </div>
                         <div class="form-group">
+                            <label for="createOrgWhatsapp">WhatsApp</label>
+                            <input type="text" id="createOrgWhatsapp" placeholder="Nummer of link">
+                        </div>
+                        <div class="form-group">
                             <label for="createOrgAddress">Adres</label>
                             <input type="text" id="createOrgAddress" placeholder="Straat, postcode, plaats">
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group" style="flex:1">
+                                <label for="createOrgFacebook">Facebook</label>
+                                <input type="url" id="createOrgFacebook" placeholder="https://facebook.com/...">
+                            </div>
+                            <div class="form-group" style="flex:1">
+                                <label for="createOrgInstagram">Instagram</label>
+                                <input type="url" id="createOrgInstagram" placeholder="https://instagram.com/...">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group" style="flex:1">
+                                <label for="createOrgTwitter">Twitter / X</label>
+                                <input type="url" id="createOrgTwitter" placeholder="https://">
+                            </div>
+                            <div class="form-group" style="flex:1">
+                                <label for="createOrgLinkedin">LinkedIn</label>
+                                <input type="url" id="createOrgLinkedin" placeholder="https://">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="createOrgBrandColorHex">Brandkleur (hex, bijv. #0066CC)</label>
+                            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                                <input type="color" id="createOrgBrandColorPicker" value="#0066CC" style="width:48px;height:40px;padding:0;border:1px solid #ddd;border-radius:6px;cursor:pointer;">
+                                <input type="text" id="createOrgBrandColorHex" placeholder="#RRGGBB" style="flex:1;min-width:120px;">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="createOrgLogoUrl">Logo-URL</label>
+                            <input type="url" id="createOrgLogoUrl" placeholder="https://... (of alleen upload hieronder)">
+                            <p class="text-muted" style="font-size:12px;margin-top:6px;margin-bottom:0;">Na opslaan kun je ook een bestand uploaden; dat krijgt voorrang boven de URL.</p>
+                            <input type="file" id="createOrgLogoFile" accept="image/*" style="margin-top:8px;">
                         </div>
                         <div class="form-group">
                             <label class="checkbox-label">
@@ -1395,6 +1463,15 @@ class HolwertAdmin {
             </div>
         `;
         document.body.appendChild(modal);
+        const picker = modal.querySelector('#createOrgBrandColorPicker');
+        const hexEl = modal.querySelector('#createOrgBrandColorHex');
+        if (picker && hexEl) {
+            picker.addEventListener('input', () => { hexEl.value = picker.value.toUpperCase(); });
+            hexEl.addEventListener('change', () => {
+                const v = hexEl.value.trim();
+                if (/^#[0-9A-Fa-f]{6}$/i.test(v)) picker.value = v;
+            });
+        }
         const close = () => modal.remove();
         modal.querySelectorAll('.modal-close, [data-modal-close]').forEach((el) => el.addEventListener('click', close));
         modal.querySelector('.modal-content')?.addEventListener('click', (e) => e.stopPropagation());
@@ -1407,6 +1484,10 @@ class HolwertAdmin {
                 self.showNotification('Naam is verplicht', 'error');
                 return;
             }
+            const hexRaw = document.getElementById('createOrgBrandColorHex')?.value?.trim() || '';
+            const brand_color = /^#[0-9A-Fa-f]{6}$/i.test(hexRaw) ? hexRaw : undefined;
+            const logoUrlField = document.getElementById('createOrgLogoUrl')?.value?.trim() || '';
+            const logoFile = document.getElementById('createOrgLogoFile')?.files?.[0];
             const body = {
                 name,
                 category: document.getElementById('createOrgCategory')?.value?.trim() || undefined,
@@ -1415,7 +1496,14 @@ class HolwertAdmin {
                 email: document.getElementById('createOrgEmail')?.value?.trim() || undefined,
                 website: document.getElementById('createOrgWebsite')?.value?.trim() || undefined,
                 phone: document.getElementById('createOrgPhone')?.value?.trim() || undefined,
+                whatsapp: document.getElementById('createOrgWhatsapp')?.value?.trim() || undefined,
                 address: document.getElementById('createOrgAddress')?.value?.trim() || undefined,
+                facebook: document.getElementById('createOrgFacebook')?.value?.trim() || undefined,
+                instagram: document.getElementById('createOrgInstagram')?.value?.trim() || undefined,
+                twitter: document.getElementById('createOrgTwitter')?.value?.trim() || undefined,
+                linkedin: document.getElementById('createOrgLinkedin')?.value?.trim() || undefined,
+                brand_color,
+                logo_url: !logoFile && logoUrlField ? logoUrlField : undefined,
                 is_approved: document.getElementById('createOrgApproved')?.checked !== false
             };
             try {
@@ -1431,6 +1519,25 @@ class HolwertAdmin {
                 if (!res.ok) {
                     self.showNotification(data.message || data.error || `Aanmaken mislukt (${res.status})`, 'error');
                     return;
+                }
+                const newId = data.organization?.id;
+                if (logoFile && newId) {
+                    try {
+                        const uploaded = await self.uploadOrganizationLogo(newId, logoFile);
+                        if (uploaded) {
+                            await fetch(`${self.apiBaseUrl}/admin/organizations/${newId}`, {
+                                method: 'PUT',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'Authorization': `Bearer ${self.token}`
+                                },
+                                body: JSON.stringify({ logo_url: uploaded })
+                            });
+                        }
+                    } catch (upErr) {
+                        console.error(upErr);
+                        self.showNotification(`Organisatie aangemaakt, maar logo upload mislukt: ${upErr.message || upErr}`, 'warning');
+                    }
                 }
                 self.showNotification('Organisatie aangemaakt', 'success');
                 close();
@@ -1463,49 +1570,96 @@ class HolwertAdmin {
                 this.showNotification('Organisatie niet gevonden', 'error');
                 return;
             }
+            const escQ = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+            const escTA = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            const brandPickerVal = (org.brand_color && /^#[0-9A-Fa-f]{6}$/i.test(org.brand_color)) ? org.brand_color : '#0066CC';
+            const logoPreview = org.logo_url
+                ? `<div class="form-group"><label>Huidig logo</label><img src="${escQ(org.logo_url)}" alt="Logo" class="avatar-img" style="max-height:80px;border-radius:8px;display:block;" onerror="this.style.display='none'"></div>`
+                : '';
             const modal = document.createElement('div');
             modal.className = 'modal-overlay';
-            // Zelfde patroon als nieuws/gebruiker-modals: direct zichtbaar maken
             modal.style.display = 'flex';
             modal.innerHTML = `
-                <div class="modal-content">
+                <div class="modal-content modal-large">
                     <div class="modal-header">
                         <h3>Organisatie bewerken</h3>
-                        <button class="modal-close" data-modal-close><i class="fas fa-times"></i></button>
+                        <button type="button" class="modal-close" data-modal-close aria-label="Sluiten"><i class="fas fa-times"></i></button>
                     </div>
                     <div class="modal-body">
                         <form id="editOrganizationForm">
                             <div class="form-group">
                                 <label for="editOrgName">Naam *</label>
-                                <input type="text" id="editOrgName" value="${(org.name || '').replace(/"/g, '&quot;')}" required>
+                                <input type="text" id="editOrgName" value="${escQ(org.name)}" required>
                             </div>
                             <div class="form-group">
                                 <label for="editOrgCategory">Categorie</label>
-                                <input type="text" id="editOrgCategory" value="${(org.category || '').replace(/"/g, '&quot;')}" placeholder="bijv. Vereniging">
+                                <input type="text" id="editOrgCategory" value="${escQ(org.category)}" placeholder="bijv. Vereniging">
                             </div>
                             <div class="form-group">
                                 <label for="editOrgDescription">Beschrijving</label>
-                                <textarea id="editOrgDescription" rows="3">${(org.description || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
+                                <textarea id="editOrgDescription" rows="3">${escTA(org.description)}</textarea>
                             </div>
                             <div class="form-group">
                                 <label for="editOrgBio">Bio</label>
-                                <textarea id="editOrgBio" rows="2">${(org.bio || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
+                                <textarea id="editOrgBio" rows="2">${escTA(org.bio)}</textarea>
                             </div>
                             <div class="form-group">
                                 <label for="editOrgEmail">E-mail</label>
-                                <input type="email" id="editOrgEmail" value="${(org.email || '').replace(/"/g, '&quot;')}">
+                                <input type="email" id="editOrgEmail" value="${escQ(org.email)}">
                             </div>
                             <div class="form-group">
                                 <label for="editOrgWebsite">Website</label>
-                                <input type="url" id="editOrgWebsite" value="${(org.website || '').replace(/"/g, '&quot;')}" placeholder="https://">
+                                <input type="url" id="editOrgWebsite" value="${escQ(org.website)}" placeholder="https://">
                             </div>
                             <div class="form-group">
                                 <label for="editOrgPhone">Telefoon</label>
-                                <input type="text" id="editOrgPhone" value="${(org.phone || '').replace(/"/g, '&quot;')}">
+                                <input type="text" id="editOrgPhone" value="${escQ(org.phone)}">
+                            </div>
+                            <div class="form-group">
+                                <label for="editOrgWhatsapp">WhatsApp</label>
+                                <input type="text" id="editOrgWhatsapp" value="${escQ(org.whatsapp)}">
                             </div>
                             <div class="form-group">
                                 <label for="editOrgAddress">Adres</label>
-                                <input type="text" id="editOrgAddress" value="${(org.address || '').replace(/"/g, '&quot;')}">
+                                <input type="text" id="editOrgAddress" value="${escQ(org.address)}">
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group" style="flex:1">
+                                    <label for="editOrgFacebook">Facebook</label>
+                                    <input type="url" id="editOrgFacebook" value="${escQ(org.facebook)}" placeholder="https://">
+                                </div>
+                                <div class="form-group" style="flex:1">
+                                    <label for="editOrgInstagram">Instagram</label>
+                                    <input type="url" id="editOrgInstagram" value="${escQ(org.instagram)}" placeholder="https://">
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group" style="flex:1">
+                                    <label for="editOrgTwitter">Twitter / X</label>
+                                    <input type="url" id="editOrgTwitter" value="${escQ(org.twitter)}" placeholder="https://">
+                                </div>
+                                <div class="form-group" style="flex:1">
+                                    <label for="editOrgLinkedin">LinkedIn</label>
+                                    <input type="url" id="editOrgLinkedin" value="${escQ(org.linkedin)}" placeholder="https://">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="editOrgBrandColorHex">Brandkleur (hex)</label>
+                                <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                                    <input type="color" id="editOrgBrandColorPicker" value="${brandPickerVal}" style="width:48px;height:40px;padding:0;border:1px solid #ddd;border-radius:6px;cursor:pointer;">
+                                    <input type="text" id="editOrgBrandColorHex" placeholder="#RRGGBB" value="${escQ(org.brand_color || '')}" style="flex:1;min-width:120px;">
+                                </div>
+                            </div>
+                            ${logoPreview}
+                            <div class="form-group">
+                                <label for="editOrgLogoUrl">Logo-URL</label>
+                                <input type="url" id="editOrgLogoUrl" value="${escQ(org.logo_url)}" placeholder="https://...">
+                                <p class="text-muted" style="font-size:12px;margin-top:6px;">Nieuw bestand uploaden overschrijft de URL hierboven.</p>
+                                <input type="file" id="editOrgLogoFile" accept="image/*" style="margin-top:8px;">
+                            </div>
+                            <div class="form-group">
+                                <label for="editOrgPrivacy">Privacyverklaring (tekst voor in de app)</label>
+                                <textarea id="editOrgPrivacy" rows="4" placeholder="Optioneel">${escTA(org.privacy_statement)}</textarea>
                             </div>
                             <div class="form-group">
                                 <label class="checkbox-label">
@@ -1523,6 +1677,15 @@ class HolwertAdmin {
             `;
             document.body.appendChild(modal);
             console.log('[Admin] editOrganization: modal toegevoegd aan DOM');
+            const picker = modal.querySelector('#editOrgBrandColorPicker');
+            const hexEl = modal.querySelector('#editOrgBrandColorHex');
+            if (picker && hexEl) {
+                picker.addEventListener('input', () => { hexEl.value = picker.value.toUpperCase(); });
+                hexEl.addEventListener('change', () => {
+                    const v = hexEl.value.trim();
+                    if (/^#[0-9A-Fa-f]{6}$/i.test(v)) picker.value = v;
+                });
+            }
             modal.querySelectorAll('.modal-close, [data-modal-close]').forEach(el => {
                 el.addEventListener('click', () => modal.remove());
             });
@@ -1535,6 +1698,22 @@ class HolwertAdmin {
                     this.showNotification('Naam is verplicht', 'error');
                     return;
                 }
+                let logo_url = document.getElementById('editOrgLogoUrl').value.trim();
+                const logoFile = document.getElementById('editOrgLogoFile')?.files?.[0];
+                if (logoFile) {
+                    try {
+                        const up = await this.uploadOrganizationLogo(id, logoFile);
+                        if (up) logo_url = up;
+                    } catch (e) {
+                        console.error(e);
+                        this.showNotification(e.message || 'Logo upload mislukt', 'error');
+                        return;
+                    }
+                } else if (logo_url === '') {
+                    logo_url = null;
+                }
+                const hexRaw = document.getElementById('editOrgBrandColorHex').value.trim();
+                const brand_color = /^#[0-9A-Fa-f]{6}$/i.test(hexRaw) ? hexRaw : undefined;
                 const body = {
                     name,
                     category: document.getElementById('editOrgCategory').value.trim() || undefined,
@@ -1543,7 +1722,15 @@ class HolwertAdmin {
                     email: document.getElementById('editOrgEmail').value.trim() || undefined,
                     website: document.getElementById('editOrgWebsite').value.trim() || undefined,
                     phone: document.getElementById('editOrgPhone').value.trim() || undefined,
+                    whatsapp: document.getElementById('editOrgWhatsapp').value.trim() || undefined,
                     address: document.getElementById('editOrgAddress').value.trim() || undefined,
+                    facebook: document.getElementById('editOrgFacebook').value.trim() || undefined,
+                    instagram: document.getElementById('editOrgInstagram').value.trim() || undefined,
+                    twitter: document.getElementById('editOrgTwitter').value.trim() || undefined,
+                    linkedin: document.getElementById('editOrgLinkedin').value.trim() || undefined,
+                    brand_color,
+                    logo_url,
+                    privacy_statement: document.getElementById('editOrgPrivacy').value.trim() || undefined,
                     is_approved: document.getElementById('editOrgApproved').checked
                 };
                 const res = await fetch(`${this.apiBaseUrl}/admin/organizations/${id}`, {

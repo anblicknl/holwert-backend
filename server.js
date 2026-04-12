@@ -3107,7 +3107,7 @@ app.get('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (
     
     const result = await executeQuery(
       `SELECT id, name, category, description, bio, is_approved, website, email, phone, whatsapp, address, 
-              facebook, instagram, twitter, linkedin, brand_color, logo_url, created_at, updated_at
+              facebook, instagram, twitter, linkedin, brand_color, logo_url, privacy_statement, created_at, updated_at
        FROM organizations 
        WHERE id = $1`,
       [id]
