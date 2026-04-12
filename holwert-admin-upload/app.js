@@ -114,6 +114,41 @@ class HolwertAdmin {
             });
         }
 
+        // Gebruikers: oog / bewerken / verwijderen (geen inline onclick — werkt niet bij CSP op sommige hosts)
+        const usersContentEl = document.getElementById('usersContent');
+        if (usersContentEl && !usersContentEl.dataset.actionsBound) {
+            usersContentEl.dataset.actionsBound = '1';
+            usersContentEl.addEventListener('click', (e) => {
+                const el = e.target.closest('[data-user-action]');
+                if (!el || !usersContentEl.contains(el)) return;
+                e.preventDefault();
+                const action = el.getAttribute('data-user-action');
+                const id = parseInt(el.getAttribute('data-user-id'), 10);
+                if (!action || Number.isNaN(id)) return;
+                if (action === 'view') {
+                    this.viewUser(id);
+                    return;
+                }
+                if (action === 'edit') {
+                    this.editUser(id);
+                    return;
+                }
+                if (action === 'delete') {
+                    this.deleteUser(id);
+                    return;
+                }
+                if (action === 'role') {
+                    this.changeUserRole(id);
+                    return;
+                }
+                if (action === 'status') {
+                    const a = el.getAttribute('data-user-active');
+                    const isActive = a === '1' || a === 'true';
+                    this.toggleUserStatus(id, isActive);
+                }
+            });
+        }
+
         // Organizations table actions (edit/delete) via event delegation
         const organizationsTableBody = document.getElementById('organizationsTableBody');
         if (organizationsTableBody) {
@@ -1001,24 +1036,24 @@ class HolwertAdmin {
                                     </div>
                                 </td>
                                 <td>
-                                    <span class="role-badge role-${user.role}" onclick="admin.changeUserRole(${user.id}, '${user.role}')" style="cursor: pointer;" title="Klik om rol te wijzigen">
+                                    <span class="role-badge role-${user.role}" data-user-action="role" data-user-id="${user.id}" style="cursor: pointer;" title="Klik om rol te wijzigen">
                                         ${user.role}
                                     </span>
                                 </td>
                                 <td>
-                                    <span class="status-badge status-${user.is_active ? 'active' : 'inactive'}" onclick="admin.toggleUserStatus(${user.id}, ${user.is_active})" style="cursor: pointer;" title="Klik om status te wijzigen">
+                                    <span class="status-badge status-${user.is_active ? 'active' : 'inactive'}" data-user-action="status" data-user-id="${user.id}" data-user-active="${user.is_active ? 1 : 0}" style="cursor: pointer;" title="Klik om status te wijzigen">
                                         ${user.is_active ? 'Actief' : 'Inactief'}
                                     </span>
                                 </td>
                                 <td>
                                     <div class="action-buttons">
-                                        <button class="btn-icon btn-view" onclick="admin.viewUser(${user.id})" title="Bekijk volledig profiel">
+                                        <button type="button" class="btn-icon btn-view" data-user-action="view" data-user-id="${user.id}" title="Bekijk volledig profiel">
                                             <i class="fas fa-eye"></i>
                                         </button>
-                                        <button class="btn-icon btn-edit" onclick="admin.editUser(${user.id})" title="Bewerken">
+                                        <button type="button" class="btn-icon btn-edit" data-user-action="edit" data-user-id="${user.id}" title="Bewerken">
                                             <i class="fas fa-edit"></i>
                                         </button>
-                                        <button class="btn-icon btn-delete" onclick="admin.deleteUser(${user.id})" title="Verwijderen">
+                                        <button type="button" class="btn-icon btn-delete" data-user-action="delete" data-user-id="${user.id}" title="Verwijderen">
                                             <i class="fas fa-trash"></i>
                                         </button>
                                     </div>
@@ -1047,23 +1082,23 @@ class HolwertAdmin {
                                     <strong>${user.first_name} ${user.last_name}</strong>
                                 </div>
                                 <div class="user-badges">
-                                    <span class="role-badge role-${user.role}" onclick="admin.changeUserRole(${user.id}, '${user.role}')" style="cursor: pointer;" title="Klik om rol te wijzigen">
+                                    <span class="role-badge role-${user.role}" data-user-action="role" data-user-id="${user.id}" style="cursor: pointer;" title="Klik om rol te wijzigen">
                                         ${user.role}
                                     </span>
-                                    <span class="status-badge status-${user.is_active ? 'active' : 'inactive'}" onclick="admin.toggleUserStatus(${user.id}, ${user.is_active})" style="cursor: pointer;" title="Klik om status te wijzigen">
+                                    <span class="status-badge status-${user.is_active ? 'active' : 'inactive'}" data-user-action="status" data-user-id="${user.id}" data-user-active="${user.is_active ? 1 : 0}" style="cursor: pointer;" title="Klik om status te wijzigen">
                                         ${user.is_active ? 'Actief' : 'Inactief'}
                                     </span>
                                 </div>
                             </div>
                         </div>
                         <div class="user-card-actions">
-                            <button class="btn-icon btn-view" onclick="admin.viewUser(${user.id})" title="Bekijk volledig profiel">
+                            <button type="button" class="btn-icon btn-view" data-user-action="view" data-user-id="${user.id}" title="Bekijk volledig profiel">
                                 <i class="fas fa-eye"></i>
                             </button>
-                            <button class="btn-icon btn-edit" onclick="admin.editUser(${user.id})" title="Bewerken">
+                            <button type="button" class="btn-icon btn-edit" data-user-action="edit" data-user-id="${user.id}" title="Bewerken">
                                 <i class="fas fa-edit"></i>
                             </button>
-                            <button class="btn-icon btn-delete" onclick="admin.deleteUser(${user.id})" title="Verwijderen">
+                            <button type="button" class="btn-icon btn-delete" data-user-action="delete" data-user-id="${user.id}" title="Verwijderen">
                                 <i class="fas fa-trash"></i>
                             </button>
                         </div>
@@ -3554,11 +3589,12 @@ class HolwertAdmin {
     showUserModal(user) {
         const modal = document.createElement('div');
         modal.className = 'modal-overlay';
+        const uid = user.id;
         modal.innerHTML = `
             <div class="modal-content">
                 <div class="modal-header">
                     <h3>Gebruikersprofiel</h3>
-                    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">
+                    <button type="button" class="modal-close" aria-label="Sluiten">
                         <i class="fas fa-times"></i>
                     </button>
                 </div>
@@ -3604,13 +3640,23 @@ class HolwertAdmin {
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">Sluiten</button>
-                    <button class="btn btn-primary" onclick="admin.editUser(${user.id}); this.closest('.modal-overlay').remove()">Bewerken</button>
+                    <button type="button" class="btn btn-secondary js-user-view-close">Sluiten</button>
+                    <button type="button" class="btn btn-primary js-user-view-edit">Bewerken</button>
                 </div>
             </div>
         `;
         modal.style.display = 'flex';
         document.body.appendChild(modal);
+        const close = () => modal.remove();
+        modal.querySelector('.modal-close')?.addEventListener('click', close);
+        modal.querySelector('.js-user-view-close')?.addEventListener('click', close);
+        modal.querySelector('.js-user-view-edit')?.addEventListener('click', () => {
+            close();
+            this.editUser(uid);
+        });
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) close();
+        });
     }
 
     async editUser(id) {
@@ -3645,11 +3691,12 @@ class HolwertAdmin {
     showEditUserModal(user) {
         const modal = document.createElement('div');
         modal.className = 'modal-overlay';
+        const userId = user.id;
         modal.innerHTML = `
-            <div class="modal-content modal-large">
+            <div class="modal-content modal-large" id="editUserModalRoot">
                 <div class="modal-header">
                     <h3>Gebruiker Bewerken</h3>
-                    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">
+                    <button type="button" class="modal-close" aria-label="Sluiten">
                         <i class="fas fa-times"></i>
                     </button>
                 </div>
@@ -3709,18 +3756,18 @@ class HolwertAdmin {
                                 </div>
                                 <div class="image-options">
                                     <div class="option-tabs">
-                                        <button type="button" class="tab-btn active" onclick="admin.switchImageTab('url')">URL</button>
-                                        <button type="button" class="tab-btn" onclick="admin.switchImageTab('upload')">Upload</button>
+                                        <button type="button" class="tab-btn active" data-image-tab="url">URL</button>
+                                        <button type="button" class="tab-btn" data-image-tab="upload">Upload</button>
                                     </div>
                                     <div class="tab-content">
                                         <div id="url-tab" class="tab-pane active">
                                             <input type="url" id="editProfileImage" name="profile_image_url" value="${user.profile_image_url || ''}" placeholder="https://...">
                                         </div>
                                         <div id="upload-tab" class="tab-pane">
-                                            <input type="file" id="profileImageUpload" name="profile_image_file" accept="image/*" onchange="admin.previewUploadedImage(this)">
+                                            <input type="file" id="profileImageUpload" name="profile_image_file" accept="image/*">
                                             <div id="uploadPreview" class="upload-preview" style="display: none;">
                                                 <img id="uploadedImagePreview" src="" alt="Preview" class="preview-img">
-                                                <button type="button" class="btn btn-sm btn-secondary" onclick="admin.clearUploadPreview()">Verwijder</button>
+                                                <button type="button" class="btn btn-sm btn-secondary js-clear-upload-preview">Verwijder</button>
                                             </div>
                                         </div>
                                     </div>
@@ -3730,18 +3777,32 @@ class HolwertAdmin {
                     </form>
                 </div>
                 <div class="modal-footer">
-                    <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">Annuleren</button>
-                    <button class="btn btn-primary" onclick="admin.saveUserChanges(${user.id})">Opslaan</button>
+                    <button type="button" class="btn btn-secondary js-edit-user-cancel">Annuleren</button>
+                    <button type="button" class="btn btn-primary js-edit-user-save">Opslaan</button>
                 </div>
             </div>
         `;
         modal.style.display = 'flex';
         document.body.appendChild(modal);
+        const closeEdit = () => modal.remove();
+        modal.querySelector('.modal-close')?.addEventListener('click', closeEdit);
+        modal.querySelector('.js-edit-user-cancel')?.addEventListener('click', closeEdit);
+        modal.querySelector('.js-edit-user-save')?.addEventListener('click', () => this.saveUserChanges(userId));
+        modal.querySelectorAll('[data-image-tab]').forEach((btn) => {
+            btn.addEventListener('click', () => this.switchImageTab(btn.getAttribute('data-image-tab')));
+        });
+        modal.querySelector('#profileImageUpload')?.addEventListener('change', (e) => this.previewUploadedImage(e.target));
+        modal.querySelector('.js-clear-upload-preview')?.addEventListener('click', () => this.clearUploadPreview());
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) closeEdit();
+        });
     }
 
-    changeUserRole(id, currentRole) {
+    changeUserRole(id) {
+        const u = this.findUserById(id, this.allUsersCache);
+        const r = u && u.role != null ? u.role : '';
         this.showNotification(
-            'Rol wijzigen kan via «Bewerken» in het gebruikersoverzicht. (Snelle klik op de rol-badge volgt later.)',
+            `Rol wijzigen: gebruik de knop «Bewerken» (potlood). Huidige rol: ${r || '—'}.`,
             'info'
         );
     }
@@ -3865,7 +3926,7 @@ class HolwertAdmin {
                 const result = await response.json();
                 console.log('Update successful:', result);
                 this.showNotification('Gebruiker succesvol bijgewerkt', 'success');
-                document.querySelector('.modal-overlay').remove();
+                document.getElementById('editUserModalRoot')?.closest('.modal-overlay')?.remove();
                 this.loadUsers(); // Refresh the users list
             } else {
                 let errorMessage = 'Onbekende fout';
@@ -4001,13 +4062,14 @@ class HolwertAdmin {
     }
 
     switchImageTab(tab) {
-        // Remove active class from all tabs and panes
-        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-        document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
-        
-        // Add active class to selected tab and pane
-        document.querySelector(`[onclick="admin.switchImageTab('${tab}')"]`).classList.add('active');
-        document.getElementById(`${tab}-tab`).classList.add('active');
+        const root = document.getElementById('editUserModalRoot');
+        if (!root) return;
+        root.querySelectorAll('.tab-btn').forEach((btn) => btn.classList.remove('active'));
+        root.querySelectorAll('.tab-pane').forEach((pane) => pane.classList.remove('active'));
+        const selBtn = root.querySelector(`[data-image-tab="${tab}"]`);
+        if (selBtn) selBtn.classList.add('active');
+        const pane = root.querySelector(`#${tab}-tab`);
+        if (pane) pane.classList.add('active');
     }
 
     async previewUploadedImage(input) {
