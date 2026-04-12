@@ -294,7 +294,39 @@ class HolwertAdmin {
             if (response.ok) {
                 console.log('Login successful!');
                 this.token = data.token;
-                this.currentUser = data.user;
+                const elevated = new Set(['admin', 'superadmin', 'editor']);
+                let profileRole = '';
+                try {
+                    const profRes = await fetch(`${this.apiBaseUrl}/auth/profile`, {
+                        headers: { 'Authorization': `Bearer ${this.token}` }
+                    });
+                    if (profRes.ok) {
+                        const profData = await profRes.json();
+                        profileRole = profData.user && profData.user.role != null
+                            ? String(profData.user.role).trim().toLowerCase()
+                            : '';
+                        this.currentUser = profData.user || data.user;
+                    }
+                } catch (e) {
+                    console.warn('Kon profiel na login niet laden:', e);
+                }
+                if (!profileRole) {
+                    profileRole = data.user && data.user.role != null
+                        ? String(data.user.role).trim().toLowerCase()
+                        : '';
+                }
+                if (!profileRole || !elevated.has(profileRole)) {
+                    this.token = null;
+                    if (errorDiv) {
+                        errorDiv.innerHTML = 'Dit account heeft geen rechten voor het beheerderspaneel. In de database moet je rol <strong>admin</strong>, <strong>superadmin</strong> of <strong>editor</strong> zijn.';
+                        errorDiv.style.display = 'block';
+                        errorDiv.style.color = 'red';
+                    }
+                    return;
+                }
+                if (!this.currentUser) {
+                    this.currentUser = data.user;
+                }
                 localStorage.setItem('authToken', this.token);
                 
                 if (span) span.textContent = 'Succesvol!';
@@ -309,6 +341,7 @@ class HolwertAdmin {
                 setTimeout(() => {
                     console.log('Switching to main screen');
                     this.showMainScreen();
+                    this.showSection('dashboard');
                 }, 1000);
             } else {
                 console.log('Login failed:', data);
@@ -870,11 +903,15 @@ class HolwertAdmin {
                 try {
                     const error = await response.json();
                     console.error('Error:', error);
-                    if (error.error || error.message) msg = error.error || error.message;
+                    if (error.message) {
+                        msg = error.message;
+                    } else if (error.error) {
+                        msg = error.error;
+                    }
+                    if (response.status === 403 && error.dbRole != null) {
+                        msg += ` (rol in database: ${error.dbRole})`;
+                    }
                 } catch (_) { /* body geen JSON */ }
-                if (response.status === 403) {
-                    msg = 'Geen rechten om gebruikers te bekijken. Log in met een admin-account.';
-                }
                 this.showNotification(msg, 'error');
             }
         } catch (error) {
@@ -921,7 +958,14 @@ class HolwertAdmin {
         if (!container) return;
 
         if (users.length === 0) {
-            container.innerHTML = '<p class="text-muted">Geen gebruikers gevonden</p>';
+            const cache = Array.isArray(this.allUsersCache) ? this.allUsersCache : [];
+            const tabLabel = this.currentUsersTab === 'organisaties' ? 'Organisaties' : 'Dorpsbewoners';
+            const otherTab = this.currentUsersTab === 'organisaties' ? 'Dorpsbewoners' : 'Organisaties';
+            let extra = '';
+            if (cache.length > 0) {
+                extra = `<p class="text-muted" style="margin-top:8px;">Er zijn wél accounts geladen (${cache.length}). Probeer het tabblad <strong>${otherTab}</strong>: daar staan accounts die niet onder «${tabLabel}» vallen (filter op rol).</p>`;
+            }
+            container.innerHTML = `<p class="text-muted">Geen gebruikers in dit overzicht.</p>${extra}`;
             return;
         }
 

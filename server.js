@@ -771,15 +771,46 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
-// Require admin role (accept a small set of elevated roles; case-insensitive)
-const requireAdmin = (req, res, next) => {
-  const roleRaw = req.user && req.user.role;
-  const role = typeof roleRaw === 'string' ? roleRaw.toLowerCase() : undefined;
-  const allowed = ['admin', 'superadmin', 'editor'];
-  if (!role || !allowed.includes(role)) {
-    return res.status(403).json({ error: 'Admin privileges required' });
+// Admin-rollen (JWT kan ontbreken of afwijken van DB na handmatige fixes)
+const ELEVATED_ADMIN_ROLES = new Set(['admin', 'superadmin', 'editor']);
+
+function normalizeAdminRole(roleRaw) {
+  if (roleRaw == null) return '';
+  const s = String(roleRaw).trim().toLowerCase();
+  if (!s || s === 'null' || s === 'undefined') return '';
+  return s;
+}
+
+/** Async: valideert JWT-rol, zo niet aanwezig of geweigerd dan rol uit database (zelfde userId). */
+const requireAdmin = async (req, res, next) => {
+  try {
+    const jwtRole = normalizeAdminRole(req.user && req.user.role);
+    if (jwtRole && ELEVATED_ADMIN_ROLES.has(jwtRole)) {
+      return next();
+    }
+    const userId = req.user && req.user.userId;
+    if (userId == null) {
+      return res.status(403).json({
+        error: 'Admin privileges required',
+        message: 'Token mist gebruikers-id. Log opnieuw in.'
+      });
+    }
+    const r = await executeQuery('SELECT role FROM users WHERE id = ?', [userId]);
+    const dbRole = normalizeAdminRole(r.rows?.[0]?.role);
+    if (dbRole && ELEVATED_ADMIN_ROLES.has(dbRole)) {
+      return next();
+    }
+    return res.status(403).json({
+      error: 'Admin privileges required',
+      message:
+        'Geen beheerdersrechten (admin, superadmin of editor). Controleer in de database het veld `role` voor jouw account, of log uit en opnieuw in.',
+      jwtRole: req.user && req.user.role != null ? req.user.role : null,
+      dbRole: r.rows?.[0]?.role != null ? r.rows[0].role : null
+    });
+  } catch (err) {
+    console.error('requireAdmin:', err);
+    return res.status(500).json({ error: 'Auth check failed', message: err.message });
   }
-  next();
 };
 
 // Alleen voor organisatie-portal: user moet organizationId in JWT hebben
@@ -3065,19 +3096,10 @@ app.delete('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, r
 });
 
 // Get single organization (admin) - MUST BE BEFORE /api/admin/organizations (without :id)
-app.get('/api/admin/organizations/:id', authenticateToken, async (req, res) => {
+app.get('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     console.log(`[GET /api/admin/organizations/:id] Request for organization ID: ${id}, user:`, req.user);
-    
-    // Check admin privileges
-    const roleRaw = req.user && req.user.role;
-    const role = typeof roleRaw === 'string' ? roleRaw.toLowerCase() : undefined;
-    const allowed = ['admin', 'superadmin', 'editor'];
-    if (!role || !allowed.includes(role)) {
-      console.log(`[GET /api/admin/organizations/:id] Access denied for role: ${role}`);
-      return res.status(403).json({ error: 'Admin privileges required' });
-    }
     
     if (!id || isNaN(parseInt(id))) {
       return res.status(400).json({ error: 'Invalid organization ID' });
@@ -3105,15 +3127,8 @@ app.get('/api/admin/organizations/:id', authenticateToken, async (req, res) => {
 });
 
 // Get all organizations (admin) - OPTIMIZED: Caching + combined queries
-app.get('/api/admin/organizations', authenticateToken, async (req, res) => {
+app.get('/api/admin/organizations', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const roleRaw = req.user && req.user.role;
-    const role = typeof roleRaw === 'string' ? roleRaw.toLowerCase() : undefined;
-    const allowed = ['admin', 'superadmin', 'editor'];
-    if (!role || !allowed.includes(role)) {
-      return res.status(403).json({ error: 'Admin privileges required' });
-    }
-
     const { page = 1, limit = 20, status } = req.query;
     const offset = (page - 1) * limit;
     
