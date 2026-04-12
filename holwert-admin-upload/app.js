@@ -1332,8 +1332,114 @@ class HolwertAdmin {
     }
 
     showCreateOrganizationModal() {
-        this.showNotification('Organisatie aanmaken functie is nog niet geïmplementeerd', 'info');
-        // TODO: Implementeer create organization modal (zoals bij nieuws/events)
+        const self = this;
+        if (!this.token) {
+            this.showNotification('Niet ingelogd. Log opnieuw in.', 'error');
+            return;
+        }
+        const modal = document.createElement('div');
+        modal.className = 'modal-overlay';
+        modal.style.display = 'flex';
+        modal.innerHTML = `
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Nieuwe organisatie</h3>
+                    <button type="button" class="modal-close" data-modal-close aria-label="Sluiten"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="modal-body">
+                    <form id="createOrganizationForm">
+                        <div class="form-group">
+                            <label for="createOrgName">Naam *</label>
+                            <input type="text" id="createOrgName" required placeholder="Naam van de organisatie">
+                        </div>
+                        <div class="form-group">
+                            <label for="createOrgCategory">Categorie</label>
+                            <input type="text" id="createOrgCategory" placeholder="bijv. Vereniging, Gemeente, Sport">
+                        </div>
+                        <div class="form-group">
+                            <label for="createOrgDescription">Beschrijving</label>
+                            <textarea id="createOrgDescription" rows="3" placeholder="Korte beschrijving"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="createOrgBio">Bio</label>
+                            <textarea id="createOrgBio" rows="2" placeholder="Optionele bio"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="createOrgEmail">E-mail</label>
+                            <input type="email" id="createOrgEmail" placeholder="contact@voorbeeld.nl">
+                        </div>
+                        <div class="form-group">
+                            <label for="createOrgWebsite">Website</label>
+                            <input type="url" id="createOrgWebsite" placeholder="https://">
+                        </div>
+                        <div class="form-group">
+                            <label for="createOrgPhone">Telefoon</label>
+                            <input type="text" id="createOrgPhone" placeholder="Telefoonnummer">
+                        </div>
+                        <div class="form-group">
+                            <label for="createOrgAddress">Adres</label>
+                            <input type="text" id="createOrgAddress" placeholder="Straat, postcode, plaats">
+                        </div>
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="createOrgApproved" checked>
+                                Direct goedgekeurd (zichtbaar in app)
+                            </label>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-modal-close>Annuleren</button>
+                    <button type="button" class="btn btn-primary" id="createOrganizationSubmitBtn">Organisatie aanmaken</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        const close = () => modal.remove();
+        modal.querySelectorAll('.modal-close, [data-modal-close]').forEach((el) => el.addEventListener('click', close));
+        modal.querySelector('.modal-content')?.addEventListener('click', (e) => e.stopPropagation());
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) close();
+        });
+        modal.querySelector('#createOrganizationSubmitBtn')?.addEventListener('click', async () => {
+            const name = document.getElementById('createOrgName')?.value?.trim();
+            if (!name) {
+                self.showNotification('Naam is verplicht', 'error');
+                return;
+            }
+            const body = {
+                name,
+                category: document.getElementById('createOrgCategory')?.value?.trim() || undefined,
+                description: document.getElementById('createOrgDescription')?.value?.trim() || undefined,
+                bio: document.getElementById('createOrgBio')?.value?.trim() || undefined,
+                email: document.getElementById('createOrgEmail')?.value?.trim() || undefined,
+                website: document.getElementById('createOrgWebsite')?.value?.trim() || undefined,
+                phone: document.getElementById('createOrgPhone')?.value?.trim() || undefined,
+                address: document.getElementById('createOrgAddress')?.value?.trim() || undefined,
+                is_approved: document.getElementById('createOrgApproved')?.checked !== false
+            };
+            try {
+                const res = await fetch(`${self.apiBaseUrl}/admin/organizations`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${self.token}`
+                    },
+                    body: JSON.stringify(body)
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    self.showNotification(data.message || data.error || `Aanmaken mislukt (${res.status})`, 'error');
+                    return;
+                }
+                self.showNotification('Organisatie aangemaakt', 'success');
+                close();
+                self.loadOrganizations();
+            } catch (e) {
+                console.error(e);
+                self.showNotification('Fout bij aanmaken organisatie', 'error');
+            }
+        });
     }
 
     async editOrganization(id) {
