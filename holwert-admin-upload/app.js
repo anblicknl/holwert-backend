@@ -35,6 +35,22 @@ class HolwertAdmin {
             });
         }
 
+        const loginPwToggle = document.getElementById('loginPasswordToggle');
+        const loginPwInput = document.getElementById('password');
+        if (loginPwToggle && loginPwInput) {
+            loginPwToggle.addEventListener('click', () => {
+                const tonen = loginPwInput.type === 'password';
+                loginPwInput.type = tonen ? 'text' : 'password';
+                loginPwToggle.setAttribute('aria-pressed', tonen ? 'true' : 'false');
+                loginPwToggle.setAttribute('aria-label', tonen ? 'Wachtwoord verbergen' : 'Wachtwoord tonen');
+                loginPwToggle.title = tonen ? 'Wachtwoord verbergen' : 'Wachtwoord tonen';
+                const icon = loginPwToggle.querySelector('i');
+                if (icon) {
+                    icon.className = tonen ? 'fas fa-eye-slash' : 'fas fa-eye';
+                }
+            });
+        }
+
         // Logout button
         const logoutBtn = document.getElementById('logoutBtn');
         if (logoutBtn) {

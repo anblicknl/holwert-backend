@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Holwert Dorpsapp - Admin Panel</title>
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.css?v=1744494000">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
 <body>
@@ -25,7 +25,12 @@
                 </div>
                 <div class="form-group">
                     <label for="password">Wachtwoord</label>
-                    <input type="password" id="password" name="password" placeholder="••••••••" required>
+                    <div class="login-password-wrap">
+                        <input type="password" id="password" name="password" placeholder="••••••••" autocomplete="current-password" required>
+                        <button type="button" class="login-password-toggle" id="loginPasswordToggle" aria-label="Wachtwoord tonen" aria-pressed="false" title="Wachtwoord tonen">
+                            <i class="fas fa-eye" aria-hidden="true"></i>
+                        </button>
+                    </div>
                 </div>
                 <button type="submit" class="btn btn-primary">
                     <i class="fas fa-arrow-right"></i> 
@@ -389,6 +394,6 @@
         console.log('🔧 VERSION: ADMIN-ORG-EVENTS-20260225-1');
     </script>
     <!-- Cache-busting query parameter zodat nieuwe app.js altijd wordt opgehaald -->
-    <script src="app.js?v=1744493600"></script>
+    <script src="app.js?v=1744494000"></script>
 </body>
 </html>
