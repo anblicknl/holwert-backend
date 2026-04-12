@@ -165,6 +165,40 @@ class HolwertAdmin {
             });
         }
 
+        // Evenementen: bekijken / bewerken / verwijderen (geen inline onclick — CSP)
+        const eventsContentEl = document.getElementById('eventsContent');
+        if (eventsContentEl && !eventsContentEl.dataset.actionsBound) {
+            eventsContentEl.dataset.actionsBound = '1';
+            eventsContentEl.addEventListener('click', (e) => {
+                const el = e.target.closest('[data-event-action]');
+                if (!el || !eventsContentEl.contains(el)) return;
+                e.preventDefault();
+                const action = el.getAttribute('data-event-action');
+                const id = parseInt(el.getAttribute('data-event-id'), 10);
+                if (Number.isNaN(id)) return;
+                if (action === 'view') {
+                    this.viewEvent(id);
+                    return;
+                }
+                if (action === 'edit') {
+                    this.editEvent(id);
+                    return;
+                }
+                if (action === 'delete') {
+                    let title = '';
+                    const enc = el.getAttribute('data-event-title');
+                    if (enc) {
+                        try {
+                            title = decodeURIComponent(enc);
+                        } catch {
+                            title = '';
+                        }
+                    }
+                    this.deleteEvent(id, title || 'dit evenement');
+                }
+            });
+        }
+
         // Organizations table actions (edit/delete) via event delegation
         const organizationsTableBody = document.getElementById('organizationsTableBody');
         if (organizationsTableBody) {
@@ -1201,7 +1235,7 @@ class HolwertAdmin {
             const data = await res.json().catch(() => ({}));
             if (res.ok) {
                 this.showNotification('Gebruiker succesvol aangemaakt', 'success');
-                document.querySelector('.modal-overlay')?.remove();
+                document.getElementById('createFirstName')?.closest('.modal-overlay')?.remove();
                 this.loadUsers();
             } else {
                 const msg = data.error || data.message || `HTTP ${res.status}`;
@@ -1838,7 +1872,7 @@ class HolwertAdmin {
                             type: 'news',
                             id: news.id,
                             title: news.title,
-                            meta: `Nieuws • ${this.formatDate(news.created_at)}`,
+                            meta: `Nieuws • ${this.formatDate(news.published_at || news.created_at)}`,
                             icon: 'newspaper'
                         });
                     });
@@ -2081,7 +2115,7 @@ class HolwertAdmin {
                                     </span>
                                 </td>
                                 <td>
-                                    <small>${new Date(article.created_at).toLocaleDateString('nl-NL')}</small>
+                                    <small>${this.formatNewsArticleDate(article)}</small>
                                 </td>
                                 <td>
                                     <div class="action-buttons">
@@ -2149,6 +2183,40 @@ class HolwertAdmin {
         });
     }
 
+    /** Lokale kalenderdatum voor <input type="date"> (niet UTC via toISOString). */
+    _newsLocalDateForInput(value) {
+        if (value == null || value === '') return '';
+        const d = value instanceof Date ? value : new Date(value);
+        if (Number.isNaN(d.getTime())) return '';
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+    }
+
+    /** Lokale tijd voor <input type="time">. */
+    _newsLocalTimeForInput(value) {
+        if (value == null || value === '') return '12:00';
+        const d = value instanceof Date ? value : new Date(value);
+        if (Number.isNaN(d.getTime())) return '12:00';
+        return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    }
+
+    /** Datum voor weergave in lijsten/modals: publicatiedatum (API: COALESCE), anders aanmaakmoment. */
+    formatNewsArticleDate(article) {
+        const when = article?.published_at || article?.created_at;
+        if (!when) return '–';
+        return new Date(when).toLocaleDateString('nl-NL');
+    }
+
+    /** Organisaties voor dropdowns alfabetisch op naam (nl). */
+    _sortOrganizationsByName(organizations) {
+        if (!Array.isArray(organizations)) return [];
+        return [...organizations].sort((a, b) =>
+            String(a?.name || '').localeCompare(String(b?.name || ''), 'nl', { sensitivity: 'base' })
+        );
+    }
+
     // Nieuwe uniforme functie voor nieuws modal (net als events)
     async openNewsModal(newsId = null, mode = 'create') {
         try {
@@ -2166,7 +2234,7 @@ class HolwertAdmin {
                 console.log('Organizations fetch status:', response.status);
                 if (response.ok) {
                     const data = await response.json();
-                    organizations = data.organizations || [];
+                    organizations = this._sortOrganizationsByName(data.organizations || []);
                     console.log('Organizations loaded:', organizations.length);
                 } else {
                     const errorData = await response.json().catch(() => ({}));
@@ -2206,11 +2274,15 @@ class HolwertAdmin {
             const title = isEdit ? 'Nieuws Bewerken' : 'Nieuw Nieuws Artikel';
             const buttonText = isEdit ? 'Bijwerken' : 'Opslaan';
             
-            // Formatteer datum voor input (standaard vandaag)
-            const today = new Date().toISOString().split('T')[0];
-            const articleDate = article?.created_at || article?.published_at;
-            const pubDate = articleDate ? new Date(articleDate).toISOString().split('T')[0] : today;
-            const pubTime = articleDate ? new Date(articleDate).toTimeString().slice(0, 5) : '12:00';
+            // Publicatiedatum/tijd: API levert published_at als COALESCE(published_at, created_at) — die eerst gebruiken.
+            // Geen toISOString() voor de datum (UTC verschuift de kalenderdag); lokale velden via helpers.
+            const articleMoment = isEdit ? (article.published_at || article.created_at) : null;
+            const pubDate = articleMoment
+                ? this._newsLocalDateForInput(articleMoment)
+                : this._newsLocalDateForInput(new Date());
+            const pubTime = articleMoment
+                ? this._newsLocalTimeForInput(articleMoment)
+                : '12:00';
 
             console.log('📋 Creating modal overlay...');
             const overlay = document.createElement('div');
@@ -2446,11 +2518,13 @@ class HolwertAdmin {
             const organization_id = (organization_id_val && organization_id_val !== '' && organization_id_val !== '0') 
                 ? parseInt(organization_id_val) 
                 : null;
-            
-            // Note: Date fields removed - using created_at/updated_at from database
-            // const pubDate = document.getElementById('newsPubDate').value;
-            // const pubTime = document.getElementById('newsPubTime').value || '12:00';
-            // const published_at = pubDate ? `${pubDate}T${pubTime}:00.000Z` : new Date().toISOString();
+
+            const pubDateVal = (document.getElementById('newsPubDate')?.value || '').trim();
+            const pubTimeRaw = (document.getElementById('newsPubTime')?.value || '').trim() || '12:00';
+            const timeParts = pubTimeRaw.split(':');
+            const hh = String(Math.min(23, Math.max(0, parseInt(timeParts[0], 10) || 0))).padStart(2, '0');
+            const mm = String(Math.min(59, Math.max(0, parseInt(timeParts[1], 10) || 0))).padStart(2, '0');
+            const published_at = pubDateVal ? `${pubDateVal} ${hh}:${mm}:00` : undefined;
             
             // Handle image upload
             const uploadedFile = document.getElementById('newsImage')?.files[0];
@@ -2517,9 +2591,11 @@ class HolwertAdmin {
                 content,
                 category,
                 organization_id,
-                // Note: published_at column doesn't exist in DB, using created_at/updated_at instead
                 is_published: document.getElementById('newsPublished').checked
             };
+            if (published_at !== undefined) {
+                body.published_at = published_at;
+            }
             
             // Voeg image_url alleen toe als het gedefinieerd is
             if (imageUrl !== undefined) {
@@ -2553,7 +2629,7 @@ class HolwertAdmin {
             }
 
             this.showNotification('Nieuws artikel opgeslagen', 'success');
-            document.querySelector('.modal-overlay')?.remove();
+            document.getElementById('newsTitle')?.closest('.modal-overlay')?.remove();
             this.loadNews();
         } catch (e) {
             console.error('saveNews error:', e);
@@ -2666,7 +2742,7 @@ class HolwertAdmin {
                 <div class="news-meta">
                     <div class="news-meta-item">
                         <i class="fas fa-calendar-alt"></i>
-                        <span>${new Date(article.created_at).toLocaleDateString('nl-NL')}</span>
+                        <span>${this.formatNewsArticleDate(article)}</span>
                     </div>
                     <div class="news-meta-item">
                         <i class="fas fa-tag"></i>
@@ -2814,13 +2890,13 @@ class HolwertAdmin {
                 <td><span class="status-badge status-published">GEPUBLICEERD</span></td>
                 <td>
                     <div class="action-buttons">
-                        <button class="btn-icon btn-view" onclick="admin.viewEvent(${ev.id}, ${JSON.stringify(ev).replace(/"/g, '&quot;')})" title="Bekijken">
+                        <button type="button" class="btn-icon btn-view" data-event-action="view" data-event-id="${ev.id}" title="Bekijken">
                             <i class="fas fa-eye"></i>
                         </button>
-                        <button class="btn-icon btn-edit" onclick="admin.editEvent(${ev.id})" title="Bewerken">
+                        <button type="button" class="btn-icon btn-edit" data-event-action="edit" data-event-id="${ev.id}" title="Bewerken">
                             <i class="fas fa-edit"></i>
                         </button>
-                        <button class="btn-icon btn-delete" onclick="admin.deleteEvent(${ev.id}, '${(ev.title || '').replace(/'/g, "\\'")}')">
+                        <button type="button" class="btn-icon btn-delete" data-event-action="delete" data-event-id="${ev.id}" data-event-title="${encodeURIComponent(ev.title || '')}">
                             <i class="fas fa-trash"></i>
                         </button>
                     </div>
@@ -2856,10 +2932,11 @@ class HolwertAdmin {
         try {
             let event;
             if (eventData) {
-                // Gebruik de doorgegeven event data
                 event = eventData;
-            } else {
-                // Fallback: haal event data op via API
+            } else if (Array.isArray(this.allEventsCache)) {
+                event = this.allEventsCache.find((e) => Number(e.id) === Number(id));
+            }
+            if (!event) {
                 const response = await fetch(`${this.apiBaseUrl}/events/${id}`);
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 event = await response.json();
@@ -3092,7 +3169,7 @@ class HolwertAdmin {
 
             if (response.ok) {
                 this.showNotification('Evenement succesvol aangemaakt', 'success');
-                document.querySelector('.modal-overlay').remove();
+                document.getElementById('createEventForm')?.closest('.modal-overlay')?.remove();
                 this.loadEvents(); // Herlaad de lijst
                 this.loadNotificationCounts(); // Refresh notification badges
             } else {
@@ -3133,7 +3210,7 @@ class HolwertAdmin {
 
             if (response.ok) {
                 this.showNotification('Evenement succesvol bijgewerkt', 'success');
-                document.querySelector('.modal-overlay').remove();
+                document.getElementById('editEventForm')?.closest('.modal-overlay')?.remove();
                 this.loadEvents(); // Herlaad de lijst
                 this.loadNotificationCounts(); // Refresh notification badges
             } else {
@@ -3286,6 +3363,7 @@ class HolwertAdmin {
         });
         
         // Add to DOM
+        modalOverlay.style.display = 'flex';
         document.body.appendChild(modalOverlay);
     }
 
@@ -4550,7 +4628,7 @@ class HolwertAdmin {
                             </span>
                         </div>
                         <div class="content-meta">
-                            <small>${new Date(article.created_at).toLocaleDateString('nl-NL')}</small>
+                            <small>${this.formatNewsArticleDate(article)}</small>
                         </div>
                         <div class="content-actions">
                             <button class="btn btn-sm btn-primary" onclick="admin.viewNews(${article.id})">
@@ -4583,10 +4661,10 @@ class HolwertAdmin {
                             <small>${new Date(event.event_date).toLocaleDateString('nl-NL')} - ${event.location || 'Locatie onbekend'}</small>
                         </div>
                         <div class="content-actions">
-                            <button class="btn btn-sm btn-secondary" onclick="admin.openEventModal(${event.id}, 'edit')">
+                            <button type="button" class="btn btn-sm btn-secondary" data-org-event-action="edit" data-org-event-id="${event.id}">
                                 <i class="fas fa-edit"></i> Bewerken
                             </button>
-                            <button class="btn btn-sm btn-primary" onclick="admin.openEventModal(${event.id}, 'view')">
+                            <button type="button" class="btn btn-sm btn-primary" data-org-event-action="view" data-org-event-id="${event.id}">
                                 <i class="fas fa-eye"></i> Bekijken
                             </button>
                         </div>
@@ -4594,6 +4672,16 @@ class HolwertAdmin {
                 `).join('')}
             </div>
         `;
+        tabPane.querySelectorAll('[data-org-event-action]').forEach((btn) => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                const eid = parseInt(btn.getAttribute('data-org-event-id'), 10);
+                const mode = btn.getAttribute('data-org-event-action');
+                if (!Number.isNaN(eid) && (mode === 'edit' || mode === 'view')) {
+                    this.openEventModal(eid, mode);
+                }
+            });
+        });
     }
 
     displayOrgFollowers(followers, tabPane) {
@@ -4654,7 +4742,7 @@ class HolwertAdmin {
                     });
                     if (orgRes.ok) {
                         const orgData = await orgRes.json();
-                        organizations = orgData.organizations || [];
+                        organizations = this._sortOrganizationsByName(orgData.organizations || []);
                         console.log('Organizations loaded:', organizations.length);
                     } else {
                         // Niet gooien van error, gewoon loggen en doorgaan zonder organisaties
@@ -4789,7 +4877,7 @@ class HolwertAdmin {
                     <div class="modal" style="max-width: 600px;">
                         <div class="modal-header">
                             <h3>Event Preview</h3>
-                            <button class="close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+                            <button type="button" class="close js-event-modal-close" aria-label="Sluiten">&times;</button>
                         </div>
                         <div class="modal-body" style="padding: 0;">
                             <div style="background: linear-gradient(135deg, #f8f6f0 0%, #f0ede5 100%); padding: 24px; border-radius: 12px 12px 0 0;">
@@ -4827,7 +4915,7 @@ class HolwertAdmin {
                             </div>
                         </div>
                         <div class="modal-footer">
-                            <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">Sluiten</button>
+                            <button type="button" class="btn btn-secondary js-event-modal-close">Sluiten</button>
                         </div>
                     </div>
                 `;
@@ -4837,7 +4925,7 @@ class HolwertAdmin {
                     <div class="modal-content">
                         <div class="modal-header">
                             <h3>${mode === 'create' ? 'Nieuw event' : 'Event bewerken'}</h3>
-                            <button class="close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+                            <button type="button" class="close js-event-modal-close" aria-label="Sluiten">&times;</button>
                         </div>
                         <div class="modal-body">
                             <form id="eventForm" class="form">
@@ -4874,10 +4962,10 @@ class HolwertAdmin {
                                 </div>
                                 <div class="form-group">
                                     <label>Afbeelding (optioneel)</label>
-                                    <input type="file" id="evImage" accept="image/*" onchange="admin.previewEventImage(this)">
+                                    <input type="file" id="evImage" accept="image/*">
                                     <div id="evImagePreview" style="display: none; margin-top: 10px;">
                                         <img id="evImagePreviewImg" src="" style="max-width: 200px; max-height: 200px; border-radius: 8px;">
-                                        <button type="button" class="btn btn-sm btn-secondary" onclick="admin.clearEventImagePreview()" style="margin-top: 5px;">Verwijder afbeelding</button>
+                                        <button type="button" class="btn btn-sm btn-secondary" id="evImageClearBtn" style="margin-top: 5px;">Verwijder afbeelding</button>
                                     </div>
                                     ${initial.image_url ? `
                                         <div style="margin-top: 10px;" data-existing-image="${initial.image_url}">
@@ -4889,28 +4977,53 @@ class HolwertAdmin {
                             </form>
                         </div>
                         <div class="modal-footer">
-                            <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">Annuleren</button>
-                            <button class="btn btn-primary" onclick="admin.saveEvent(${eventId ? eventId : 'null'})">Opslaan</button>
+                            <button type="button" class="btn btn-secondary js-event-modal-close">Annuleren</button>
+                            <button type="button" class="btn btn-primary" id="eventFormSaveBtn">Opslaan</button>
                         </div>
                     </div>
                 `;
             }
+            overlay.style.display = 'flex';
             document.body.appendChild(overlay);
 
-            // Koppel einddatum aan begindatum (alleen voor create/edit modus)
+            const closeOverlay = () => overlay.remove();
+            overlay.querySelectorAll('.js-event-modal-close').forEach((b) => {
+                b.addEventListener('click', () => closeOverlay());
+            });
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) closeOverlay();
+            });
+
             if (mode !== 'view') {
+                const saveId = eventId != null && eventId !== '' ? parseInt(eventId, 10) : null;
+                const saveBtn = overlay.querySelector('#eventFormSaveBtn');
+                if (saveBtn) {
+                    saveBtn.addEventListener('click', () => {
+                        this.saveEvent(Number.isNaN(saveId) ? null : saveId);
+                    });
+                }
+                const evImageInput = overlay.querySelector('#evImage');
+                if (evImageInput) {
+                    evImageInput.addEventListener('change', () => this.previewEventImage(evImageInput));
+                }
+                const evImageClearBtn = overlay.querySelector('#evImageClearBtn');
+                if (evImageClearBtn) {
+                    evImageClearBtn.addEventListener('click', () => this.clearEventImagePreview());
+                }
                 const startEl = overlay.querySelector('#evStart');
                 const endEl = overlay.querySelector('#evEnd');
                 const syncEnd = () => {
-                    if (startEl.value) {
+                    if (startEl && endEl && startEl.value) {
                         endEl.min = startEl.value;
                         if (!endEl.value || endEl.value < startEl.value) {
                             endEl.value = startEl.value;
                         }
                     }
                 };
-                startEl.addEventListener('change', syncEnd);
-                syncEnd();
+                if (startEl && endEl) {
+                    startEl.addEventListener('change', syncEnd);
+                    syncEnd();
+                }
             }
         } catch (e) {
             console.error('openEventModal error:', e);
@@ -5058,7 +5171,7 @@ class HolwertAdmin {
             }
 
             this.showNotification('Event opgeslagen', 'success');
-            document.querySelector('.modal-overlay')?.remove();
+            document.getElementById('evTitle')?.closest('.modal-overlay')?.remove();
             // Refresh events lijst
             this.loadEvents();
             // Refresh organisatie lijst als we in een organisatie zitten
