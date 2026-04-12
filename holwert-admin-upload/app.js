@@ -3609,6 +3609,7 @@ class HolwertAdmin {
                 </div>
             </div>
         `;
+        modal.style.display = 'flex';
         document.body.appendChild(modal);
     }
 
@@ -3734,7 +3735,69 @@ class HolwertAdmin {
                 </div>
             </div>
         `;
+        modal.style.display = 'flex';
         document.body.appendChild(modal);
+    }
+
+    changeUserRole(id, currentRole) {
+        this.showNotification(
+            'Rol wijzigen kan via «Bewerken» in het gebruikersoverzicht. (Snelle klik op de rol-badge volgt later.)',
+            'info'
+        );
+    }
+
+    async toggleUserStatus(id, isActive) {
+        if (!this.token) {
+            this.showNotification('Niet ingelogd.', 'error');
+            return;
+        }
+        const next = !Boolean(isActive);
+        try {
+            const res = await fetch(`${this.apiBaseUrl}/admin/users/${id}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.token}`
+                },
+                body: JSON.stringify({ is_active: next })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                this.showNotification(data.message || data.error || `Status bijwerken mislukt (${res.status})`, 'error');
+                return;
+            }
+            this.showNotification(next ? 'Gebruiker geactiveerd' : 'Gebruiker gedeactiveerd', 'success');
+            this.loadUsers();
+        } catch (e) {
+            console.error(e);
+            this.showNotification('Status bijwerken mislukt.', 'error');
+        }
+    }
+
+    async deleteUser(id) {
+        if (!this.token) {
+            this.showNotification('Niet ingelogd.', 'error');
+            return;
+        }
+        if (!confirm('Deze gebruiker definitief verwijderen? Dit kan niet ongedaan worden.')) {
+            return;
+        }
+        try {
+            const res = await fetch(`${this.apiBaseUrl}/admin/users/${id}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                this.showNotification(data.message || data.error || `Verwijderen mislukt (${res.status})`, 'error');
+                return;
+            }
+            this.showNotification('Gebruiker verwijderd', 'success');
+            this.loadUsers();
+        } catch (e) {
+            console.error(e);
+            this.showNotification('Verwijderen mislukt.', 'error');
+        }
     }
 
     async saveUserChanges(userId) {
