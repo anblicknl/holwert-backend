@@ -1,4 +1,4 @@
-console.log('=== SCRIPT LOADED - VERSION 2024-12-27-20:00 ===');
+console.log('=== SCRIPT LOADED - VERSION 2026-03-03-21:PRAKTISCH-ICONS ===');
 
 class HolwertAdmin {
     constructor() {
@@ -12,6 +12,10 @@ class HolwertAdmin {
         // Gebruikers-tab state (Dorpsbewoners / Organisaties)
         this.currentUsersTab = 'dorpsbewoners';
         this.allUsersCache = [];
+
+        // Events-tab state (Actief / Archief)
+        this.currentEventsTab = 'actief';
+        this.allEventsCache = [];
 
         this.init();
     }
@@ -69,6 +73,25 @@ class HolwertAdmin {
             addEventBtn.addEventListener('click', () => {
                 console.log('[Admin] + Nieuw evenement klik geregistreerd');
                 this.openCreateEventModal();
+            });
+        }
+
+        // Events tabs (Actief / Archief)
+        const eventTabs = document.querySelectorAll('.events-tab');
+        if (eventTabs && eventTabs.length) {
+            eventTabs.forEach(tab => {
+                tab.addEventListener('click', () => {
+                    const tabKey = tab.getAttribute('data-events-tab') || 'actief';
+                    console.log('[Admin] Events tab klik:', tabKey);
+                    this.currentEventsTab = tabKey;
+
+                    // Active styling
+                    eventTabs.forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+
+                    // Herteken events-lijst op basis van geselecteerde tab
+                    this.updateEventsView();
+                });
             });
         }
 
@@ -564,17 +587,16 @@ class HolwertAdmin {
 
     async getPendingOrganizationsCount() {
         try {
-            const response = await fetch(`${this.apiBaseUrl}/admin/organizations?status=pending`, {
+            const response = await fetch(`${this.apiBaseUrl}/admin/organizations?status=pending&limit=1`, {
                 headers: { 'Authorization': `Bearer ${this.token}` }
             });
             if (response.ok) {
                 const data = await response.json();
-                return data.length || 0;
+                return data.pagination?.total ?? (Array.isArray(data.organizations) ? data.organizations.length : 0) ?? 0;
             }
         } catch (error) {
             console.error('Error getting pending organizations count:', error);
         }
-        // Fallback: return 0 if endpoint doesn't exist or fails
         return 0;
     }
 
@@ -820,11 +842,18 @@ class HolwertAdmin {
         }
     }
 
+    /** Zelfde logica als backend/API: id kan number of string zijn (MySQL/driver). */
+    findUserById(id, list) {
+        const n = Number(id);
+        if (Number.isNaN(n)) return undefined;
+        return (Array.isArray(list) ? list : []).find((u) => Number(u.id) === n);
+    }
+
     // User management
     async loadUsers() {
         try {
             console.log('Loading users...');
-            const response = await fetch(`${this.apiBaseUrl}/admin/users`, {
+            const response = await fetch(`${this.apiBaseUrl}/admin/users?limit=5000`, {
                 headers: {
                     'Authorization': `Bearer ${this.token}`
                 }
@@ -837,11 +866,20 @@ class HolwertAdmin {
                 this.updateUsersView();
             } else {
                 console.error('Failed to load users:', response.status);
-                const error = await response.json();
-                console.error('Error:', error);
+                let msg = `Gebruikers laden mislukt (HTTP ${response.status})`;
+                try {
+                    const error = await response.json();
+                    console.error('Error:', error);
+                    if (error.error || error.message) msg = error.error || error.message;
+                } catch (_) { /* body geen JSON */ }
+                if (response.status === 403) {
+                    msg = 'Geen rechten om gebruikers te bekijken. Log in met een admin-account.';
+                }
+                this.showNotification(msg, 'error');
             }
         } catch (error) {
             console.error('Error loading users:', error);
+            this.showNotification('Gebruikers laden mislukt. Controleer verbinding en probeer opnieuw.', 'error');
         }
     }
 
@@ -2321,6 +2359,7 @@ class HolwertAdmin {
         }
     }
 
+    // Events management
     async loadEvents() {
         try {
             const response = await fetch(`${this.apiBaseUrl}/admin/events`, {
@@ -2331,7 +2370,8 @@ class HolwertAdmin {
 
             if (response.ok) {
                 const data = await response.json();
-                this.displayEvents(data.events || []);
+                this.allEventsCache = Array.isArray(data.events) ? data.events : [];
+                this.updateEventsView();
             } else {
                 const container = document.getElementById('eventsContent');
                 if (container) container.innerHTML = '<p>Fout bij laden events.</p>';
@@ -2341,6 +2381,32 @@ class HolwertAdmin {
             const container = document.getElementById('eventsContent');
             if (container) container.innerHTML = '<p>Fout bij laden events.</p>';
         }
+    }
+
+    updateEventsView() {
+        const events = Array.isArray(this.allEventsCache) ? [...this.allEventsCache] : [];
+        const now = new Date();
+
+        let filtered;
+        if (this.currentEventsTab === 'archief') {
+            // Verlopen evenementen: einddatum (of startdatum) ligt in het verleden
+            filtered = events.filter(ev => {
+                const end = ev.event_end_date || ev.end_date || ev.event_date;
+                if (!end) return false;
+                const endDate = new Date(end);
+                return endDate < now;
+            });
+        } else {
+            // Actieve/toekomstige evenementen: geen datum óf einddatum ligt vandaag/in de toekomst
+            filtered = events.filter(ev => {
+                const end = ev.event_end_date || ev.end_date || ev.event_date;
+                if (!end) return true;
+                const endDate = new Date(end);
+                return endDate >= now;
+            });
+        }
+
+        this.displayEvents(filtered);
     }
 
     displayEvents(events) {
@@ -3007,36 +3073,8 @@ class HolwertAdmin {
     }
 
     async createPracticalItem() {
-        try {
-            const title = prompt('Titel van de tegel (verplicht):');
-            if (!title) return;
-            const subtitle = prompt('Subtitel (optioneel):', '');
-            const icon = prompt('Icoon (bijv. \"fas fa-info-circle\"):', 'fas fa-info-circle') || 'fas fa-info-circle';
-            const type = prompt('Type (bijv. \"info\" of \"link\"):', 'info') || 'info';
-            const url = type === 'link' ? (prompt('Link-URL (optioneel):', '') || '') : '';
-            const sortStr = prompt('Volgorde (0 = bovenaan):', '0') || '0';
-            const sort_order = parseInt(sortStr, 10) || 0;
-            const isActive = confirm('Tegel direct actief maken in de app?');
-
-            const body = { title, subtitle, icon, content: null, type, url, sort_order, is_active: isActive };
-            const response = await fetch(`${this.apiBaseUrl}/admin/practical-info`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${this.token}`
-                },
-                body: JSON.stringify(body)
-            });
-            if (!response.ok) {
-                const err = await response.json().catch(() => ({}));
-                alert('Opslaan mislukt: ' + (err.error || err.message || `status ${response.status}`));
-                return;
-            }
-            await this.loadPractical();
-        } catch (error) {
-            console.error('Error creating practical item:', error);
-            alert('Fout bij aanmaken praktische tegel.');
-        }
+        // Open mooie modal, zoals bij Nieuws/Evenementen
+        this.openPracticalModal(null);
     }
 
     async editPractical(id) {
@@ -3052,40 +3090,224 @@ class HolwertAdmin {
             const items = data.items || [];
             const item = items.find(x => x.id === id);
             if (!item) {
-                alert('Item niet gevonden.');
+                this.showNotification('Praktische tegel niet gevonden.', 'error');
+                return;
+            }
+            this.openPracticalModal(item);
+        } catch (error) {
+            console.error('Error editing practical item:', error);
+            this.showNotification('Fout bij bewerken praktische tegel.', 'error');
+        }
+    }
+
+    openPracticalModal(item) {
+        const isEdit = !!item;
+        // Haal eventueel telefoon/website uit samengestelde URL (zoals de app dat ook doet)
+        let phone = '';
+        let website = '';
+        if (item?.url) {
+            const parts = String(item.url)
+                .split(',')
+                .map(p => p.trim())
+                .filter(Boolean);
+            phone = parts[0] || '';
+            website = parts[1] || '';
+        }
+
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay practical-modal';
+        overlay.style.display = 'flex';
+
+        const title = isEdit ? 'Tegel bewerken' : 'Nieuwe tegel';
+
+        overlay.innerHTML = `
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>${title}</h3>
+                    <button class="modal-close" data-modal-close><i class="fas fa-times"></i></button>
+                </div>
+                <div class="modal-body">
+                    <form id="practicalForm">
+                        <div class="form-group">
+                            <label for="practicalTitle">Titel *</label>
+                            <input type="text" id="practicalTitle" value="${(item?.title || '').replace(/"/g, '&quot;')}" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="practicalSubtitle">Subtitel</label>
+                            <input type="text" id="practicalSubtitle" value="${(item?.subtitle || '').replace(/"/g, '&quot;')}">
+                        </div>
+                        <div class="form-group">
+                            <label for="practicalIcon">Icoon (voor in de app)</label>
+                            <input type="text" id="practicalIcon" value="${(item?.icon || 'information-circle-outline').replace(/"/g, '&quot;')}" placeholder="Ionicons-naam, of kies hieronder">
+                            <p class="text-muted" style="margin: 0.5rem 0 0.25rem 0; font-size: 0.85rem;">Icooncatalogus – klik op een icoon om het veld in te vullen:</p>
+                            <div class="practical-icon-grid">
+                                <button type="button" class="practical-icon-option" data-icon="information-circle-outline" title="Info"><i class="fas fa-info-circle"></i><span>Info</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="call-outline" title="Telefoon"><i class="fas fa-phone"></i><span>Telefoon</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="open-outline" title="Link"><i class="fas fa-external-link-alt"></i><span>Link</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="map-outline" title="Locatie"><i class="fas fa-map-marker-alt"></i><span>Locatie</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="time-outline" title="Tijd"><i class="fas fa-clock"></i><span>Tijd</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="shield-outline" title="Politie / Wijkagent"><i class="fas fa-shield-alt"></i><span>Politie</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="medkit-outline" title="Huisarts / Zorg"><i class="fas fa-medkit"></i><span>Huisarts</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="people-outline" title="Vereniging / Groep"><i class="fas fa-users"></i><span>Vereniging</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="business-outline" title="Bedrijf"><i class="fas fa-building"></i><span>Bedrijf</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="school-outline" title="School"><i class="fas fa-school"></i><span>School</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="alert-circle-outline" title="Waarschuwing"><i class="fas fa-exclamation-circle"></i><span>Waarschuwing</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="mail-outline" title="E-mail"><i class="fas fa-envelope"></i><span>E-mail</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="calendar-outline" title="Agenda"><i class="fas fa-calendar-alt"></i><span>Agenda</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="heart-outline" title="Zorg / Welzijn"><i class="fas fa-heart"></i><span>Zorg</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="document-text-outline" title="Document"><i class="fas fa-file-alt"></i><span>Document</span></button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="practicalType">Type</label>
+                            <select id="practicalType">
+                                <option value="info" ${!item || (item.type || 'info') === 'info' ? 'selected' : ''}>Informatief</option>
+                                <option value="phone" ${(item?.type || '') === 'phone' ? 'selected' : ''}>Telefoon</option>
+                                <option value="link" ${(item?.type || '') === 'link' ? 'selected' : ''}>Link</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="practicalPhone">Telefoonnummer</label>
+                            <input type="tel" id="practicalPhone" value="${phone.replace(/"/g, '&quot;')}" placeholder="bijv. 0519 123 456">
+                        </div>
+                        <div class="form-group">
+                            <label for="practicalUrl">Link-URL</label>
+                            <input type="url" id="practicalUrl" value="${website.replace(/"/g, '&quot;')}" placeholder="https://...">
+                            <small class="text-muted">Alleen gebruikt als type = Telefoon/Link. In de app wordt telefoon en website beide getoond (indien ingevuld).</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="practicalContent">Beschrijving / extra tekst</label>
+                            <textarea id="practicalContent" rows="3" placeholder="Korte omschrijving van deze tegel...">${(item?.content || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="practicalSortOrder">Volgorde</label>
+                            <input type="number" id="practicalSortOrder" value="${item?.sort_order ?? 0}">
+                            <small class="text-muted">0 = bovenaan, hogere nummers komen lager in de lijst.</small>
+                        </div>
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="practicalActive" ${item?.is_active ? 'checked' : ''}>
+                                Actief in de app
+                            </label>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-modal-close>Annuleren</button>
+                    <button type="button" class="btn btn-primary" id="savePracticalBtn">Opslaan</button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(overlay);
+
+        // Sluiten
+        overlay.querySelectorAll('.modal-close, [data-modal-close]').forEach(el => {
+            el.addEventListener('click', () => overlay.remove());
+        });
+        overlay.querySelector('.modal-content').addEventListener('click', (e) => e.stopPropagation());
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+        // Opslaan
+        const saveBtn = overlay.querySelector('#savePracticalBtn');
+        saveBtn.addEventListener('click', () => {
+            this.savePractical(item || null);
+        });
+
+        // Icon catalog: klik op een icoon vult het veld
+        const iconInput = overlay.querySelector('#practicalIcon');
+        const iconButtons = overlay.querySelectorAll('.practical-icon-option');
+        const currentIcon = (item?.icon || 'information-circle-outline').trim();
+        iconButtons.forEach((btn) => {
+            if ((btn.getAttribute('data-icon') || '') === currentIcon) {
+                btn.classList.add('active');
+            }
+            btn.addEventListener('click', () => {
+                const value = btn.getAttribute('data-icon') || '';
+                if (iconInput) {
+                    iconInput.value = value;
+                }
+                iconButtons.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+            });
+        });
+    }
+
+    async savePractical(existingItem = null) {
+        try {
+            const titleEl = document.getElementById('practicalTitle');
+            const subtitleEl = document.getElementById('practicalSubtitle');
+            const iconEl = document.getElementById('practicalIcon');
+            const typeEl = document.getElementById('practicalType');
+            const phoneEl = document.getElementById('practicalPhone');
+            const urlEl = document.getElementById('practicalUrl');
+            const contentEl = document.getElementById('practicalContent');
+            const sortEl = document.getElementById('practicalSortOrder');
+            const activeEl = document.getElementById('practicalActive');
+
+            if (!titleEl) {
+                this.showNotification('Formulier voor Praktisch niet gevonden.', 'error');
                 return;
             }
 
-            const title = prompt('Titel van de tegel:', item.title || '') ?? item.title;
-            if (!title) return;
-            const subtitle = prompt('Subtitel (optioneel):', item.subtitle || '') ?? item.subtitle;
-            const icon = prompt('Icoon (bijv. \"fas fa-info-circle\"):', item.icon || 'fas fa-info-circle') || item.icon;
-            const type = prompt('Type (bijv. \"info\" of \"link\"):', item.type || 'info') || item.type;
-            const url = type === 'link'
-                ? (prompt('Link-URL (optioneel):', item.url || '') ?? item.url)
-                : (item.url || '');
-            const sortStr = prompt('Volgorde (0 = bovenaan):', String(item.sort_order ?? 0)) || String(item.sort_order ?? 0);
-            const sort_order = parseInt(sortStr, 10) || 0;
-            const isActive = confirm('Tegel actief maken in de app? (OK = ja, Annuleren = nee)');
+            const title = titleEl.value.trim();
+            if (!title) {
+                this.showNotification('Titel is verplicht voor een tegel.', 'error');
+                return;
+            }
 
-            const body = { title, subtitle, icon, content: item.content || null, type, url, sort_order, is_active: isActive };
-            const saveResp = await fetch(`${this.apiBaseUrl}/admin/practical-info/${id}`, {
-                method: 'PUT',
+            const subtitle = subtitleEl?.value?.trim() || '';
+            const icon = iconEl?.value?.trim() || 'information-circle-outline';
+            const type = typeEl?.value || 'info';
+            const phone = phoneEl?.value?.trim() || '';
+            const website = urlEl?.value?.trim() || '';
+            // Altijd telefoon en website opslaan als ingevuld (app toont ze altijd; bij type phone/link is de tegel ook klikbaar)
+            const parts = [];
+            if (phone) parts.push(phone);
+            if (website) parts.push(website);
+            const url = parts.length ? parts.join(', ') : '';
+            const sort_order = parseInt(sortEl?.value || '0', 10) || 0;
+            const is_active = !!activeEl?.checked;
+            const content = contentEl?.value || existingItem?.content || null;
+
+            const body = {
+                title,
+                subtitle: subtitle || null,
+                icon,
+                content: content || null,
+                type,
+                url: url || null,
+                sort_order,
+                is_active
+            };
+
+            const isEdit = !!existingItem?.id;
+            const urlEndpoint = isEdit
+                ? `${this.apiBaseUrl}/admin/practical-info/${existingItem.id}`
+                : `${this.apiBaseUrl}/admin/practical-info`;
+            const method = isEdit ? 'PUT' : 'POST';
+
+            const response = await fetch(urlEndpoint, {
+                method,
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${this.token}`
                 },
                 body: JSON.stringify(body)
             });
-            if (!saveResp.ok) {
-                const err = await saveResp.json().catch(() => ({}));
-                alert('Opslaan mislukt: ' + (err.error || err.message || `status ${saveResp.status}`));
+
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                this.showNotification('Opslaan mislukt: ' + (err.error || err.message || `status ${response.status}`), 'error');
                 return;
             }
+
+            this.showNotification('Praktische tegel opgeslagen', 'success');
+            document.querySelector('.modal-overlay.practical-modal')?.remove();
             await this.loadPractical();
         } catch (error) {
-            console.error('Error editing practical item:', error);
-            alert('Fout bij bewerken praktische tegel.');
+            console.error('Error saving practical item:', error);
+            this.showNotification('Fout bij opslaan praktische tegel.', 'error');
         }
     }
 
@@ -3258,18 +3480,26 @@ class HolwertAdmin {
     // User management methods
     async viewUser(id) {
         try {
-            const response = await fetch(`${this.apiBaseUrl}/admin/users`, {
-                headers: {
-                    'Authorization': `Bearer ${this.token}`
-                }
-            });
+            let user = this.findUserById(id, this.allUsersCache);
+            if (!user) {
+                const response = await fetch(`${this.apiBaseUrl}/admin/users?limit=5000`, {
+                    headers: {
+                        'Authorization': `Bearer ${this.token}`
+                    }
+                });
 
-            if (response.ok) {
-                const data = await response.json();
-                const user = data.users.find(u => u.id === id);
-                if (user) {
-                    this.showUserModal(user);
+                if (response.ok) {
+                    const data = await response.json();
+                    user = this.findUserById(id, data.users);
+                } else {
+                    this.showNotification('Fout bij ophalen gebruikersgegevens', 'error');
+                    return;
                 }
+            }
+            if (user) {
+                this.showUserModal(user);
+            } else {
+                this.showNotification('Gebruiker niet gevonden in de lijst. Vernieuw de pagina of controleer rechten.', 'error');
             }
         } catch (error) {
             console.error('Error getting user details:', error);
@@ -3340,18 +3570,26 @@ class HolwertAdmin {
 
     async editUser(id) {
         try {
-            const response = await fetch(`${this.apiBaseUrl}/admin/users`, {
-                headers: {
-                    'Authorization': `Bearer ${this.token}`
-                }
-            });
+            let user = this.findUserById(id, this.allUsersCache);
+            if (!user) {
+                const response = await fetch(`${this.apiBaseUrl}/admin/users?limit=5000`, {
+                    headers: {
+                        'Authorization': `Bearer ${this.token}`
+                    }
+                });
 
-            if (response.ok) {
-                const data = await response.json();
-                const user = data.users.find(u => u.id === id);
-                if (user) {
-                    this.showEditUserModal(user);
+                if (response.ok) {
+                    const data = await response.json();
+                    user = this.findUserById(id, data.users);
+                } else {
+                    this.showNotification('Fout bij ophalen gebruikersgegevens', 'error');
+                    return;
                 }
+            }
+            if (user) {
+                this.showEditUserModal(user);
+            } else {
+                this.showNotification('Gebruiker niet gevonden in de lijst. Vernieuw de pagina of controleer rechten.', 'error');
             }
         } catch (error) {
             console.error('Error getting user details:', error);

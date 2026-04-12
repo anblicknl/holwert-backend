@@ -4039,7 +4039,7 @@ app.get('/api/privacy', (req, res) => serveContentPageHtml(req, res, 'privacy', 
 app.get('/api/terms', (req, res) => serveContentPageHtml(req, res, 'terms', 'Gebruiksvoorwaarden', 'Fout'));
 
 // Get all users (admin)
-app.get('/api/admin/users', authenticateToken, async (req, res) => {
+app.get('/api/admin/users', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { page = 1, limit = 20, role } = req.query;
     const offset = (page - 1) * limit;
