@@ -3175,6 +3175,43 @@ app.put('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res)
   }
 });
 
+// Publiceren vanuit moderatie (alleen is_published + published_at)
+app.post('/api/admin/news/:id/publish', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    let upd;
+    try {
+      upd = await executeQuery(
+        `UPDATE news SET is_published = true, published_at = COALESCE(published_at, NOW()), updated_at = NOW() WHERE id = ?`,
+        [id],
+      );
+    } catch (e) {
+      if (e.message && String(e.message).includes('published_at')) {
+        upd = await executeQuery(
+          `UPDATE news SET is_published = true, updated_at = NOW() WHERE id = ?`,
+          [id],
+        );
+      } else {
+        throw e;
+      }
+    }
+    if (!upd.rowCount) {
+      return res.status(404).json({ error: 'Artikel niet gevonden' });
+    }
+    invalidateCache('/api/news');
+    invalidateCache(`/api/news/${id}`);
+    invalidateCache('/api/featured');
+    invalidateCache('/api/admin/news');
+    invalidateCache('/api/admin/moderation/count');
+    invalidateCache('/api/admin/dashboard');
+    invalidateCache('/api/admin/pending');
+    res.json({ message: 'Nieuws gepubliceerd' });
+  } catch (error) {
+    console.error('Publish news error:', error);
+    res.status(500).json({ error: 'Publiceren mislukt', message: error.message });
+  }
+});
+
 // Delete news article (admin)
 app.delete('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
@@ -3190,7 +3227,9 @@ app.delete('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, r
     invalidateCache('/api/featured');
     invalidateCache('/api/admin/news');
     invalidateCache('/api/admin/dashboard');
-    
+    invalidateCache('/api/admin/moderation/count');
+    invalidateCache('/api/admin/pending');
+
     res.json({ success: true });
   } catch (error) {
     console.error('Delete news error:', error);
@@ -3465,8 +3504,9 @@ app.post('/api/admin/organizations/:id/approve', authenticateToken, requireAdmin
     invalidateCache('/api/admin/stats');
     invalidateCache('/api/admin/moderation/count');
     invalidateCache('/api/admin/dashboard');
-    
-    res.json({ message: 'Organization approved successfully' });
+    invalidateCache('/api/admin/pending');
+
+    res.json({ message: 'Organisatie goedgekeurd' });
   } catch (error) {
     console.error('Approve organization error:', error);
     res.status(500).json({ error: 'Failed to approve organization', message: error.message });
@@ -3485,7 +3525,8 @@ app.post('/api/admin/organizations/:id/reject', authenticateToken, requireAdmin,
     invalidateCache('/api/admin/stats');
     invalidateCache('/api/admin/moderation/count');
     invalidateCache('/api/admin/dashboard');
-    
+    invalidateCache('/api/admin/pending');
+
     res.json({ message: 'Organization rejected successfully' });
   } catch (error) {
     console.error('Reject organization error:', error);
@@ -3505,7 +3546,8 @@ app.delete('/api/admin/organizations/:id', authenticateToken, requireAdmin, asyn
     invalidateCache('/api/admin/stats');
     invalidateCache('/api/admin/moderation/count');
     invalidateCache('/api/admin/dashboard');
-    
+    invalidateCache('/api/admin/pending');
+
     res.json({ success: true });
   } catch (error) {
     if (error.code === '23503') return res.status(409).json({ error: 'Cannot delete organization in use' });
@@ -3987,12 +4029,36 @@ app.put('/api/admin/events/:id', authenticateToken, requireAdmin, async (req, re
   }
 });
 
+// Evenement publiceren (moderatie)
+app.post('/api/admin/events/:id/publish', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const upd = await executeQuery(
+      'UPDATE events SET is_published = true, updated_at = NOW() WHERE id = ?',
+      [id],
+    );
+    if (!upd.rowCount) {
+      return res.status(404).json({ error: 'Evenement niet gevonden' });
+    }
+    invalidateCache('/api/admin/moderation/count');
+    invalidateCache('/api/admin/dashboard');
+    invalidateCache('/api/admin/pending');
+    res.json({ message: 'Evenement gepubliceerd' });
+  } catch (error) {
+    console.error('Publish event error:', error);
+    res.status(500).json({ error: 'Publiceren mislukt', message: error.message });
+  }
+});
+
 // Delete event
 app.delete('/api/admin/events/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const result = await executeQuery('DELETE FROM events WHERE id = ?', [id]);
     if (!result.rowCount) return res.status(404).json({ error: 'Event not found' });
+    invalidateCache('/api/admin/moderation/count');
+    invalidateCache('/api/admin/pending');
+    invalidateCache('/api/admin/dashboard');
     res.json({ success: true });
   } catch (error) {
     if (error.code === '23503') return res.status(409).json({ error: 'Cannot delete event in use' });

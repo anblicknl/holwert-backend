@@ -17,12 +17,23 @@ class HolwertAdmin {
         this.currentEventsTab = 'actief';
         this.allEventsCache = [];
 
+        /** Gevulde na loadOrganizations / ensureOrganizationsListForUsers (dropdown bij gebruikers). */
+        this.organizationsList = [];
+
         this.init();
     }
 
     init() {
         this.setupEventListeners();
         this.checkAuth();
+    }
+
+    /** Tekst veilig in HTML (moderatie-items). */
+    escHtml(s) {
+        if (s == null || s === '') return '';
+        const d = document.createElement('div');
+        d.textContent = String(s);
+        return d.innerHTML;
     }
 
     setupEventListeners() {
@@ -79,7 +90,7 @@ class HolwertAdmin {
         const addUserBtn = document.getElementById('addUserBtn');
         if (addUserBtn) {
             addUserBtn.addEventListener('click', () => {
-                this.showCreateUserModal();
+                void this.showCreateUserModal();
             });
         }
 
@@ -205,11 +216,17 @@ class HolwertAdmin {
             organizationsTableBody.addEventListener('click', (e) => {
                 const editBtn = e.target.closest('.organization-edit-btn');
                 const deleteBtn = e.target.closest('.organization-delete-btn');
+                const approveBtn = e.target.closest('.organization-approve-btn');
                 if (editBtn && editBtn.dataset.orgId) {
                     const orgId = parseInt(editBtn.dataset.orgId, 10);
                     console.log('[Admin] Edit organization klik geregistreerd, id =', orgId);
                     if (!isNaN(orgId)) {
                         this.editOrganization(orgId);
+                    }
+                } else if (approveBtn && approveBtn.dataset.orgId) {
+                    const orgId = parseInt(approveBtn.dataset.orgId, 10);
+                    if (!isNaN(orgId)) {
+                        void this.approveContent('organization', orgId);
                     }
                 } else if (deleteBtn && deleteBtn.dataset.orgId) {
                     const orgId = parseInt(deleteBtn.dataset.orgId, 10);
@@ -733,11 +750,17 @@ class HolwertAdmin {
             existingBadge.remove();
         }
 
-        // Voeg nieuwe badge toe als count > 0
+        // Voeg badge toe: moderatie = opvallend rood bolletje; overige secties cijfer
         if (count > 0) {
             const badge = document.createElement('span');
-            badge.className = 'notification-badge';
-            badge.textContent = count > 99 ? '99+' : count.toString();
+            if (section === 'moderation') {
+                badge.className = 'notification-badge notification-badge--dot';
+                badge.title = `${count} item(s) wachten op moderatie`;
+                badge.setAttribute('aria-label', `${count} item(s) wachten op moderatie`);
+            } else {
+                badge.className = 'notification-badge';
+                badge.textContent = count > 99 ? '99+' : count.toString();
+            }
             navLink.appendChild(badge);
         }
     }
@@ -816,9 +839,10 @@ class HolwertAdmin {
 
     getContentIcon(type) {
         const icons = {
-            'news': 'newspaper',
-            'event': 'calendar',
-            'found_lost': 'search'
+            news: 'newspaper',
+            event: 'calendar',
+            organization: 'building',
+            found_lost: 'search',
         };
         return icons[type] || 'file';
     }
@@ -852,24 +876,45 @@ class HolwertAdmin {
     async approveContent(type, id) {
         try {
             console.log(`Approving ${type} with id ${id}`);
-            
-            const response = await fetch(`${this.apiBaseUrl}/admin/approve/${type}/${id}`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${this.token}`,
-                    'Content-Type': 'application/json'
-                }
-            });
+            const headers = {
+                Authorization: `Bearer ${this.token}`,
+                'Content-Type': 'application/json',
+            };
+            let response;
+
+            if (type === 'organization') {
+                response = await fetch(`${this.apiBaseUrl}/admin/organizations/${id}/approve`, {
+                    method: 'POST',
+                    headers,
+                });
+            } else if (type === 'news') {
+                response = await fetch(`${this.apiBaseUrl}/admin/news/${id}/publish`, {
+                    method: 'POST',
+                    headers,
+                });
+            } else if (type === 'event') {
+                response = await fetch(`${this.apiBaseUrl}/admin/events/${id}/publish`, {
+                    method: 'POST',
+                    headers,
+                });
+            } else {
+                this.showNotification(`Goedkeuren voor type "${type}" is niet geconfigureerd.`, 'error');
+                return;
+            }
 
             if (response.ok) {
-                const result = await response.json();
-                this.showNotification(result.message, 'success');
-                this.loadDashboard(); // Refresh dashboard
-                this.loadPendingContent(); // Refresh pending content
-                this.loadNotificationCounts(); // Refresh notification badges
+                const result = await response.json().catch(() => ({}));
+                this.showNotification(result.message || 'Goedgekeurd', 'success');
+                this.loadDashboard();
+                this.loadPendingContent();
+                this.loadModeration();
+                this.loadNotificationCounts();
+                if (typeof this.loadOrganizations === 'function') {
+                    this.loadOrganizations();
+                }
             } else {
-                const error = await response.json();
-                this.showNotification(error.message || 'Fout bij goedkeuren', 'error');
+                const error = await response.json().catch(() => ({}));
+                this.showNotification(error.message || error.error || 'Fout bij goedkeuren', 'error');
             }
         } catch (error) {
             console.error('Error approving content:', error);
@@ -880,28 +925,44 @@ class HolwertAdmin {
     async rejectContent(type, id) {
         try {
             console.log(`Rejecting ${type} with id ${id}`);
-            
-            if (!confirm('Weet je zeker dat je deze content wilt afwijzen? Deze actie kan niet ongedaan worden gemaakt.')) {
+            const msg =
+                type === 'organization'
+                    ? 'Deze organisatie-aanmelding definitief verwijderen? Dit kan niet ongedaan worden gemaakt.'
+                    : 'Weet je zeker dat je dit item wilt verwijderen? Dit kan niet ongedaan worden gemaakt.';
+            if (!confirm(msg)) {
                 return;
             }
-            
-            const response = await fetch(`${this.apiBaseUrl}/admin/reject/${type}/${id}`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${this.token}`,
-                    'Content-Type': 'application/json'
-                }
+
+            let url;
+            if (type === 'organization') {
+                url = `${this.apiBaseUrl}/admin/organizations/${id}`;
+            } else if (type === 'news') {
+                url = `${this.apiBaseUrl}/admin/news/${id}`;
+            } else if (type === 'event') {
+                url = `${this.apiBaseUrl}/admin/events/${id}`;
+            } else {
+                this.showNotification(`Afwijzen voor type "${type}" is niet geconfigureerd.`, 'error');
+                return;
+            }
+
+            const response = await fetch(url, {
+                method: 'DELETE',
+                headers: { Authorization: `Bearer ${this.token}` },
             });
 
             if (response.ok) {
-                const result = await response.json();
-                this.showNotification(result.message, 'success');
-                this.loadDashboard(); // Refresh dashboard
-                this.loadPendingContent(); // Refresh pending content
-                this.loadNotificationCounts(); // Refresh notification badges
+                const result = await response.json().catch(() => ({}));
+                this.showNotification(result.message || 'Verwijderd', 'success');
+                this.loadDashboard();
+                this.loadPendingContent();
+                this.loadModeration();
+                this.loadNotificationCounts();
+                if (type === 'organization' && typeof this.loadOrganizations === 'function') {
+                    this.loadOrganizations();
+                }
             } else {
-                const error = await response.json();
-                this.showNotification(error.message || 'Fout bij afwijzen', 'error');
+                const error = await response.json().catch(() => ({}));
+                this.showNotification(error.message || error.error || 'Fout bij afwijzen', 'error');
             }
         } catch (error) {
             console.error('Error rejecting content:', error);
@@ -1158,15 +1219,16 @@ class HolwertAdmin {
         `;
     }
 
-    showCreateUserModal() {
+    async showCreateUserModal() {
         const self = this;
+        await this.ensureOrganizationsListForUsers();
         const modal = document.createElement('div');
         modal.className = 'modal-overlay';
         modal.style.display = 'flex';
         modal.innerHTML = `
             <div class="modal-content">
                 <div class="modal-header">
-                    <h3>Nieuwe Dorpsbewoner</h3>
+                    <h3>Nieuwe gebruiker</h3>
                     <button type="button" class="modal-close">
                         <i class="fas fa-times"></i>
                     </button>
@@ -1190,6 +1252,13 @@ class HolwertAdmin {
                         <div class="form-group">
                             <label for="createPassword">Wachtwoord *</label>
                             <input type="password" id="createPassword" name="password" required minlength="6">
+                        </div>
+                        <div class="form-group">
+                            <label for="createOrganizationId">Organisatie (dashboard)</label>
+                            <select id="createOrganizationId" name="organization_id">
+                                ${this.buildOrganizationSelectHtml(null)}
+                            </select>
+                            <small style="display:block;margin-top:0.35rem;color:#666;">Kies een organisatie voor een contactpersoon die het organisatie-dashboard gebruikt. Laat leeg voor een gewone dorpsbewoner.</small>
                         </div>
                     </form>
                 </div>
@@ -1224,13 +1293,27 @@ class HolwertAdmin {
                 this.showNotification('Niet ingelogd. Log opnieuw in.', 'error');
                 return;
             }
+            const orgRaw = document.getElementById('createOrganizationId')?.value;
+            let organization_id = null;
+            if (orgRaw && orgRaw !== '') {
+                const n = parseInt(orgRaw, 10);
+                if (!Number.isNaN(n)) organization_id = n;
+            }
             const res = await fetch(`${this.apiBaseUrl}/admin/users`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${this.token}`
                 },
-                body: JSON.stringify({ first_name, last_name, email, password, role: 'user', is_active: true })
+                body: JSON.stringify({
+                    first_name,
+                    last_name,
+                    email,
+                    password,
+                    role: 'user',
+                    is_active: true,
+                    organization_id
+                })
             });
             const data = await res.json().catch(() => ({}));
             if (res.ok) {
@@ -1282,6 +1365,17 @@ class HolwertAdmin {
                 </td>
                 <td>
                     <div class="action-buttons">
+                        ${
+                            !org.is_approved
+                                ? `<button
+                            type="button"
+                            class="btn-icon btn-approve organization-approve-btn"
+                            data-org-id="${org.id}"
+                            title="Goedkeuren">
+                            <i class="fas fa-check"></i>
+                        </button>`
+                                : ''
+                        }
                         <button 
                             class="btn-icon btn-edit organization-edit-btn" 
                             data-org-id="${org.id}" 
@@ -1328,6 +1422,7 @@ class HolwertAdmin {
                         if (nameA > nameB) return 1;
                         return 0;
                     });
+                    this.organizationsList = sorted;
                     this.displayOrganizations(sorted);
                 } else {
                     console.log('No organizations found in response');
@@ -1363,6 +1458,39 @@ class HolwertAdmin {
                 container.innerHTML = `<tr><td colspan="5" class="empty-message">Fout: ${error.message}</td></tr>`;
             }
         }
+    }
+
+    /** Voor gebruikersbeheer: organisatielijst als die nog niet uit het Organisaties-tabblad geladen is. */
+    async ensureOrganizationsListForUsers() {
+        if (this.organizationsList && this.organizationsList.length) return;
+        if (!this.token) return;
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/admin/organizations`, {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            if (!response.ok) return;
+            const data = await response.json();
+            const list = data.organizations || [];
+            this.organizationsList = [...list].sort((a, b) => {
+                const nameA = (a.name || '').toLowerCase();
+                const nameB = (b.name || '').toLowerCase();
+                if (nameA < nameB) return -1;
+                if (nameA > nameB) return 1;
+                return 0;
+            });
+        } catch (e) {
+            console.warn('ensureOrganizationsListForUsers:', e);
+        }
+    }
+
+    buildOrganizationSelectHtml(selectedId) {
+        const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+        let html = `<option value="">${esc('— Geen (geen organisatie-dashboard) —')}</option>`;
+        for (const org of this.organizationsList || []) {
+            const sel = String(selectedId ?? '') === String(org.id) ? ' selected' : '';
+            html += `<option value="${org.id}"${sel}>${esc(org.name || `Organisatie ${org.id}`)}</option>`;
+        }
+        return html;
     }
 
     /** Logo naar CDN via backend-upload; `organizationId` bepaalt de server-map (twee cijfers). */
@@ -1867,26 +1995,25 @@ class HolwertAdmin {
                 
                 // Add pending news
                 if (data.news && data.news.length > 0) {
-                    data.news.forEach(news => {
+                    data.news.forEach((news) => {
                         allPending.push({
                             type: 'news',
                             id: news.id,
-                            title: news.title,
+                            title: news.name || news.title || 'Zonder titel',
                             meta: `Nieuws • ${this.formatDate(news.published_at || news.created_at)}`,
-                            icon: 'newspaper'
+                            icon: 'newspaper',
                         });
                     });
                 }
-                
-                // Add pending events
+
                 if (data.events && data.events.length > 0) {
-                    data.events.forEach(event => {
+                    data.events.forEach((event) => {
                         allPending.push({
                             type: 'event',
                             id: event.id,
-                            title: event.title,
+                            title: event.name || event.title || 'Zonder titel',
                             meta: `Evenement • ${this.formatDate(event.created_at)}`,
-                            icon: 'calendar'
+                            icon: 'calendar',
                         });
                     });
                 }
@@ -3857,26 +3984,60 @@ class HolwertAdmin {
             const container = document.getElementById('moderationContent');
             if (!container) return;
 
-            // Toon loading state
             container.innerHTML = '<div class="loading-spinner">Laden...</div>';
 
-            // Haal pending content op
-            const response = await fetch(`${this.apiBaseUrl}/admin/moderation/pending`, {
+            const response = await fetch(`${this.apiBaseUrl}/admin/pending`, {
                 headers: {
-                    'Authorization': `Bearer ${this.token}`,
-                    'Content-Type': 'application/json'
-                }
+                    Authorization: `Bearer ${this.token}`,
+                    'Content-Type': 'application/json',
+                },
             });
 
-            if (response.ok) {
-                const pendingItems = await response.json();
-                this.displayModerationContent(pendingItems);
-            } else {
-                container.innerHTML = '<p class="text-muted">Geen content wacht op moderatie</p>';
+            if (!response.ok) {
+                container.innerHTML = '<p class="text-muted">Kon moderatiewachtrij niet laden.</p>';
+                return;
             }
+
+            const data = await response.json();
+            const items = [];
+            (data.organizations || []).forEach((o) => {
+                items.push({
+                    type: 'organization',
+                    id: o.id,
+                    title: o.name,
+                    description: o.description || '',
+                    author_name: o.contact_email || 'Organisatie-aanmelding',
+                    created_at: o.created_at,
+                });
+            });
+            (data.news || []).forEach((n) => {
+                const author = [n.first_name, n.last_name].filter(Boolean).join(' ').trim();
+                items.push({
+                    type: 'news',
+                    id: n.id,
+                    title: n.name || n.title || 'Zonder titel',
+                    description: n.description || '',
+                    author_name: author || 'Onbekende auteur',
+                    created_at: n.created_at,
+                });
+            });
+            (data.events || []).forEach((ev) => {
+                const author = [ev.first_name, ev.last_name].filter(Boolean).join(' ').trim();
+                items.push({
+                    type: 'event',
+                    id: ev.id,
+                    title: ev.name || ev.title || 'Zonder titel',
+                    description: ev.description || '',
+                    author_name: author || 'Onbekende organisator',
+                    created_at: ev.created_at,
+                });
+            });
+
+            this.displayModerationContent(items);
         } catch (error) {
             console.error('Error loading moderation content:', error);
-            document.getElementById('moderationContent').innerHTML = '<p class="text-muted">Fout bij laden moderatie content</p>';
+            const el = document.getElementById('moderationContent');
+            if (el) el.innerHTML = '<p class="text-muted">Fout bij laden moderatie content</p>';
         }
     }
 
@@ -3895,44 +4056,53 @@ class HolwertAdmin {
             return;
         }
 
-        const itemsHtml = items.map(item => `
+        const typeLabel = (t) =>
+            ({
+                organization: 'Organisatie',
+                news: 'Nieuws',
+                event: 'Evenement',
+            }[t] || t || 'Onbekend');
+
+        const itemsHtml = items
+            .map((item) => {
+                const t = item.type || '';
+                const title = this.escHtml(item.title || 'Geen titel');
+                const desc = item.description ? this.escHtml(item.description) : '';
+                const author = this.escHtml(item.author_name || 'Onbekende gebruiker');
+                const typeNl = this.escHtml(typeLabel(t));
+                return `
             <div class="moderation-item" style="background: white; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border-left: 4px solid #ffc107;">
                 <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
                     <div>
-                        <h4 style="margin: 0; color: #212529; font-size: 18px;">${item.title || 'Geen titel'}</h4>
+                        <h4 style="margin: 0; color: #212529; font-size: 18px;">${title}</h4>
                         <p style="margin: 4px 0 0 0; color: #6c757d; font-size: 14px;">
                             <i class="fas fa-tag" style="margin-right: 6px;"></i>
-                            ${item.type || 'Onbekend type'}
+                            ${typeNl}
                         </p>
                     </div>
                     <div style="display: flex; gap: 8px;">
-                        <button class="btn-icon btn-approve" onclick="admin.approveContent('${item.type}', ${item.id})" title="Goedkeuren">
+                        <button type="button" class="btn-icon btn-approve" onclick="admin.approveContent('${t}', ${item.id})" title="Goedkeuren">
                             <i class="fas fa-check"></i>
                         </button>
-                        <button class="btn-icon btn-reject" onclick="admin.rejectContent('${item.type}', ${item.id})" title="Afwijzen">
+                        <button type="button" class="btn-icon btn-reject" onclick="admin.rejectContent('${t}', ${item.id})" title="Afwijzen / verwijderen">
                             <i class="fas fa-times"></i>
                         </button>
                     </div>
                 </div>
-                
-                ${item.description ? `
-                    <div style="margin-bottom: 12px;">
-                        <p style="color: #495057; line-height: 1.5; margin: 0;">${item.description}</p>
-                    </div>
-                ` : ''}
-                
+                ${
+                    desc
+                        ? `<div style="margin-bottom: 12px;"><p style="color: #495057; line-height: 1.5; margin: 0;">${desc}</p></div>`
+                        : ''
+                }
                 <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #6c757d;">
-                    <span>
-                        <i class="fas fa-user" style="margin-right: 4px;"></i>
-                        ${item.author_name || 'Onbekende gebruiker'}
-                    </span>
-                    <span>
-                        <i class="fas fa-clock" style="margin-right: 4px;"></i>
-                        ${item.created_at ? new Date(item.created_at).toLocaleDateString('nl-NL') : 'Onbekende datum'}
-                    </span>
+                    <span><i class="fas fa-user" style="margin-right: 4px;"></i>${author}</span>
+                    <span><i class="fas fa-clock" style="margin-right: 4px;"></i>${
+                        item.created_at ? new Date(item.created_at).toLocaleDateString('nl-NL') : 'Onbekende datum'
+                    }</span>
                 </div>
-            </div>
-        `).join('');
+            </div>`;
+            })
+            .join('');
 
         container.innerHTML = `
             <div class="moderation-header" style="margin-bottom: 20px;">
@@ -4065,6 +4235,7 @@ class HolwertAdmin {
                 }
             }
             if (user) {
+                await this.ensureOrganizationsListForUsers();
                 this.showEditUserModal(user);
             } else {
                 this.showNotification('Gebruiker niet gevonden in de lijst. Vernieuw de pagina of controleer rechten.', 'error');
@@ -4125,6 +4296,13 @@ class HolwertAdmin {
                                     <option value="false" ${!user.is_active ? 'selected' : ''}>Inactief</option>
                                 </select>
                             </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="editOrganizationId">Organisatie (dashboard)</label>
+                            <select id="editOrganizationId" name="organization_id">
+                                ${this.buildOrganizationSelectHtml(user.organization_id)}
+                            </select>
+                            <small style="display:block;margin-top:0.35rem;color:#666;">Voor dashboard-inlog: juiste organisatie kiezen en rol «Gebruiker» laten staan.</small>
                         </div>
                         <div class="form-group">
                             <label>Profielfoto</label>
@@ -4292,6 +4470,15 @@ class HolwertAdmin {
                 is_active: formData.get('is_active') === 'true',
                 profile_image_url: profileImageUrl
             };
+            const orgEl = document.getElementById('editOrganizationId');
+            if (orgEl) {
+                const v = orgEl.value;
+                if (v === '') userData.organization_id = null;
+                else {
+                    const n = parseInt(v, 10);
+                    userData.organization_id = Number.isNaN(n) ? null : n;
+                }
+            }
 
             console.log('Saving user data:', { ...userData, profile_image_url: profileImageUrl ? 'base64 data' : null });
             console.log('API URL:', `${this.apiBaseUrl}/admin/users/${userId}`);

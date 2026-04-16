@@ -181,6 +181,7 @@ body {
 }
 
 .nav-item {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 0.75rem;
@@ -189,6 +190,44 @@ body {
     transition: background-color 0.2s;
     color: #666;
     border-left: 3px solid transparent;
+}
+
+/* Badge bij navigatie (o.a. moderatie) */
+.notification-badge {
+    position: absolute;
+    top: 8px;
+    right: 12px;
+    min-width: 1.25rem;
+    height: 1.25rem;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: #6b7280;
+    color: #fff;
+    font-size: 0.65rem;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    box-sizing: border-box;
+}
+
+.notification-badge--dot {
+    top: 10px;
+    right: 14px;
+    min-width: 12px;
+    width: 12px;
+    height: 12px;
+    padding: 0;
+    background: #e11d48;
+    border: 2px solid #fff;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
+    animation: moderation-dot-pulse 2.2s ease-in-out infinite;
+}
+
+@keyframes moderation-dot-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.85; transform: scale(1.05); }
 }
 
 .nav-item:hover {
