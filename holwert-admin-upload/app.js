@@ -4082,7 +4082,14 @@ class HolwertAdmin {
                             ${typeNl}
                         </p>
                     </div>
-                    <div style="display: flex; gap: 8px;">
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+                        ${
+                            t === 'organization'
+                                ? `<button type="button" class="btn btn-secondary btn-sm" onclick="admin.previewOrganizationFromModeration(${item.id})" title="Volledig organisatieprofiel bekijken">
+                            <i class="fas fa-eye"></i> Preview
+                        </button>`
+                                : ''
+                        }
                         <button type="button" class="btn-icon btn-approve" onclick="admin.approveContent('${t}', ${item.id})" title="Goedkeuren">
                             <i class="fas fa-check"></i>
                         </button>
@@ -4113,6 +4120,104 @@ class HolwertAdmin {
             </div>
             ${itemsHtml}
         `;
+    }
+
+    /** Volledig organisatieprofiel tonen (moderatie, zonder naar tab Organisaties te gaan). */
+    async previewOrganizationFromModeration(id) {
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/admin/organizations/${id}`, {
+                headers: { Authorization: `Bearer ${this.token}` },
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                this.showNotification(data.error || data.message || 'Organisatie laden mislukt', 'error');
+                return;
+            }
+            const org = data.organization;
+            if (!org) {
+                this.showNotification('Geen organisatiegegevens ontvangen', 'error');
+                return;
+            }
+            const h = (s) => this.escHtml(s == null ? '' : String(s));
+            const escAttr = (s) =>
+                String(s ?? '')
+                    .replace(/&/g, '&amp;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/</g, '&lt;');
+            const block = (label, innerHtml) =>
+                `<div class="moderation-org-preview-row"><strong>${h(label)}</strong><div>${innerHtml}</div></div>`;
+            const textOrDash = (s) => {
+                const t = (s == null ? '' : String(s)).trim();
+                return t ? `<div style="white-space:pre-wrap;">${h(t)}</div>` : '<span class="text-muted">—</span>';
+            };
+            const linkOrDash = (url) => {
+                const u = (url || '').trim();
+                if (!u) return '<span class="text-muted">—</span>';
+                return `<a href="${escAttr(u)}" target="_blank" rel="noopener noreferrer">${h(u)}</a>`;
+            };
+            const bcRaw = String(org.brand_color || '').trim();
+            const bcCss = /^#[0-9A-Fa-f]{6}$/i.test(bcRaw) ? bcRaw : null;
+            const brand = bcCss
+                ? `<span style="display:inline-flex;align-items:center;gap:10px;"><span style="width:32px;height:32px;border-radius:8px;background:${bcCss};border:1px solid #ccc;"></span><code>${h(bcRaw)}</code></span>`
+                : '<span class="text-muted">—</span>';
+            const logoSection = org.logo_url
+                ? `<div class="form-group" style="margin-top:1rem;"><label>Logo</label><img src="${escAttr(org.logo_url)}" alt="" style="max-height:120px;border-radius:8px;border:1px solid #eee;display:block;" loading="lazy" onerror="this.replaceWith(document.createTextNode('(logo niet te tonen)'))"></div>`
+                : '';
+            const statusNl = org.is_approved ? 'Goedgekeurd' : 'In afwachting';
+            const created = org.created_at
+                ? new Date(org.created_at).toLocaleString('nl-NL', { dateStyle: 'medium', timeStyle: 'short' })
+                : '—';
+
+            const modal = document.createElement('div');
+            modal.className = 'modal-overlay';
+            modal.style.display = 'flex';
+            modal.innerHTML = `
+                <div class="modal-content modal-large moderation-org-preview-modal">
+                    <div class="modal-header">
+                        <h3><i class="fas fa-eye" style="margin-right:8px;"></i> Organisatie preview</h3>
+                        <button type="button" class="modal-close" data-org-preview-close aria-label="Sluiten"><i class="fas fa-times"></i></button>
+                    </div>
+                    <div class="modal-body" style="max-height:72vh;overflow-y:auto;">
+                        <p class="text-muted" style="margin-bottom:1rem;font-size:0.9rem;">Ter controle bij moderatie (ID ${h(String(org.id))}).</p>
+                        <div class="moderation-org-preview-grid">
+                            ${block('Status', `<span class="status-badge ${org.is_approved ? 'status-published' : 'status-draft'}">${h(statusNl)}</span>`)}
+                            ${block('Aangemeld', h(created))}
+                            ${block('Naam', textOrDash(org.name))}
+                            ${block('Categorie', textOrDash(org.category))}
+                            ${block('Beschrijving', textOrDash(org.description))}
+                            ${block('Bio', textOrDash(org.bio))}
+                            ${block('E-mail', textOrDash(org.email))}
+                            ${block('Website', linkOrDash(org.website))}
+                            ${block('Telefoon', textOrDash(org.phone))}
+                            ${block('WhatsApp', textOrDash(org.whatsapp))}
+                            ${block('Adres', textOrDash(org.address))}
+                            ${block('Facebook', linkOrDash(org.facebook))}
+                            ${block('Instagram', linkOrDash(org.instagram))}
+                            ${block('Twitter / X', linkOrDash(org.twitter))}
+                            ${block('LinkedIn', linkOrDash(org.linkedin))}
+                            ${block('Brandkleur', brand)}
+                        </div>
+                        ${logoSection}
+                        <div class="form-group" style="margin-top:1rem;">
+                            <label>Privacyverklaring</label>
+                            ${textOrDash(org.privacy_statement)}
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-primary" data-org-preview-close>Sluiten</button>
+                    </div>
+                </div>`;
+            document.body.appendChild(modal);
+            const close = () => modal.remove();
+            modal.querySelectorAll('[data-org-preview-close]').forEach((el) => el.addEventListener('click', close));
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) close();
+            });
+            modal.querySelector('.modal-content')?.addEventListener('click', (e) => e.stopPropagation());
+        } catch (error) {
+            console.error('previewOrganizationFromModeration:', error);
+            this.showNotification('Fout bij laden van organisatie', 'error');
+        }
     }
 
     // User management methods

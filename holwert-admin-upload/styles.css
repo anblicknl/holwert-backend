@@ -1254,3 +1254,26 @@ input, select, textarea {
     background: #f8d7da;
     color: #721c24;
 }
+
+/* Moderatie: organisatie-preview modal */
+.moderation-org-preview-modal .moderation-org-preview-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+.moderation-org-preview-modal .moderation-org-preview-row {
+    display: grid;
+    grid-template-columns: minmax(120px, 160px) 1fr;
+    gap: 0.5rem 1rem;
+    align-items: start;
+    font-size: 0.95rem;
+}
+.moderation-org-preview-modal .moderation-org-preview-row strong {
+    color: #444;
+    font-weight: 600;
+}
+@media (max-width: 600px) {
+    .moderation-org-preview-modal .moderation-org-preview-row {
+        grid-template-columns: 1fr;
+    }
+}
