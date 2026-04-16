@@ -813,16 +813,46 @@ const requireAdmin = async (req, res, next) => {
   }
 };
 
-// Alleen voor organisatie-portal: user moet organizationId in JWT hebben
+// Alleen voor organisatie-portal: user met organizationId in JWT, géén centrale beheerdersrol (die gebruiken /admin).
 const requireOrgPortal = (req, res, next) => {
+  const jwtRole = normalizeAdminRole(req.user && req.user.role);
+  if (jwtRole && ELEVATED_ADMIN_ROLES.has(jwtRole)) {
+    return res.status(403).json({
+      error: 'Verkeerd portaal',
+      message:
+        'Accounts met rol admin, superadmin of editor horen in te loggen op het beheerderspaneel (/admin), niet op het organisatie-dashboard.',
+    });
+  }
   const orgId = req.user && (req.user.organizationId ?? req.user.organization_id);
   if (!orgId) {
-    return res.status(403).json({ error: 'Geen organisatie gekoppeld aan dit account. Log in via het organisatieportaal of neem contact op met de beheerder.' });
+    return res.status(403).json({ error: 'Geen organisatie gekoppeld aan dit account. Log in via het dashboard of neem contact op met de beheerder.' });
   }
   req.organizationId = parseInt(orgId, 10);
   if (isNaN(req.organizationId)) return res.status(403).json({ error: 'Ongeldige organisatie' });
   next();
 };
+
+/**
+ * CDN-uploadmap: dashboard-gebruiker (JWT.organizationId) → altijd die org, `organizationId` uit body wordt genegeerd.
+ * Admin zonder org in JWT mag body.organizationId meegeven; anders 00.
+ */
+function resolveUploadOrganizationIdForRequest(req, clientOrganizationId) {
+  const jwtRaw = req.user && (req.user.organizationId ?? req.user.organization_id);
+  if (jwtRaw != null && jwtRaw !== '') {
+    const n = parseInt(jwtRaw, 10);
+    if (!Number.isNaN(n) && n > 0) return n;
+  }
+  if (clientOrganizationId != null && clientOrganizationId !== '') {
+    const c = parseInt(clientOrganizationId, 10);
+    if (!Number.isNaN(c) && c > 0) return c;
+  }
+  return null;
+}
+
+function folderSegmentForOrgUpload(orgIdNum) {
+  if (orgIdNum == null || !Number.isFinite(orgIdNum) || orgIdNum < 1) return '00';
+  return String(Math.floor(orgIdNum)).padStart(2, '0');
+}
 
 // ===== FIXED IMAGE UPLOAD TO EXTERNAL SERVER =====
 app.post('/api/upload', authenticateToken, upload.single('image'), async (req, res) => {
@@ -844,14 +874,12 @@ app.post('/api/upload', authenticateToken, upload.single('image'), async (req, r
       contentType: req.file.mimetype
     });
     
-    // Folder: uploads/YYYY/MM/ plus organisatie-submap (01, 07, …) of 00 bij geen org
     const now = new Date();
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, '0');
-    const orgId = req.body.organizationId != null && req.body.organizationId !== ''
-      ? String(parseInt(req.body.organizationId, 10)).padStart(2, '0')
-      : '00';
-    const folder = `uploads/${year}/${month}/${orgId}/`;
+    const resolvedOrg = resolveUploadOrganizationIdForRequest(req, req.body && req.body.organizationId);
+    const orgFolder = folderSegmentForOrgUpload(resolvedOrg);
+    const folder = `uploads/${year}/${month}/${orgFolder}/`;
     form.append('folder', folder);
 
     // Upload to external server (HTTPS; ignore hostname mismatch on cert)
@@ -925,7 +953,18 @@ app.post('/api/upload/image', authenticateToken, async (req, res) => {
     });
 
     const base64Data = imageData.replace(/^data:image\/[a-z]+;base64,/, '');
-    const buffer = Buffer.from(base64Data, 'base64');
+    if (base64Data.length > 14 * 1024 * 1024) {
+      return res.status(400).json({ error: 'Afbeelding te groot', message: 'Maximaal ongeveer 10 MB na base64.' });
+    }
+    let buffer;
+    try {
+      buffer = Buffer.from(base64Data, 'base64');
+    } catch (e) {
+      return res.status(400).json({ error: 'Ongeldige afbeeldingsdata' });
+    }
+    if (!buffer.length || buffer.length > 12 * 1024 * 1024) {
+      return res.status(400).json({ error: 'Afbeelding te groot of leeg' });
+    }
 
     const form = new FormData();
     const uniqueFilename = filename || `image-${Date.now()}-${Math.round(Math.random() * 1E9)}.jpg`;
@@ -934,14 +973,12 @@ app.post('/api/upload/image', authenticateToken, async (req, res) => {
       contentType: 'image/jpeg'
     });
 
-    // uploads/YYYY/MM/ + organisatie 01, 07, … of 00
     const now = new Date();
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, '0');
-    const orgNum = organizationId != null && organizationId !== ''
-      ? String(parseInt(organizationId, 10)).padStart(2, '0')
-      : '00';
-    const folder = `uploads/${year}/${month}/${orgNum}/`;
+    const resolvedOrg = resolveUploadOrganizationIdForRequest(req, organizationId);
+    const orgFolder = folderSegmentForOrgUpload(resolvedOrg);
+    const folder = `uploads/${year}/${month}/${orgFolder}/`;
     form.append('folder', folder);
     
         // Upload to external server (HTTPS; ignore hostname mismatch on cert)
@@ -2285,7 +2322,7 @@ app.post('/api/auth/login', loginRateLimiter, async (req, res) => {
 
     const organizationId = user.organization_id != null ? parseInt(user.organization_id, 10) : null;
 
-    // Generate JWT token (organization_id voor org-portal)
+    // Generate JWT token (organization_id voor dashboard /api/org/*)
     const token = jwt.sign(
       {
         userId: user.id,
@@ -2451,19 +2488,27 @@ app.get('/api/auth/profile', authenticateToken, async (req, res) => {
     let result;
     try {
       result = await executeQuery(
-        'SELECT id, email, first_name, last_name, profile_image_url, profile_number, role, relationship_with_holwert, created_at, updated_at FROM users WHERE id = ?',
+        'SELECT id, email, first_name, last_name, profile_image_url, profile_number, role, relationship_with_holwert, organization_id, created_at, updated_at FROM users WHERE id = ?',
         [userId]
       );
     } catch (colErr) {
-      result = await executeQuery(
-        'SELECT id, email, first_name, last_name, role, created_at, updated_at FROM users WHERE id = ?',
-        [userId]
-      );
+      try {
+        result = await executeQuery(
+          'SELECT id, email, first_name, last_name, profile_image_url, profile_number, role, relationship_with_holwert, created_at, updated_at FROM users WHERE id = ?',
+          [userId]
+        );
+      } catch (colErr2) {
+        result = await executeQuery(
+          'SELECT id, email, first_name, last_name, role, created_at, updated_at FROM users WHERE id = ?',
+          [userId]
+        );
+      }
     }
     if (!result.rows.length) {
       return res.status(404).json({ error: 'User not found' });
     }
     const user = result.rows[0];
+    const organizationId = user.organization_id != null ? parseInt(user.organization_id, 10) : null;
     res.json({
       user: {
         id: user.id,
@@ -2475,6 +2520,7 @@ app.get('/api/auth/profile', authenticateToken, async (req, res) => {
         profile_number: user.profile_number ?? null,
         relationship_with_holwert: user.relationship_with_holwert ?? null,
         role: user.role,
+        ...(organizationId != null && !isNaN(organizationId) ? { organization_id: organizationId } : {}),
         created_at: user.created_at,
         updated_at: user.updated_at
       }
@@ -3994,6 +4040,7 @@ app.put('/api/admin/content-pages/:slug', authenticateToken, requireAdmin, async
         [slug, title, content || '']
       );
     }
+    invalidateCache('/api/app/content-pages');
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: 'Failed to update content page', message: error.message });
@@ -4008,6 +4055,8 @@ app.get('/api/app/content-pages/:slug', async (req, res) => {
     if (!result.rows || result.rows.length === 0) {
       return res.status(404).json({ error: 'Page not found' });
     }
+    // Juridische teksten wijzigen soms; geen CDN/app-cache op oude terms/privacy
+    res.set('Cache-Control', 'private, no-store, max-age=0');
     res.json({ page: result.rows[0] });
   } catch (error) {
     res.status(500).json({ error: 'Failed to get content page', message: error.message });
@@ -4831,11 +4880,32 @@ app.post('/api/organizations/register', orgRegisterRateLimiter, async (req, res)
   try {
     const {
       name, category, description, bio,
-      website, email, phone, whatsapp, address
+      website, email, phone, whatsapp, address,
+      brand_color, logo_url,
+      facebook, instagram, twitter, linkedin,
+      privacy_statement,
     } = req.body || {};
+
+    const norm = (v) => ((v != null && typeof v === 'string') ? v.trim() : null);
+    const normOptUrl = (v) => {
+      const s = norm(v);
+      if (!s) return null;
+      if (!/^https?:\/\//i.test(s)) {
+        return null;
+      }
+      return s.length > 2000 ? s.slice(0, 2000) : s;
+    };
 
     if (!name || typeof name !== 'string' || !name.trim()) {
       return res.status(400).json({ error: 'Naam van de organisatie is verplicht' });
+    }
+
+    const bc = norm(brand_color);
+    if (bc && !/^#[0-9A-Fa-f]{6}$/.test(bc)) {
+      return res.status(400).json({
+        error: 'Ongeldige brandkleur',
+        message: 'Gebruik een hex-kleur zoals #0f46ae (6 tekens na #).',
+      });
     }
 
     const result = await executeInsert(
@@ -4843,20 +4913,26 @@ app.post('/api/organizations/register', orgRegisterRateLimiter, async (req, res)
         name, category, description, bio, is_approved,
         website, email, phone, whatsapp, address,
         facebook, instagram, twitter, linkedin,
-        brand_color, logo_url, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        brand_color, logo_url, privacy_statement, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
       [
         name.trim(),
-        (category && typeof category === 'string') ? category.trim() : null,
-        (description && typeof description === 'string') ? description.trim() : null,
-        (bio && typeof bio === 'string') ? bio.trim() : null,
+        norm(category),
+        norm(description),
+        norm(bio),
         false, // is_approved = false: wacht op goedkeuring in admin
-        (website && typeof website === 'string') ? website.trim() : null,
-        (email && typeof email === 'string') ? email.trim() : null,
-        (phone && typeof phone === 'string') ? String(phone).trim() : null,
-        (whatsapp && typeof whatsapp === 'string') ? String(whatsapp).trim() : null,
-        (address && typeof address === 'string') ? address.trim() : null,
-        null, null, null, null, null, null
+        norm(website),
+        norm(email),
+        norm(phone),
+        norm(whatsapp),
+        norm(address),
+        normOptUrl(facebook),
+        normOptUrl(instagram),
+        normOptUrl(twitter),
+        normOptUrl(linkedin),
+        bc || null,
+        normOptUrl(logo_url),
+        norm(privacy_statement),
       ]
     );
 
