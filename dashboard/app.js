@@ -455,6 +455,50 @@
 
     document.getElementById('addEventBtn')?.addEventListener('click', () => openEventModal(null));
 
+    /**
+     * Kalenderdag als YYYY-MM-DD (zelfde logica voor datetime-local en API-datums).
+     * Begint de string met een datum, dan die eerste 10 tekens (voorkomt timezone-shift).
+     */
+    function calendarDayKey(val) {
+        if (val == null || val === '') return null;
+        const s = String(val).trim();
+        if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+        const d = new Date(s);
+        if (Number.isNaN(d.getTime())) return null;
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+    }
+
+    function otherEventsOnSameCalendarDay(allEvents, dayKey, excludeId) {
+        if (!dayKey || !Array.isArray(allEvents) || !allEvents.length) return [];
+        return allEvents.filter((ev) => {
+            if (excludeId != null && Number(ev.id) === Number(excludeId)) return false;
+            const k = calendarDayKey(ev.event_date);
+            return k === dayKey;
+        });
+    }
+
+    function refreshEventSameDayWarning(allEvents, excludeId) {
+        const box = document.getElementById('eventSameDayWarning');
+        const dateInput = document.getElementById('eventDate');
+        if (!box || !dateInput) return;
+        const dayKey = calendarDayKey(dateInput.value);
+        const others = otherEventsOnSameCalendarDay(allEvents, dayKey, excludeId);
+        if (!others.length) {
+            box.hidden = true;
+            box.textContent = '';
+            return;
+        }
+        const names = others.map((e) => e.title || 'Zonder titel').map((t) => escapeHtml(t)).join(', ');
+        box.hidden = false;
+        box.innerHTML =
+            '<strong>LET OP:</strong> er staat op <strong>deze dag</strong> al een evenement in jullie agenda: ' +
+            names +
+            '. Je kunt dit evenement gewoon opslaan; kies bewust of je liever een andere dag pakt om meer bezoekers te trekken.';
+    }
+
     function openEventModal(id) {
         const overlay = document.createElement('div');
         overlay.className = 'modal-overlay show';
@@ -486,6 +530,7 @@
                         <div class="form-group">
                             <label>Datum</label>
                             <input type="datetime-local" id="eventDate" value="${event?.event_date ? new Date(event.event_date).toISOString().slice(0, 16) : ''}">
+                            <div id="eventSameDayWarning" class="event-same-day-warning" hidden role="status" aria-live="polite"></div>
                         </div>
                         <div class="form-group">
                             <label>Locatie</label>
@@ -507,6 +552,25 @@
                 </div>`;
             overlay.querySelector('.modal-close').addEventListener('click', () => overlay.remove());
             overlay.querySelector('.modal-close-btn').addEventListener('click', () => overlay.remove());
+
+            let allOrgEvents = [];
+            try {
+                const evRes = await fetch(`${apiBase}/org/events?limit=200`, { headers: authHeaders() });
+                if (evRes.ok) {
+                    const evData = await evRes.json();
+                    allOrgEvents = evData.events || [];
+                }
+            } catch (e) {
+                /* geen extra melding; waarschuwing werkt dan niet */
+            }
+            const dateInputEl = document.getElementById('eventDate');
+            const runSameDayCheck = () => refreshEventSameDayWarning(allOrgEvents, id);
+            if (dateInputEl) {
+                dateInputEl.addEventListener('input', runSameDayCheck);
+                dateInputEl.addEventListener('change', runSameDayCheck);
+            }
+            runSameDayCheck();
+
             overlay.querySelector('#eventSaveBtn').addEventListener('click', async () => {
                 const btn = overlay.querySelector('#eventSaveBtn');
                 const file = document.getElementById('eventImageFile')?.files?.[0];

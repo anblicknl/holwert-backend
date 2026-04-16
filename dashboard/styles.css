@@ -199,6 +199,21 @@ body {
 .profile-form { max-width: 600px; }
 .profile-form .form-group { margin-bottom: 1rem; }
 .form-hint { font-size: 0.8rem; color: #666; margin-top: 0.35rem; }
+
+/* Waarschuwing: andere agenda-item op dezelfde kalenderdag (organisatie-dashboard) */
+.event-same-day-warning {
+    margin-top: 0.75rem;
+    padding: 0.75rem 1rem;
+    border-radius: 6px;
+    border: 1px solid #f59e0b;
+    background: #fffbeb;
+    color: #92400e;
+    font-size: 0.9rem;
+    line-height: 1.45;
+}
+.event-same-day-warning strong {
+    color: #b45309;
+}
 .empty-message { padding: 2rem; color: #666; text-align: center; }
 
 .modal-overlay {
