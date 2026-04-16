@@ -37,6 +37,26 @@
     const userInfo = document.getElementById('userInfo');
     const logoutBtn = document.getElementById('logoutBtn');
 
+    let orgLogoPreviewObjectUrl = null;
+    function clearOrgLogoPreview() {
+        if (orgLogoPreviewObjectUrl) {
+            URL.revokeObjectURL(orgLogoPreviewObjectUrl);
+            orgLogoPreviewObjectUrl = null;
+        }
+        const prev = document.getElementById('org_reg_logo_preview');
+        if (prev) prev.innerHTML = '';
+    }
+
+    document.getElementById('org_reg_logo_file')?.addEventListener('change', () => {
+        clearOrgLogoPreview();
+        const input = document.getElementById('org_reg_logo_file');
+        const prev = document.getElementById('org_reg_logo_preview');
+        const f = input?.files?.[0];
+        if (!f || !f.type.startsWith('image/') || !prev) return;
+        orgLogoPreviewObjectUrl = URL.createObjectURL(f);
+        prev.innerHTML = `<img src="${orgLogoPreviewObjectUrl}" alt="" style="max-height:96px;border-radius:6px;margin-top:8px;object-fit:contain">`;
+    });
+
     function trimOrUndef(id) {
         const el = document.getElementById(id);
         const s = (el && el.value) ? String(el.value).trim() : '';
@@ -58,6 +78,7 @@
     });
 
     document.getElementById('backToLoginBtn')?.addEventListener('click', () => {
+        clearOrgLogoPreview();
         if (registerOrgPanel) registerOrgPanel.style.display = 'none';
         if (loginPanel) loginPanel.style.display = 'block';
         if (orgRegisterError) {
@@ -80,29 +101,60 @@
             showOrgRegisterError('Brandkleur: gebruik hex zoals #0f46ae (6 tekens na #).');
             return;
         }
+        const logoFile = document.getElementById('org_reg_logo_file')?.files?.[0];
+        if (logoFile) {
+            if (!logoFile.type.startsWith('image/')) {
+                showOrgRegisterError('Logo: kies een afbeeldingsbestand (JPG, PNG, …).');
+                return;
+            }
+            if (logoFile.size > 9 * 1024 * 1024) {
+                showOrgRegisterError('Logo: bestand te groot (max. 9 MB).');
+                return;
+            }
+        }
+
         const btn = document.getElementById('orgRegisterSubmitBtn');
         const span = btn?.querySelector('span');
         if (span) span.textContent = 'Versturen…';
         if (btn) btn.disabled = true;
-        const payload = {
-            name,
-            category: trimOrUndef('org_reg_category'),
-            description: trimOrUndef('org_reg_description'),
-            bio: trimOrUndef('org_reg_bio'),
-            website: trimOrUndef('org_reg_website'),
-            email: trimOrUndef('org_reg_email'),
-            phone: trimOrUndef('org_reg_phone'),
-            whatsapp: trimOrUndef('org_reg_whatsapp'),
-            address: trimOrUndef('org_reg_address'),
-            brand_color: bcRaw || undefined,
-            logo_url: trimOrUndef('org_reg_logo_url'),
-            facebook: trimOrUndef('org_reg_facebook'),
-            instagram: trimOrUndef('org_reg_instagram'),
-            twitter: trimOrUndef('org_reg_twitter'),
-            linkedin: trimOrUndef('org_reg_linkedin'),
-            privacy_statement: trimOrUndef('org_reg_privacy'),
-        };
         try {
+            let logoUrl = trimOrUndef('org_reg_logo_url');
+            if (logoFile) {
+                if (span) span.textContent = 'Logo uploaden…';
+                const fd = new FormData();
+                fd.append('image', logoFile);
+                const upRes = await fetch(`${apiBase}/organizations/register-logo`, {
+                    method: 'POST',
+                    body: fd,
+                });
+                const upData = await upRes.json().catch(() => ({}));
+                if (!upRes.ok) {
+                    showOrgRegisterError(upData.message || upData.error || `Logo-upload mislukt (${upRes.status})`);
+                    if (span) span.textContent = 'Aanmelding versturen';
+                    if (btn) btn.disabled = false;
+                    return;
+                }
+                logoUrl = upData.url || upData.imageUrl || logoUrl;
+            }
+            if (span) span.textContent = 'Aanmelding versturen…';
+            const payload = {
+                name,
+                category: trimOrUndef('org_reg_category'),
+                description: trimOrUndef('org_reg_description'),
+                bio: trimOrUndef('org_reg_bio'),
+                website: trimOrUndef('org_reg_website'),
+                email: trimOrUndef('org_reg_email'),
+                phone: trimOrUndef('org_reg_phone'),
+                whatsapp: trimOrUndef('org_reg_whatsapp'),
+                address: trimOrUndef('org_reg_address'),
+                brand_color: bcRaw || undefined,
+                logo_url: logoUrl,
+                facebook: trimOrUndef('org_reg_facebook'),
+                instagram: trimOrUndef('org_reg_instagram'),
+                twitter: trimOrUndef('org_reg_twitter'),
+                linkedin: trimOrUndef('org_reg_linkedin'),
+                privacy_statement: trimOrUndef('org_reg_privacy'),
+            };
             const res = await fetch(`${apiBase}/organizations/register`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -116,6 +168,7 @@
                 return;
             }
             showOrgRegisterError(data.message || 'Aanmelding ontvangen. Na goedkeuring neemt de beheerder contact op.', false);
+            clearOrgLogoPreview();
             orgRegisterForm.reset();
             setTimeout(() => {
                 if (registerOrgPanel) registerOrgPanel.style.display = 'none';

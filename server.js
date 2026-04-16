@@ -136,6 +136,29 @@ function orgRegisterRateLimiter(req, res, next) {
   return next();
 }
 
+// Rate limiter: logo-upload bij publieke org-aanmelding (los van registratie-teller)
+const orgRegLogoAttempts = new Map();
+const ORG_REG_LOGO_WINDOW_MS = 15 * 60 * 1000;
+const ORG_REG_LOGO_MAX = 25;
+function orgRegisterLogoRateLimiter(req, res, next) {
+  const ip = getClientIp(req);
+  const now = Date.now();
+  const existing = orgRegLogoAttempts.get(ip) || { count: 0, first: now };
+  if (now - existing.first > ORG_REG_LOGO_WINDOW_MS) {
+    existing.count = 0;
+    existing.first = now;
+  }
+  existing.count += 1;
+  orgRegLogoAttempts.set(ip, existing);
+  if (existing.count > ORG_REG_LOGO_MAX) {
+    return res.status(429).json({
+      error: 'Te veel uploads. Probeer het later opnieuw.',
+      retry_after_seconds: Math.ceil((ORG_REG_LOGO_WINDOW_MS - (now - existing.first)) / 1000),
+    });
+  }
+  return next();
+}
+
 // Helper: haal user op met fallback als kolommen niet bestaan
 async function getUserById(id) {
   try {
@@ -854,82 +877,142 @@ function folderSegmentForOrgUpload(orgIdNum) {
   return String(Math.floor(orgIdNum)).padStart(2, '0');
 }
 
+/** Upload afbeelding naar holwert.appenvloed.com/upload (org-submap: twee cijfers, bv. 07 of 00). */
+async function uploadImageBufferToSharedHosting(buffer, originalname, mimetype, orgFolderTwoDigits) {
+  const form = new FormData();
+  form.append('file', buffer, {
+    filename: originalname || 'image.jpg',
+    contentType: mimetype || 'image/jpeg',
+  });
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const seg = typeof orgFolderTwoDigits === 'string' && /^[0-9]{2}$/.test(orgFolderTwoDigits)
+    ? orgFolderTwoDigits
+    : '00';
+  form.append('folder', `uploads/${year}/${month}/${seg}/`);
+
+  const uploadResponse = await axios.post('https://holwert.appenvloed.com/upload/upload.php', form, {
+    headers: {
+      ...form.getHeaders(),
+      'User-Agent': 'HolwertBackend/1.0',
+      'Origin': 'https://holwert.appenvloed.com',
+      'Referer': 'https://holwert.appenvloed.com/',
+    },
+    timeout: 30000,
+    maxBodyLength: Infinity,
+    maxContentLength: Infinity,
+    httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+  });
+
+  if (!uploadResponse.data || !uploadResponse.data.success) {
+    throw new Error((uploadResponse.data && uploadResponse.data.message) || 'Upload failed');
+  }
+  const rawUrl = uploadResponse.data.url;
+  if (!rawUrl || typeof rawUrl !== 'string') {
+    throw new Error('Geen URL van upload-server');
+  }
+  return rawUrl.replace('http://', 'https://');
+}
+
+// Publieke logo-upload voor organisatie-aanmelding (geen account); bestanden in map 00 tot org bestaat.
+app.post(
+  '/api/organizations/register-logo',
+  orgRegisterLogoRateLimiter,
+  (req, res, next) => {
+    upload.single('image')(req, res, (err) => {
+      if (err) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return res.status(400).json({ error: 'Bestand te groot', message: 'Maximaal 10 MB.' });
+        }
+        return res.status(400).json({
+          error: 'Ongeldig bestand',
+          message: err.message || String(err),
+        });
+      }
+      next();
+    });
+  },
+  async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({
+          error: 'Geen afbeelding',
+          message: 'Stuur een bestand met veldnaam "image" (multipart/form-data).',
+        });
+      }
+      const imageUrl = await uploadImageBufferToSharedHosting(
+        req.file.buffer,
+        req.file.originalname,
+        req.file.mimetype,
+        '00',
+      );
+      console.log('[POST /api/organizations/register-logo] OK:', imageUrl);
+      res.json({
+        success: true,
+        url: imageUrl,
+        imageUrl: imageUrl,
+        message: 'Logo geüpload.',
+      });
+    } catch (error) {
+      console.error('[POST /api/organizations/register-logo]', error);
+      res.status(500).json({
+        error: 'Upload mislukt',
+        message: error.message,
+      });
+    }
+  },
+);
+
 // ===== FIXED IMAGE UPLOAD TO EXTERNAL SERVER =====
 app.post('/api/upload', authenticateToken, upload.single('image'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No image provided' });
     }
-    
+
     console.log('Uploading to external server:', {
       filename: req.file.originalname,
       size: req.file.size,
-      mimetype: req.file.mimetype
+      mimetype: req.file.mimetype,
     });
-    
-    // Create form data for external upload
-    const form = new FormData();
-    form.append('file', req.file.buffer, {
-      filename: req.file.originalname,
-      contentType: req.file.mimetype
-    });
-    
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
+
     const resolvedOrg = resolveUploadOrganizationIdForRequest(req, req.body && req.body.organizationId);
     const orgFolder = folderSegmentForOrgUpload(resolvedOrg);
-    const folder = `uploads/${year}/${month}/${orgFolder}/`;
-    form.append('folder', folder);
-
-    // Upload to external server (HTTPS; ignore hostname mismatch on cert)
-    const uploadResponse = await axios.post('https://holwert.appenvloed.com/upload/upload.php', form, {
-           headers: {
-             ...form.getHeaders(),
-             'User-Agent': 'HolwertBackend/1.0',
-             'Origin': 'https://holwert.appenvloed.com',
-             'Referer': 'https://holwert.appenvloed.com/'
-           },
-           timeout: 30000,
-           maxBodyLength: Infinity,
-           maxContentLength: Infinity,
-           httpsAgent: new https.Agent({ rejectUnauthorized: false })
-         });
-    
-    if (uploadResponse.data.success) {
-      const imageUrl = uploadResponse.data.url.replace('http://', 'https://');
-      console.log('Image uploaded successfully:', imageUrl);
-      res.json({
-        message: 'Image uploaded successfully to external server',
-        url: imageUrl,
-        imageUrl: imageUrl,
-        image_data: JSON.stringify({
-          original: { url: imageUrl },
-          full: { url: imageUrl },
-          large: { url: imageUrl },
-          medium_large: { url: imageUrl },
-          medium: { url: imageUrl },
-          thumbnail: { url: imageUrl }
-        }),
-        sizes: {
-          original: { url: imageUrl },
-          full: { url: imageUrl },
-          large: { url: imageUrl },
-          medium_large: { url: imageUrl },
-          medium: { url: imageUrl },
-          thumbnail: { url: imageUrl }
-        }
-      });
-    } else {
-      throw new Error(uploadResponse.data.message || 'Upload failed');
-    }
-
+    const imageUrl = await uploadImageBufferToSharedHosting(
+      req.file.buffer,
+      req.file.originalname,
+      req.file.mimetype,
+      orgFolder,
+    );
+    console.log('Image uploaded successfully:', imageUrl);
+    res.json({
+      message: 'Image uploaded successfully to external server',
+      url: imageUrl,
+      imageUrl: imageUrl,
+      image_data: JSON.stringify({
+        original: { url: imageUrl },
+        full: { url: imageUrl },
+        large: { url: imageUrl },
+        medium_large: { url: imageUrl },
+        medium: { url: imageUrl },
+        thumbnail: { url: imageUrl },
+      }),
+      sizes: {
+        original: { url: imageUrl },
+        full: { url: imageUrl },
+        large: { url: imageUrl },
+        medium_large: { url: imageUrl },
+        medium: { url: imageUrl },
+        thumbnail: { url: imageUrl },
+      },
+    });
   } catch (error) {
     console.error('Image upload error:', error);
-    res.status(500).json({ 
-      error: 'Failed to upload image', 
+    res.status(500).json({
+      error: 'Failed to upload image',
       message: error.message,
-      details: error.response?.data || error.toString()
+      details: error.response?.data || error.toString(),
     });
   }
 });
@@ -966,48 +1049,22 @@ app.post('/api/upload/image', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Afbeelding te groot of leeg' });
     }
 
-    const form = new FormData();
     const uniqueFilename = filename || `image-${Date.now()}-${Math.round(Math.random() * 1E9)}.jpg`;
-    form.append('file', buffer, {
-      filename: uniqueFilename,
-      contentType: 'image/jpeg'
-    });
-
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
     const resolvedOrg = resolveUploadOrganizationIdForRequest(req, organizationId);
     const orgFolder = folderSegmentForOrgUpload(resolvedOrg);
-    const folder = `uploads/${year}/${month}/${orgFolder}/`;
-    form.append('folder', folder);
-    
-        // Upload to external server (HTTPS; ignore hostname mismatch on cert)
-        const uploadResponse = await axios.post('https://holwert.appenvloed.com/upload/upload.php', form, {
-          headers: {
-            ...form.getHeaders(),
-            'User-Agent': 'HolwertBackend/1.0',
-            'Origin': 'https://holwert.appenvloed.com',
-            'Referer': 'https://holwert.appenvloed.com/'
-          },
-          timeout: 30000,
-          maxBodyLength: Infinity,
-          maxContentLength: Infinity,
-          httpsAgent: new https.Agent({ rejectUnauthorized: false })
-        });
-    
-        if (uploadResponse.data.success) {
-          // Convert HTTP URL to HTTPS
-          const imageUrl = uploadResponse.data.url.replace('http://', 'https://');
+    const imageUrl = await uploadImageBufferToSharedHosting(
+      buffer,
+      uniqueFilename,
+      'image/jpeg',
+      orgFolder,
+    );
 
     res.json({
-            message: 'Image uploaded successfully to external server (for editing)',
+      message: 'Image uploaded successfully to external server (for editing)',
       imageUrl: imageUrl,
       filename: uniqueFilename,
-        note: 'Uploaded to external server - high quality maintained'
+      note: 'Uploaded to external server - high quality maintained',
     });
-    } else {
-      throw new Error(uploadResponse.data.message || 'Upload failed');
-    }
 
   } catch (error) {
     console.error('Upload error:', error);

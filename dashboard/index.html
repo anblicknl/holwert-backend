@@ -87,6 +87,12 @@
                     <input type="text" id="org_reg_brand_color" maxlength="7" placeholder="#0f46ae">
                 </div>
                 <div class="form-group">
+                    <label for="org_reg_logo_file">Logo uploaden (afbeelding)</label>
+                    <input type="file" id="org_reg_logo_file" accept="image/*">
+                    <p class="form-hint">JPG of PNG, max. 9 MB. Als je ook een URL invult, telt de upload.</p>
+                    <div id="org_reg_logo_preview" class="org-logo-preview" aria-live="polite"></div>
+                </div>
+                <div class="form-group">
                     <label for="org_reg_logo_url">Logo-URL (https, optioneel)</label>
                     <input type="url" id="org_reg_logo_url" maxlength="2000" placeholder="https://…">
                 </div>
