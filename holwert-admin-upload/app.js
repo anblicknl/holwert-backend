@@ -750,16 +750,18 @@ class HolwertAdmin {
             existingBadge.remove();
         }
 
-        // Voeg badge toe: moderatie = opvallend rood bolletje; overige secties cijfer
+        // Badge: zelfde vorm als organisaties (cirkel met cijfer); moderatie = rood, overig = grijs
         if (count > 0) {
             const badge = document.createElement('span');
+            const label = count > 99 ? '99+' : String(count);
             if (section === 'moderation') {
-                badge.className = 'notification-badge notification-badge--dot';
+                badge.className = 'notification-badge notification-badge--moderation';
+                badge.textContent = label;
                 badge.title = `${count} item(s) wachten op moderatie`;
                 badge.setAttribute('aria-label', `${count} item(s) wachten op moderatie`);
             } else {
                 badge.className = 'notification-badge';
-                badge.textContent = count > 99 ? '99+' : count.toString();
+                badge.textContent = label;
             }
             navLink.appendChild(badge);
         }

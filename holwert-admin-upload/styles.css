@@ -192,19 +192,19 @@ body {
     border-left: 3px solid transparent;
 }
 
-/* Badge bij navigatie (o.a. moderatie) */
+/* Badge bij navigatie: ronde pill met cijfer (organisaties = grijs, moderatie = rood, iets groter) */
 .notification-badge {
     position: absolute;
-    top: 8px;
-    right: 12px;
-    min-width: 1.25rem;
-    height: 1.25rem;
-    padding: 0 5px;
+    top: 6px;
+    right: 10px;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 7px;
     border-radius: 999px;
     background: #6b7280;
     color: #fff;
-    font-size: 0.65rem;
-    font-weight: 600;
+    font-size: 0.75rem;
+    font-weight: 700;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -212,22 +212,22 @@ body {
     box-sizing: border-box;
 }
 
-.notification-badge--dot {
-    top: 10px;
-    right: 14px;
-    min-width: 12px;
-    width: 12px;
-    height: 12px;
-    padding: 0;
+.notification-badge--moderation {
+    top: 5px;
+    right: 8px;
+    min-width: 26px;
+    height: 26px;
+    padding: 0 8px;
+    font-size: 0.8rem;
     background: #e11d48;
     border: 2px solid #fff;
     box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
-    animation: moderation-dot-pulse 2.2s ease-in-out infinite;
+    animation: moderation-badge-pulse 2.5s ease-in-out infinite;
 }
 
-@keyframes moderation-dot-pulse {
+@keyframes moderation-badge-pulse {
     0%, 100% { opacity: 1; transform: scale(1); }
-    50% { opacity: 0.85; transform: scale(1.05); }
+    50% { opacity: 0.92; transform: scale(1.04); }
 }
 
 .nav-item:hover {
