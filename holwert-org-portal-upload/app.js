@@ -53,7 +53,19 @@
             token = data.token;
             currentUser = data.user;
             localStorage.setItem('orgPortalToken', token);
+            // Alleen globale beheerders zonder org-koppeling naar /admin sturen; editor/user mét org mag hier
+            const elevated = new Set(['admin', 'superadmin', 'editor']);
+            const role = String(currentUser.role || '').toLowerCase();
+            if (elevated.has(role) && !currentUser.organization_id) {
+                localStorage.removeItem('orgPortalToken');
+                token = null;
+                showError('Dit account heeft geen organisatie gekoppeld. Gebruik het beheerderspaneel (/admin) of laat een organisatie koppelen.');
+                if (span) span.textContent = 'Inloggen';
+                return;
+            }
             if (!currentUser.organization_id) {
+                localStorage.removeItem('orgPortalToken');
+                token = null;
                 showError('Dit account is niet gekoppeld aan een organisatie. Neem contact op met de beheerder.');
                 if (span) span.textContent = 'Inloggen';
                 return;
@@ -62,7 +74,7 @@
             const meRes = await fetch(`${apiBase}/org/me`, { headers: authHeaders() });
             if (!meRes.ok) {
                 const err = await meRes.json().catch(() => ({}));
-                throw new Error(err.error || 'Geen toegang tot organisatieportaal');
+                throw new Error(err.message || err.error || 'Geen toegang tot organisatieportaal');
             }
             const meData = await meRes.json();
             organization = meData.organization;

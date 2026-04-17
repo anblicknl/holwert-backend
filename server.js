@@ -9,6 +9,7 @@ const path = require('path');
 const multer = require('multer');
 const axios = require('axios');
 const https = require('https');
+const crypto = require('crypto');
 require('dotenv').config();
 
 const app = express();
@@ -159,6 +160,29 @@ function orgRegisterLogoRateLimiter(req, res, next) {
   return next();
 }
 
+// Wachtwoord vergeten (organisatie-dashboard)
+const orgForgotPasswordAttempts = new Map();
+const ORG_FORGOT_WINDOW_MS = 15 * 60 * 1000;
+const ORG_FORGOT_MAX = 8;
+function orgForgotPasswordRateLimiter(req, res, next) {
+  const ip = getClientIp(req);
+  const now = Date.now();
+  const existing = orgForgotPasswordAttempts.get(ip) || { count: 0, first: now };
+  if (now - existing.first > ORG_FORGOT_WINDOW_MS) {
+    existing.count = 0;
+    existing.first = now;
+  }
+  existing.count += 1;
+  orgForgotPasswordAttempts.set(ip, existing);
+  if (existing.count > ORG_FORGOT_MAX) {
+    return res.status(429).json({
+      error: 'Te veel aanvragen. Probeer het later opnieuw.',
+      retry_after_seconds: Math.ceil((ORG_FORGOT_WINDOW_MS - (now - existing.first)) / 1000),
+    });
+  }
+  return next();
+}
+
 // Helper: haal user op met fallback als kolommen niet bestaan
 async function getUserById(id) {
   try {
@@ -206,6 +230,11 @@ setInterval(() => {
       loginAttempts.delete(ip);
     }
   }
+  for (const [ip, data] of orgForgotPasswordAttempts.entries()) {
+    if (now - data.first > ORG_FORGOT_WINDOW_MS) {
+      orgForgotPasswordAttempts.delete(ip);
+    }
+  }
 }, LOGIN_WINDOW_MS);
 
 // ===== Middleware =====
@@ -235,6 +264,7 @@ function getMigrationsReady() {
         await ensureContentPagesTable();
         await ensureAfvalkalenderTable();
         await initializePushNotificationsTables();
+        await ensureOrgPasswordResetsTable();
         console.log('✅ Migraties voltooid');
       } catch (e) {
         console.error('Migraties fout:', e?.message || e);
@@ -836,20 +866,25 @@ const requireAdmin = async (req, res, next) => {
   }
 };
 
-// Alleen voor organisatie-portal: user met organizationId in JWT, géén centrale beheerdersrol (die gebruiken /admin).
+// Organisatie-portal: JWT moet organizationId hebben. Zonder org-koppeling: beheerders naar /admin sturen.
+// Met organizationId: altijd toestaan (ook editor) – veel org-accounts hebben rol "editor".
 const requireOrgPortal = (req, res, next) => {
+  const orgId = req.user && (req.user.organizationId ?? req.user.organization_id);
   const jwtRole = normalizeAdminRole(req.user && req.user.role);
-  if (jwtRole && ELEVATED_ADMIN_ROLES.has(jwtRole)) {
+
+  if (!orgId) {
+    if (jwtRole && ELEVATED_ADMIN_ROLES.has(jwtRole)) {
+      return res.status(403).json({
+        error: 'Verkeerd portaal',
+        message:
+          'Log in op het beheerderspaneel (/admin). Dit portaal is alleen voor accounts die aan één organisatie zijn gekoppeld.',
+      });
+    }
     return res.status(403).json({
-      error: 'Verkeerd portaal',
-      message:
-        'Accounts met rol admin, superadmin of editor horen in te loggen op het beheerderspaneel (/admin), niet op het organisatie-dashboard.',
+      error: 'Geen organisatie gekoppeld aan dit account. Neem contact op met de beheerder.',
     });
   }
-  const orgId = req.user && (req.user.organizationId ?? req.user.organization_id);
-  if (!orgId) {
-    return res.status(403).json({ error: 'Geen organisatie gekoppeld aan dit account. Log in via het dashboard of neem contact op met de beheerder.' });
-  }
+
   req.organizationId = parseInt(orgId, 10);
   if (isNaN(req.organizationId)) return res.status(403).json({ error: 'Ongeldige organisatie' });
   next();
@@ -2417,6 +2452,158 @@ app.post('/api/auth/login', loginRateLimiter, async (req, res) => {
   }
 });
 
+const ORG_DASHBOARD_ELEVATED_ROLES = new Set(['admin', 'superadmin', 'editor']);
+
+function hashOrgPasswordResetToken(rawToken) {
+  return crypto.createHash('sha256').update(String(rawToken), 'utf8').digest('hex');
+}
+
+function getOrgDashboardPublicBaseUrl() {
+  let base = (process.env.ORG_DASHBOARD_URL || '').trim();
+  if (!base) {
+    base = 'https://holwert.appenvloed.com/dashboard/';
+  }
+  return base.replace(/\/?$/, '/');
+}
+
+async function findUserRowForOrgPasswordReset(emailNormalized) {
+  let userResult;
+  try {
+    userResult = await executeQuery(
+      'SELECT id, email, role, is_active, organization_id FROM users WHERE LOWER(TRIM(email)) = ? LIMIT 1',
+      [emailNormalized],
+    );
+  } catch (colErr) {
+    userResult = await executeQuery(
+      'SELECT id, email, role, is_active FROM users WHERE LOWER(TRIM(email)) = ? LIMIT 1',
+      [emailNormalized],
+    );
+  }
+  return userResult.rows?.[0] ?? null;
+}
+
+function isOrgDashboardPasswordResetEligible(u) {
+  if (!u || !u.is_active) return false;
+  const role = String(u.role || '').toLowerCase();
+  if (ORG_DASHBOARD_ELEVATED_ROLES.has(role)) return false;
+  const oid = u.organization_id != null ? parseInt(u.organization_id, 10) : NaN;
+  return !Number.isNaN(oid) && oid > 0;
+}
+
+async function sendOrgPasswordResetEmailResend({ toEmail, resetUrl }) {
+  const key = process.env.RESEND_API_KEY;
+  const from = process.env.RESEND_FROM || 'Holwert <onboarding@resend.dev>';
+  if (!key) {
+    return { ok: false, reason: 'no_key' };
+  }
+  const esc = (s) =>
+    String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${key}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from,
+      to: [toEmail],
+      subject: 'Holwert – wachtwoord vernieuwen (organisatie-dashboard)',
+      html: `<p>Je hebt een nieuw wachtwoord aangevraagd voor het <strong>Holwert organisatie-dashboard</strong>.</p>
+<p><a href="${esc(resetUrl)}">Klik hier om een nieuw wachtwoord in te stellen</a></p>
+<p>Of kopieer deze link in je browser:<br><span style="word-break:break-all">${esc(resetUrl)}</span></p>
+<p>Deze link is <strong>1 uur</strong> geldig. Als je dit niet zelf hebt aangevraagd, kun je deze e-mail negeren.</p>`,
+    }),
+  });
+  if (!res.ok) {
+    const t = await res.text();
+    console.error('[Resend org forgot]', res.status, t);
+    return { ok: false, reason: 'api_error' };
+  }
+  return { ok: true };
+}
+
+// Wachtwoord vergeten (alleen accounts met organisatie, geen beheerdersrollen)
+// Dubbele pad-variant i.v.m. hosting die /api wel of niet doorgeeft (zelfde patroon als /auth/register).
+async function handleOrgForgotPasswordRequest(req, res) {
+  const generic = {
+    message:
+      'Als dit e-mailadres bij ons bekend is voor het organisatie-dashboard, ontvang je zo meteen een e-mail met een link om je wachtwoord te vernieuwen.',
+  };
+  try {
+    const emailRaw =
+      req.body?.email != null ? String(req.body.email).trim().toLowerCase() : '';
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailRaw)) {
+      return res.status(200).json(generic);
+    }
+    const user = await findUserRowForOrgPasswordReset(emailRaw);
+    if (!user || !isOrgDashboardPasswordResetEligible(user)) {
+      return res.status(200).json(generic);
+    }
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = hashOrgPasswordResetToken(rawToken);
+    await executeQuery('DELETE FROM org_password_resets WHERE user_id = ?', [user.id]);
+    await executeInsert(
+      'INSERT INTO org_password_resets (user_id, token_hash, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR))',
+      [user.id, tokenHash],
+    );
+    const resetUrl = `${getOrgDashboardPublicBaseUrl()}?reset=${encodeURIComponent(rawToken)}`;
+    const sent = await sendOrgPasswordResetEmailResend({ toEmail: user.email, resetUrl });
+    if (!sent.ok) {
+      await executeQuery('DELETE FROM org_password_resets WHERE user_id = ?', [user.id]);
+      console.warn('[org-forgot-password] geen e-mail verstuurd:', sent.reason);
+    }
+    return res.status(200).json(generic);
+  } catch (error) {
+    console.error('org-forgot-password error:', error);
+    return res.status(500).json({
+      error: 'Er ging iets mis. Probeer het later opnieuw.',
+      message: error.message,
+    });
+  }
+}
+
+app.post('/api/auth/org-forgot-password', orgForgotPasswordRateLimiter, handleOrgForgotPasswordRequest);
+app.post('/auth/org-forgot-password', orgForgotPasswordRateLimiter, handleOrgForgotPasswordRequest);
+
+async function handleOrgResetPasswordRequest(req, res) {
+  try {
+    const token = req.body?.token != null ? String(req.body.token).trim() : '';
+    const password = req.body?.password != null ? String(req.body.password) : '';
+    if (!/^[a-f0-9]{64}$/i.test(token)) {
+      return res.status(400).json({ error: 'Ongeldige of verlopen link.' });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'Het wachtwoord moet minimaal 6 tekens zijn.' });
+    }
+    const tokenHash = hashOrgPasswordResetToken(token);
+    const row = await executeQuery(
+      'SELECT user_id FROM org_password_resets WHERE token_hash = ? AND expires_at > NOW() LIMIT 1',
+      [tokenHash],
+    );
+    if (!row.rows.length) {
+      return res.status(400).json({ error: 'Ongeldige of verlopen link. Vraag een nieuwe aan via «Wachtwoord vergeten».' });
+    }
+    const userId = row.rows[0].user_id;
+    const hashed = await bcrypt.hash(password, 10);
+    await executeQuery('UPDATE users SET password_hash = ? WHERE id = ?', [hashed, userId]);
+    await executeQuery('DELETE FROM org_password_resets WHERE user_id = ?', [userId]);
+    return res.json({ message: 'Je wachtwoord is bijgewerkt. Je kunt nu inloggen.' });
+  } catch (error) {
+    console.error('org-reset-password error:', error);
+    return res.status(500).json({
+      error: 'Er ging iets mis. Probeer het later opnieuw.',
+      message: error.message,
+    });
+  }
+}
+
+app.post('/api/auth/org-reset-password', orgForgotPasswordRateLimiter, handleOrgResetPasswordRequest);
+app.post('/auth/org-reset-password', orgForgotPasswordRateLimiter, handleOrgResetPasswordRequest);
+
 // Register handler (gebruikt voor beide route-varianten i.v.m. Vercel path-handling)
 const handleRegister = async (req, res) => {
   try {
@@ -2725,12 +2912,10 @@ app.get('/api/admin/dashboard', authenticateToken, async (req, res) => {
         (SELECT COUNT(*) FROM news) as news_count,
         (SELECT COUNT(*) FROM events) as events_count,
         (SELECT COUNT(*) FROM organizations WHERE is_approved = false) as pending_orgs,
-        (SELECT COUNT(*) FROM news WHERE is_published = false) as pending_news,
         (SELECT COUNT(*) FROM events WHERE is_published = false) as pending_events
     `);
     const row = result.rows[0] || {};
     const pendingOrgs = parseInt(row.pending_orgs) || 0;
-    const pendingNews = parseInt(row.pending_news) || 0;
     const pendingEvents = parseInt(row.pending_events) || 0;
     const payload = {
       stats: {
@@ -2740,9 +2925,9 @@ app.get('/api/admin/dashboard', authenticateToken, async (req, res) => {
         events: parseInt(row.events_count) || 0
       },
       moderation: {
-        count: pendingOrgs + pendingNews + pendingEvents,
+        count: pendingOrgs + pendingEvents,
         organizations: pendingOrgs,
-        news: pendingNews,
+        news: 0,
         events: pendingEvents
       }
     };
@@ -2756,12 +2941,10 @@ app.get('/api/admin/dashboard', authenticateToken, async (req, res) => {
           (SELECT COUNT(*) FROM organizations) as organizations_count,
           (SELECT COUNT(*) FROM news) as news_count,
           (SELECT COUNT(*) FROM events) as events_count,
-          (SELECT COUNT(*) FROM organizations WHERE is_approved = false) as pending_orgs,
-          (SELECT COUNT(*) FROM news WHERE is_published = false) as pending_news
+          (SELECT COUNT(*) FROM organizations WHERE is_approved = false) as pending_orgs
       `);
       const row = result.rows[0] || {};
       const pendingOrgs = parseInt(row.pending_orgs) || 0;
-      const pendingNews = parseInt(row.pending_news) || 0;
       const payload = {
         stats: {
           users: parseInt(row.users_count) || 0,
@@ -2770,9 +2953,9 @@ app.get('/api/admin/dashboard', authenticateToken, async (req, res) => {
           events: parseInt(row.events_count) || 0
         },
         moderation: {
-          count: pendingOrgs + pendingNews,
+          count: pendingOrgs,
           organizations: pendingOrgs,
-          news: pendingNews,
+          news: 0,
           events: 0
         }
       };
@@ -2831,6 +3014,7 @@ app.get('/api/admin/moderation/count', authenticateToken, async (req, res) => {
     
     if (cached) {
       console.log('[Moderation Count] Returning cached data');
+      res.setHeader('Cache-Control', 'private, no-store');
       return res.json(cached);
     }
     
@@ -2839,30 +3023,28 @@ app.get('/api/admin/moderation/count', authenticateToken, async (req, res) => {
     const result = await executeQuery(`
       SELECT 
         (SELECT COUNT(*) FROM organizations WHERE is_approved = false) as orgs_count,
-        (SELECT COUNT(*) FROM news WHERE is_published = false) as news_count,
         (SELECT COUNT(*) FROM events WHERE is_published = false) as events_count
     `);
     
     const row = result.rows[0] || {};
     const orgs = parseInt(row.orgs_count) || 0;
-    const news = parseInt(row.news_count) || 0;
     const events = parseInt(row.events_count) || 0;
-    const response = { count: orgs + news + events, organizations: orgs, news, events };
+    const response = { count: orgs + events, organizations: orgs, news: 0, events };
     setCache(cacheKey, response, CACHE_TTL.moderation);
+    res.setHeader('Cache-Control', 'private, no-store');
     res.json(response);
   } catch (error) {
     // If events table doesn't exist, try without it
     try {
       const result = await executeQuery(`
         SELECT 
-          (SELECT COUNT(*) FROM organizations WHERE is_approved = false) as orgs_count,
-          (SELECT COUNT(*) FROM news WHERE is_published = false) as news_count
+          (SELECT COUNT(*) FROM organizations WHERE is_approved = false) as orgs_count
       `);
       const row = result.rows[0] || {};
       const orgs = parseInt(row.orgs_count) || 0;
-      const news = parseInt(row.news_count) || 0;
-      const response = { count: orgs + news, organizations: orgs, news, events: 0 };
+      const response = { count: orgs, organizations: orgs, news: 0, events: 0 };
       setCache(getCacheKey('/api/admin/moderation/count'), response, CACHE_TTL.moderation);
+      res.setHeader('Cache-Control', 'private, no-store');
       res.json(response);
     } catch (e) {
       console.error('Get moderation count error:', error);
@@ -2875,7 +3057,6 @@ app.get('/api/admin/moderation/count', authenticateToken, async (req, res) => {
 app.get('/api/admin/pending', authenticateToken, async (req, res) => {
   try {
     let orgsResult = { rows: [] };
-    let newsResult = { rows: [] };
     let eventsResult = { rows: [] };
     
     try {
@@ -2889,20 +3070,6 @@ app.get('/api/admin/pending', authenticateToken, async (req, res) => {
       `);
     } catch (e) {
       console.warn('Error fetching pending organizations:', e.message);
-    }
-    
-    try {
-      newsResult = await executeQuery(`
-        SELECT n.id, n.title as name, n.excerpt as description, n.is_published, n.created_at,
-               'news' as type, u.first_name, u.last_name
-        FROM news n
-        LEFT JOIN users u ON n.author_id = u.id
-        WHERE n.is_published = false
-        ORDER BY n.created_at DESC
-        LIMIT 10
-      `);
-    } catch (e) {
-      console.warn('Error fetching pending news:', e.message);
     }
     
     try {
@@ -2922,7 +3089,7 @@ app.get('/api/admin/pending', authenticateToken, async (req, res) => {
 
     res.json({
       organizations: orgsResult.rows,
-      news: newsResult.rows,
+      news: [],
       events: eventsResult.rows
     });
   } catch (error) {
@@ -3492,21 +3659,97 @@ app.put('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (
   }
 });
 
-// Approve organization (admin)
+// Approve organization (admin) — goedkeuren + optioneel automatisch dashboard-gebruiker (zelfde contact-e-mail)
 app.post('/api/admin/organizations/:id/approve', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const { id } = req.params;
-    const result = await executeQuery('UPDATE organizations SET is_approved = true WHERE id = ?', [id]);
-    if (!result.rowCount) return res.status(404).json({ error: 'Organization not found' });
-    
-    // Invalidate cache
+    const orgId = parseInt(req.params.id, 10);
+    if (Number.isNaN(orgId) || orgId < 1) {
+      return res.status(400).json({ error: 'Ongeldig organisatie-ID' });
+    }
+
+    const upd = await executeQuery('UPDATE organizations SET is_approved = true WHERE id = ?', [orgId]);
+    if (!upd.rowCount) return res.status(404).json({ error: 'Organization not found' });
+
+    const orgResult = await executeQuery(
+      'SELECT id, name, email FROM organizations WHERE id = ? LIMIT 1',
+      [orgId],
+    );
+    const org = orgResult.rows[0] || {};
+    let user_created = false;
+    let dashboard_login_email = null;
+    let temporary_password = null;
+    let user_notice = null;
+
+    const linkedUsers = await executeQuery(
+      'SELECT id FROM users WHERE organization_id = ? LIMIT 1',
+      [orgId],
+    );
+    if (linkedUsers.rows.length > 0) {
+      user_notice =
+        'Er was al minstens één account gekoppeld aan deze organisatie; er is geen nieuw dashboard-account aangemaakt.';
+    } else {
+      const emailRaw = org.email != null ? String(org.email).trim() : '';
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(emailRaw)) {
+        user_notice =
+          'Geen geldig contact-e-mailadres bij deze organisatie. Voeg bij Organisaties een e-mail toe en maak zo nodig handmatig een gebruiker aan.';
+      } else {
+        const dup = await executeQuery(
+          'SELECT id, organization_id FROM users WHERE email = ? LIMIT 1',
+          [emailRaw],
+        );
+        if (dup.rows.length > 0) {
+          const oi = dup.rows[0].organization_id;
+          if (oi != null && Number(oi) === orgId) {
+            user_notice = 'Er bestond al een gebruiker met dit e-mailadres voor deze organisatie.';
+          } else {
+            user_notice =
+              'Dit e-mailadres is al in gebruik door een ander account. Los dit op onder Gebruikers (ander e-mailadres bij de organisatie of bestaand account koppelen).';
+          }
+        } else {
+          const plain = crypto.randomBytes(18).toString('base64url').slice(0, 24);
+          const hashed = await bcrypt.hash(plain, 10);
+          const nameTrim = (org.name && String(org.name).trim()) ? String(org.name).trim().slice(0, 80) : 'Organisatie';
+          const firstName = nameTrim;
+          const lastName = '';
+          try {
+            await executeInsert(
+              `INSERT INTO users (first_name, last_name, email, password_hash, role, is_active, organization_id)
+               VALUES (?, ?, ?, ?, 'user', true, ?)`,
+              [firstName, lastName, emailRaw, hashed, orgId],
+            );
+            user_created = true;
+            dashboard_login_email = emailRaw;
+            temporary_password = plain;
+            user_notice =
+              'Er is automatisch een dashboard-account aangemaakt voor het web-dashboard. Geef het tijdelijke wachtwoord veilig door aan de organisatie (of wijzig het onder Gebruikers).';
+          } catch (insErr) {
+            if (insErr.code === 'ER_DUP_ENTRY' || insErr.errno === 1062) {
+              user_notice =
+                'Kon geen account aanmaken: dit e-mailadres bestaat al. Pas het contactadres van de organisatie aan of koppel een bestaand account.';
+            } else {
+              console.error('[POST approve organization] user insert:', insErr);
+              user_notice =
+                'Organisatie is goedgekeurd, maar aanmaken van het dashboard-account mislukte. Maak handmatig een gebruiker aan onder Gebruikers.';
+            }
+          }
+        }
+      }
+    }
+
     invalidateCache('/api/admin/organizations');
     invalidateCache('/api/admin/stats');
     invalidateCache('/api/admin/moderation/count');
     invalidateCache('/api/admin/dashboard');
     invalidateCache('/api/admin/pending');
 
-    res.json({ message: 'Organisatie goedgekeurd' });
+    res.json({
+      message: 'Organisatie goedgekeurd',
+      user_created,
+      ...(dashboard_login_email ? { dashboard_login_email } : {}),
+      ...(temporary_password ? { temporary_password } : {}),
+      ...(user_notice ? { user_notice } : {}),
+    });
   } catch (error) {
     console.error('Approve organization error:', error);
     res.status(500).json({ error: 'Failed to approve organization', message: error.message });
@@ -4289,16 +4532,40 @@ app.get('/api/admin/users', authenticateToken, requireAdmin, async (req, res) =>
 app.post('/api/admin/users', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { first_name, last_name, email, password, role = 'user', is_active = true, organization_id } = req.body;
-    if (!first_name || !last_name || !email || !password) {
-      return res.status(400).json({ error: 'first_name, last_name, email, password are required' });
-    }
     const hashed = await bcrypt.hash(password, 10);
-    const orgId = organization_id != null && organization_id !== '' ? parseInt(organization_id, 10) : null;
+    const orgId =
+      organization_id != null && organization_id !== ''
+        ? parseInt(organization_id, 10)
+        : null;
+    const orgIdValid = orgId != null && !Number.isNaN(orgId) && orgId > 0;
+
+    let fn = first_name != null ? String(first_name).trim() : '';
+    let ln = last_name != null ? String(last_name).trim() : '';
+
+    if (!email || !password) {
+      return res.status(400).json({ error: 'E-mail en wachtwoord zijn verplicht.' });
+    }
+
+    if (orgIdValid) {
+      if (!fn) {
+        const orgR = await executeQuery('SELECT name FROM organizations WHERE id = ? LIMIT 1', [orgId]);
+        if (!orgR.rows?.length) {
+          return res.status(404).json({ error: 'Organisatie niet gevonden' });
+        }
+        const orgName = String(orgR.rows[0].name || 'Organisatie').trim() || 'Organisatie';
+        fn = orgName.slice(0, 80);
+      }
+      ln = ln || '';
+    } else if (!fn || !ln) {
+      return res.status(400).json({
+        error: 'Voornaam en achternaam zijn verplicht voor een gebruiker zonder organisatie.',
+      });
+    }
 
     const insertResult = await executeInsert(
       `INSERT INTO users (first_name, last_name, email, password_hash, role, is_active, organization_id)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [first_name, last_name, email, hashed, role, is_active, orgId]
+      [fn, ln, email, hashed, role, is_active, orgIdValid ? orgId : null],
     );
     
     const userId = insertResult.insertId || insertResult.rows?.[0]?.id;
@@ -4307,10 +4574,10 @@ app.post('/api/admin/users', authenticateToken, requireAdmin, async (req, res) =
     }
     
     const fetchResult = await executeQuery(
-      'SELECT id, first_name, last_name, email, role, is_active, created_at, updated_at FROM users WHERE id = $1',
-      [userId]
+      'SELECT id, first_name, last_name, email, role, is_active, created_at, updated_at FROM users WHERE id = ?',
+      [userId],
     );
-    
+
     res.status(201).json({ user: fetchResult.rows[0] });
   } catch (error) {
     if (error.code === '23505' || error.code === 'ER_DUP_ENTRY' || error.errno === 1062) {
@@ -4392,14 +4659,28 @@ app.delete('/api/admin/users/:id', authenticateToken, requireAdmin, async (req, 
 app.get('/api/org/me', authenticateToken, requireOrgPortal, async (req, res) => {
   try {
     const orgId = req.organizationId;
-    const orgResult = await executeQuery(
-      `SELECT id, name, category, description, bio, is_approved, website, email, phone, whatsapp, address,
-       facebook, instagram, twitter, linkedin, brand_color, logo_url, privacy_statement, created_at, updated_at
-       FROM organizations WHERE id = ?`,
-      [orgId]
-    );
+    let orgResult;
+    try {
+      orgResult = await executeQuery(
+        `SELECT id, name, category, description, bio, is_approved, website, email, phone, whatsapp, address,
+         facebook, instagram, twitter, linkedin, brand_color, logo_url, privacy_statement, created_at, updated_at
+         FROM organizations WHERE id = ?`,
+        [orgId]
+      );
+    } catch (colErr) {
+      orgResult = await executeQuery(
+        `SELECT id, name, category, description, bio, is_approved, website, email, phone, whatsapp, address,
+         facebook, instagram, twitter, linkedin, brand_color, logo_url, created_at, updated_at
+         FROM organizations WHERE id = ?`,
+        [orgId]
+      );
+    }
     if (!orgResult.rows?.length) {
-      return res.status(404).json({ error: 'Organisatie niet gevonden' });
+      return res.status(404).json({
+        error: 'Organisatie niet gevonden',
+        message:
+          'Je account verwijst naar een organisatie die niet (meer) bestaat. Controleer organization_id in de database of neem contact op met de beheerder.',
+      });
     }
     res.json({
       user: { id: req.user.userId, email: req.user.email, role: req.user.role, organization_id: orgId },
@@ -4454,6 +4735,53 @@ app.put('/api/org/profile', authenticateToken, requireOrgPortal, async (req, res
   } catch (error) {
     console.error('PUT /api/org/profile error:', error);
     res.status(500).json({ error: 'Failed to update profile', message: error.message });
+  }
+});
+
+// Eigen inlogwachtwoord wijzigen (organisatie-dashboard, niet het org.-contact e-mailveld)
+app.put('/api/org/me/password', authenticateToken, requireOrgPortal, async (req, res) => {
+  try {
+    const userId = req.user && req.user.userId;
+    if (userId == null) {
+      return res.status(400).json({ error: 'Ongeldige sessie. Log opnieuw in.' });
+    }
+    const cur =
+      req.body?.current_password != null ? String(req.body.current_password) : '';
+    const neu = req.body?.new_password != null ? String(req.body.new_password) : '';
+    if (!cur) {
+      return res.status(400).json({ error: 'Vul je huidige wachtwoord in.' });
+    }
+    if (neu.length < 6) {
+      return res.status(400).json({ error: 'Nieuw wachtwoord moet minimaal 6 tekens zijn.' });
+    }
+    const row = await executeQuery(
+      'SELECT id, password_hash FROM users WHERE id = ? LIMIT 1',
+      [userId],
+    );
+    if (!row.rows?.length) {
+      return res.status(404).json({ error: 'Gebruiker niet gevonden' });
+    }
+    const hash = row.rows[0].password_hash;
+    const ok = hash ? await bcrypt.compare(cur, hash) : false;
+    if (!ok) {
+      return res.status(401).json({ error: 'Huidig wachtwoord is onjuist.' });
+    }
+    const hashed = await bcrypt.hash(neu, 10);
+    await executeQuery('UPDATE users SET password_hash = ?, updated_at = NOW() WHERE id = ?', [
+      hashed,
+      userId,
+    ]);
+    try {
+      await executeQuery('DELETE FROM org_password_resets WHERE user_id = ?', [userId]);
+    } catch (e) {
+      /* org_password_resets kan ontbreken op oudere omgevingen */
+    }
+    return res.json({
+      message: 'Je wachtwoord is bijgewerkt. Gebruik bij de volgende keer inloggen je nieuwe wachtwoord.',
+    });
+  } catch (error) {
+    console.error('PUT /api/org/me/password error:', error);
+    res.status(500).json({ error: 'Wachtwoord wijzigen mislukt', message: error.message });
   }
 });
 
@@ -5839,6 +6167,24 @@ async function initializePushNotificationsTables() {
   }
 }
 
+async function ensureOrgPasswordResetsTable() {
+  try {
+    await executeQuery(`
+      CREATE TABLE IF NOT EXISTS org_password_resets (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        token_hash CHAR(64) NOT NULL,
+        expires_at DATETIME NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_org_password_resets_user (user_id),
+        KEY idx_org_password_resets_token (token_hash)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    console.log('✅ org_password_resets tabel gecontroleerd');
+  } catch (e) {
+    console.error('ensureOrgPasswordResetsTable error:', e.message);
+  }
+}
 
 
 
