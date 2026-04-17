@@ -4098,12 +4098,11 @@ app.get('/api/events', async (req, res) => {
     const { organization_id, status } = req.query;
     const offset = (page - 1) * limit;
     const hasOrgScope = organization_id != null && String(organization_id).trim() !== '';
-    // Org-detail (filter op organization_id): standaard óók verleden — anders leeg als alles voorbij is (zoals "The Sound").
-    // Algemene agenda: standaard alleen komend, tenzij upcoming=false.
+    // Org-detail: standaard óók verleden (tenzij upcoming=true). Algemene agenda: alleen komend
+    // tenzij de app upcoming=false meestuurt (zelfde beeld als org-pagina).
     const showOnlyUpcoming = hasOrgScope
       ? req.query.upcoming === 'true'
       : req.query.upcoming !== 'false';
-    const orderByEventDate = hasOrgScope && !showOnlyUpcoming ? 'DESC' : 'ASC';
 
     let query = `
       SELECT e.*, o.name as organization_name, o.brand_color as organization_brand_color, o.logo_url as organization_logo
@@ -4124,7 +4123,15 @@ app.get('/api/events', async (req, res) => {
       params.push(status);
     }
     query += sqlPublicEventVisibility('e', 'o');
-    query += ` ORDER BY e.event_date ${orderByEventDate} LIMIT ? OFFSET ?`;
+    // Sortering: org-detail (verleden+toekomst) = meest recent eerst; algemene lijst met upcoming=false = eerst nog te gaan, dan verleden
+    let orderClause = 'ORDER BY e.event_date ASC';
+    if (hasOrgScope && !showOnlyUpcoming) {
+      orderClause = 'ORDER BY e.event_date DESC';
+    } else if (!hasOrgScope && !showOnlyUpcoming) {
+      orderClause =
+        'ORDER BY (GREATEST(e.event_date, COALESCE(e.event_end_date, e.event_date)) < CURDATE()) ASC, e.event_date ASC';
+    }
+    query += ` ${orderClause} LIMIT ? OFFSET ?`;
     params.push(parseInt(limit, 10), parseInt(offset, 10));
 
     let countSql = `
