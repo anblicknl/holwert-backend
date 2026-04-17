@@ -531,6 +531,24 @@ function sqlEventUpcomingCutoff(eAlias = 'e') {
   return ` AND GREATEST(${eAlias}.event_date, COALESCE(${eAlias}.event_end_date, ${eAlias}.event_date)) >= CURDATE()`;
 }
 
+/** Lijst-response klein houden: base64 in logo/image maakt JSON megabytes → app timeout (30s). Detailroute levert volledige velden. */
+function stripHeavyMediaFromEventRow(row) {
+  if (!row || typeof row !== 'object') return row;
+  const out = { ...row };
+  if (typeof out.organization_logo === 'string') {
+    if (out.organization_logo.startsWith('data:image/') || out.organization_logo.length > 2048) {
+      out.organization_logo = null;
+    }
+  }
+  if (typeof out.image_url === 'string' && out.image_url.startsWith('data:image/')) {
+    out.image_url = null;
+  }
+  if (typeof out.description === 'string' && out.description.length > 6000) {
+    out.description = `${out.description.slice(0, 6000)}…`;
+  }
+  return out;
+}
+
 // Test route
 app.get('/', async (req, res) => {
   try {
@@ -3984,7 +4002,7 @@ app.get('/events', async (req, res) => {
     const countResult = await executeQuery(countQuery, countParams);
 
     res.json({
-      events: result.rows,
+      events: (result.rows || []).map(stripHeavyMediaFromEventRow),
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -4134,7 +4152,7 @@ app.get('/api/events', async (req, res) => {
       executeQuery(countSql, countParams)
     ]);
 
-    const events = result.rows || [];
+    const events = (result.rows || []).map(stripHeavyMediaFromEventRow);
     const total = parseInt(countResult.rows?.[0]?.total ?? 0, 10) || 0;
 
     res.json({
