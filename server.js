@@ -1360,8 +1360,8 @@ app.get('/api/news', async (req, res) => {
 
     if (search) {
       const s = `%${String(search)}%`;
-      query += ` AND (n.title LIKE ? OR n.excerpt LIKE ? OR n.content LIKE ?)`;
-      params.push(s, s, s);
+      query += ` AND (n.title LIKE ? OR n.excerpt LIKE ? OR n.content LIKE ? OR o.name LIKE ?)`;
+      params.push(s, s, s, s);
     }
     
     // Sorteer op published_at (publicatiedatum), fallback naar created_at als published_at NULL is
@@ -1370,7 +1370,7 @@ app.get('/api/news', async (req, res) => {
 
     // Count query (voor pagination)
     const countParams = [];
-    let countQuery = `SELECT COUNT(*) as total FROM news n WHERE n.is_published = true`;
+    let countQuery = `SELECT COUNT(*) as total FROM news n LEFT JOIN organizations o ON n.organization_id = o.id WHERE n.is_published = true`;
     if (organization_id) {
       countQuery += ` AND n.organization_id = ?`;
       countParams.push(parseInt(organization_id));
@@ -1381,8 +1381,8 @@ app.get('/api/news', async (req, res) => {
     }
     if (search) {
       const s = `%${String(search)}%`;
-      countQuery += ` AND (n.title LIKE ? OR n.excerpt LIKE ? OR n.content LIKE ?)`;
-      countParams.push(s, s, s);
+      countQuery += ` AND (n.title LIKE ? OR n.excerpt LIKE ? OR n.content LIKE ? OR o.name LIKE ?)`;
+      countParams.push(s, s, s, s);
     }
 
     const [result, countResult] = await Promise.all([
