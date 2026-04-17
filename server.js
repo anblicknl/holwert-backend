@@ -242,7 +242,9 @@ app.use(compression()); // Compress responses for faster transfer
 app.use(cors({
   origin: [
     'https://holwert.appenvloed.com',
-    /^https?:\/\/localhost(:\d+)?$/,
+    'https://holwert-backend.vercel.app',
+    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/,
+    /^https:\/\/holwert-backend-[a-z0-9-]+\.vercel\.app$/,
     /^exp:\/\//,
   ],
   credentials: true
@@ -259,6 +261,7 @@ function getMigrationsReady() {
         await ensureProfileImageUrlColumn();
         await ensureProfileNumberColumn();
         await ensureHolwertRelationshipColumn();
+        await ensureUsersPhoneColumn();
         await ensurePrivacyStatementColumn();
         await ensurePracticalInfoTable();
         await ensureContentPagesTable();
@@ -475,6 +478,38 @@ async function executeInsert(query, params = []) {
     }
     throw error;
   }
+}
+
+/**
+ * Browser datetime-local en ISO-strings naar MySQL DATETIME ('YYYY-MM-DD HH:MM:SS').
+ * Zonder dit geeft o.a. `2026-04-12T20:00` vaak ER_WRONG_VALUE / Incorrect datetime value.
+ */
+function toMysqlDateTime(value) {
+  if (value == null || value === '') return null;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const d = value;
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+  const s0 = String(value).trim();
+  const s = s0.replace('T', ' ');
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s)) return s;
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(s)) return `${s}:00`;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return `${s} 00:00:00`;
+  const t = Date.parse(s0);
+  if (!Number.isNaN(t)) {
+    const d = new Date(t);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+  return null;
+}
+
+function normalizeEventPrice(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const n = typeof value === 'number' ? value : parseFloat(String(value).replace(',', '.'));
+  if (Number.isNaN(n)) return null;
+  return n;
 }
 
 // Test route
@@ -4159,6 +4194,12 @@ app.post('/api/admin/events', authenticateToken, requireAdmin, async (req, res) 
   try {
     const { title, description, event_date, end_date, event_end_date, location, organization_id, status = 'scheduled', price, image_url } = req.body;
     if (!title || !event_date) return res.status(400).json({ error: 'title and event_date are required' });
+    const eventDateSql = toMysqlDateTime(event_date);
+    if (!eventDateSql) return res.status(400).json({ error: 'Invalid event_date', message: 'Use a valid date/time (YYYY-MM-DD or datetime-local).' });
+    const endRaw = event_end_date || end_date || null;
+    const endSql = endRaw ? toMysqlDateTime(endRaw) : null;
+    if (endRaw && !endSql) return res.status(400).json({ error: 'Invalid event end date' });
+    const priceVal = normalizeEventPrice(price);
 
     // Organizer mag ontbreken; als user niet bestaat, zet organizer_id op null
     let organizerId = req.user?.userId || null;
@@ -4174,7 +4215,7 @@ app.post('/api/admin/events', authenticateToken, requireAdmin, async (req, res) 
     const insertResult = await executeInsert(
       `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-      [title, description || null, event_date, event_end_date || end_date || null, location || null, organization_id || null, status, organizerId, price || null, image_url || null]
+      [title, description || null, eventDateSql, endSql, location || null, organization_id || null, status, organizerId, priceVal, image_url || null]
     );
 
     if (!insertResult.insertId) {
@@ -4531,7 +4572,17 @@ app.get('/api/admin/users', authenticateToken, requireAdmin, async (req, res) =>
 // Create user (admin)
 app.post('/api/admin/users', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const { first_name, last_name, email, password, role = 'user', is_active = true, organization_id } = req.body;
+    const {
+      first_name,
+      last_name,
+      email,
+      password,
+      role = 'user',
+      is_active = true,
+      organization_id,
+      phone,
+      relationship_with_holwert,
+    } = req.body;
     const hashed = await bcrypt.hash(password, 10);
     const orgId =
       organization_id != null && organization_id !== ''
@@ -4546,6 +4597,12 @@ app.post('/api/admin/users', authenticateToken, requireAdmin, async (req, res) =
       return res.status(400).json({ error: 'E-mail en wachtwoord zijn verplicht.' });
     }
 
+    const emailTrim = String(email).trim();
+    const phoneTrim = phone != null && String(phone).trim() !== '' ? String(phone).trim().slice(0, 20) : null;
+    const relRaw = relationship_with_holwert != null ? String(relationship_with_holwert).trim() : '';
+    const allowedRel = new Set(['resident', 'former_resident', 'vacation_home', 'interested', 'tourist']);
+    const relVal = allowedRel.has(relRaw) ? relRaw : null;
+
     if (orgIdValid) {
       if (!fn) {
         const orgR = await executeQuery('SELECT name FROM organizations WHERE id = ? LIMIT 1', [orgId]);
@@ -4558,23 +4615,36 @@ app.post('/api/admin/users', authenticateToken, requireAdmin, async (req, res) =
       ln = ln || '';
     } else if (!fn || !ln) {
       return res.status(400).json({
-        error: 'Voornaam en achternaam zijn verplicht voor een gebruiker zonder organisatie.',
+        error: 'Voornaam en achternaam zijn verplicht voor een dorpsbewoner (app) zonder organisatie-dashboard.',
+      });
+    } else if (!relVal) {
+      return res.status(400).json({
+        error: 'Kies een relatie met Holwert (verplicht voor een dorpsbewoner-account).',
       });
     }
 
-    const insertResult = await executeInsert(
-      `INSERT INTO users (first_name, last_name, email, password_hash, role, is_active, organization_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [fn, ln, email, hashed, role, is_active, orgIdValid ? orgId : null],
-    );
-    
+    let insertResult;
+    if (orgIdValid) {
+      insertResult = await executeInsert(
+        `INSERT INTO users (first_name, last_name, email, password_hash, role, is_active, organization_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [fn, ln, emailTrim, hashed, role, is_active, orgId],
+      );
+    } else {
+      insertResult = await executeInsert(
+        `INSERT INTO users (first_name, last_name, email, password_hash, role, is_active, organization_id, relationship_with_holwert, phone)
+         VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+        [fn, ln, emailTrim, hashed, role, is_active, relVal, phoneTrim],
+      );
+    }
+
     const userId = insertResult.insertId || insertResult.rows?.[0]?.id;
     if (!userId) {
       return res.status(500).json({ error: 'Failed to create user', message: 'No insertId returned' });
     }
-    
+
     const fetchResult = await executeQuery(
-      'SELECT id, first_name, last_name, email, role, is_active, created_at, updated_at FROM users WHERE id = ?',
+      'SELECT id, first_name, last_name, email, phone, profile_image_url, profile_number, relationship_with_holwert, role, is_active, organization_id, created_at, updated_at FROM users WHERE id = ?',
       [userId],
     );
 
@@ -4592,13 +4662,14 @@ app.post('/api/admin/users', authenticateToken, requireAdmin, async (req, res) =
 app.put('/api/admin/users/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { first_name, last_name, email, password, role, is_active, profile_image_url, relationship_with_holwert, profile_number, organization_id } = req.body;
+    const { first_name, last_name, email, password, role, is_active, profile_image_url, relationship_with_holwert, profile_number, organization_id, phone } = req.body;
     const sets = [];
     const params = [];
     const push = (v) => { params.push(v); return '?'; };
     if (first_name !== undefined) { sets.push('first_name = ?'); params.push(first_name); }
     if (last_name !== undefined) { sets.push('last_name = ?'); params.push(last_name); }
     if (email !== undefined) { sets.push('email = ?'); params.push(email); }
+    if (phone !== undefined) { sets.push('phone = ?'); params.push(phone === '' || phone == null ? null : String(phone).trim().slice(0, 20)); }
     if (role !== undefined) { sets.push('role = ?'); params.push(role); }
     if (is_active !== undefined) { sets.push('is_active = ?'); params.push(is_active); }
     if (profile_image_url !== undefined) { sets.push('profile_image_url = ?'); params.push(profile_image_url); }
@@ -4619,7 +4690,7 @@ app.put('/api/admin/users/:id', authenticateToken, requireAdmin, async (req, res
     );
 
     const fetchResult = await executeQuery(
-      'SELECT id, first_name, last_name, email, profile_image_url, profile_number, relationship_with_holwert, role, is_active, organization_id, created_at, updated_at FROM users WHERE id = ?',
+      'SELECT id, first_name, last_name, email, phone, profile_image_url, profile_number, relationship_with_holwert, role, is_active, organization_id, created_at, updated_at FROM users WHERE id = ?',
       [id]
     );
     if (!fetchResult.rows.length) return res.status(404).json({ error: 'User not found' });
@@ -4713,13 +4784,39 @@ app.put('/api/org/profile', authenticateToken, requireOrgPortal, async (req, res
   try {
     const orgId = req.organizationId;
     const raw = req.body || {};
-    const allowed = ['description', 'bio', 'website', 'email', 'phone', 'whatsapp', 'address', 'facebook', 'instagram', 'twitter', 'linkedin', 'brand_color', 'logo_url', 'privacy_statement'];
+    /** Zelfde inhoudelijke velden als superadmin (`PUT /admin/organizations/:id`), behalve `is_approved` (alleen beheerder). */
+    const allowed = [
+      'name',
+      'category',
+      'description',
+      'bio',
+      'website',
+      'email',
+      'phone',
+      'whatsapp',
+      'address',
+      'facebook',
+      'instagram',
+      'twitter',
+      'linkedin',
+      'brand_color',
+      'logo_url',
+      'privacy_statement',
+    ];
+    if (raw.name !== undefined) {
+      const nm = raw.name != null ? String(raw.name).trim() : '';
+      if (!nm) {
+        return res.status(400).json({ error: 'Naam mag niet leeg zijn' });
+      }
+    }
     const sets = [];
     const values = [];
     allowed.forEach((key) => {
       if (raw[key] !== undefined) {
+        let v = raw[key];
+        if (key === 'name') v = String(v).trim();
         sets.push(`${key} = ?`);
-        values.push(raw[key]);
+        values.push(v);
       }
     });
     if (sets.length === 0) return res.status(400).json({ error: 'Geen velden om bij te werken' });
@@ -4872,7 +4969,7 @@ app.get('/api/org/events', authenticateToken, requireOrgPortal, async (req, res)
     const { page = 1, limit = 20, status } = req.query;
     const offset = (page - 1) * limit;
     const orgId = req.organizationId;
-    let query = `SELECT e.id, e.title, e.description, e.event_date, e.end_date, e.location, e.status, e.price, e.image_url, e.organization_id, e.created_at, e.updated_at
+    let query = `SELECT e.id, e.title, e.description, e.event_date, e.event_end_date, e.location, e.status, e.price, e.image_url, e.organization_id, e.created_at, e.updated_at
       FROM events e WHERE e.organization_id = ?`;
     const params = [orgId];
     if (status === 'scheduled') { query += ` AND (e.status = 'scheduled' OR e.status IS NULL)`; }
@@ -4898,7 +4995,7 @@ app.get('/api/org/events/:id', authenticateToken, requireOrgPortal, async (req, 
   try {
     const orgId = req.organizationId;
     const result = await executeQuery(
-      'SELECT id, title, description, event_date, end_date, location, status, price, image_url, organization_id, created_at, updated_at FROM events WHERE id = ? AND organization_id = ?',
+      'SELECT id, title, description, event_date, event_end_date, location, status, price, image_url, organization_id, created_at, updated_at FROM events WHERE id = ? AND organization_id = ?',
       [req.params.id, orgId]
     );
     if (!result.rows?.length) return res.status(404).json({ error: 'Evenement niet gevonden' });
@@ -4912,11 +5009,43 @@ app.get('/api/org/events/:id', authenticateToken, requireOrgPortal, async (req, 
 app.post('/api/org/events', authenticateToken, requireOrgPortal, async (req, res) => {
   try {
     const orgId = req.organizationId;
-    const { title, description, event_date, end_date, location, status, price, image_url } = req.body || {};
+    const organizerId = req.user?.userId != null ? parseInt(req.user.userId, 10) : null;
+    if (!organizerId || Number.isNaN(organizerId)) {
+      return res.status(400).json({ error: 'Gebruiker ontbreekt in token', message: 'Log opnieuw in.' });
+    }
+    const { title, description, event_date, end_date, event_end_date, location, status, price, image_url } = req.body || {};
     if (!title) return res.status(400).json({ error: 'title is required' });
+    if (!event_date) return res.status(400).json({ error: 'event_date is required' });
+    const eventDateSql = toMysqlDateTime(event_date);
+    if (!eventDateSql) {
+      return res.status(400).json({
+        error: 'Ongeldige datum/tijd',
+        message: 'Kies een geldige datum en tijd (het formulier stuurt soms een formaat dat de database niet direct accepteert).',
+      });
+    }
+    const endRaw =
+      event_end_date != null && String(event_end_date).trim() !== ''
+        ? event_end_date
+        : end_date != null && String(end_date).trim() !== ''
+          ? end_date
+          : null;
+    const endDt = endRaw != null ? toMysqlDateTime(endRaw) : null;
+    const priceVal = normalizeEventPrice(price);
     const result = await executeInsert(
-      'INSERT INTO events (title, description, event_date, end_date, location, organization_id, status, price, image_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())',
-      [title || '', description || null, event_date || null, end_date || null, location || null, orgId, status || 'scheduled', price ?? null, image_url || null]
+      `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [
+        title || '',
+        description || null,
+        eventDateSql,
+        endDt,
+        location || null,
+        orgId,
+        status || 'scheduled',
+        organizerId,
+        priceVal,
+        image_url || null,
+      ]
     );
     const id = result.insertId || (result.rows && result.rows[0] && result.rows[0].id);
     const row = await executeQuery('SELECT id, title, event_date, organization_id, created_at FROM events WHERE id = ?', [id]);
@@ -4931,12 +5060,54 @@ app.put('/api/org/events/:id', authenticateToken, requireOrgPortal, async (req, 
   try {
     const orgId = req.organizationId;
     const id = parseInt(req.params.id);
-    const { title, description, event_date, end_date, location, status, price, image_url } = req.body || {};
-    const existing = await executeQuery('SELECT id FROM events WHERE id = ? AND organization_id = ?', [id, orgId]);
-    if (!existing.rows?.length) return res.status(404).json({ error: 'Evenement niet gevonden' });
+    const { title, description, event_date, end_date, event_end_date, location, status, price, image_url } = req.body || {};
+    const prev = await executeQuery(
+      'SELECT id, event_date, event_end_date FROM events WHERE id = ? AND organization_id = ?',
+      [id, orgId]
+    );
+    if (!prev.rows?.length) return res.status(404).json({ error: 'Evenement niet gevonden' });
+    const p = prev.rows[0];
+
+    let eventDateSql;
+    if (event_date !== undefined) {
+      if (event_date === null || String(event_date).trim() === '') {
+        return res.status(400).json({ error: 'Datum/tijd is verplicht' });
+      }
+      eventDateSql = toMysqlDateTime(event_date);
+      if (!eventDateSql) {
+        return res.status(400).json({ error: 'Ongeldige datum/tijd', message: 'Controleer datum en tijd van het evenement.' });
+      }
+    } else {
+      eventDateSql = toMysqlDateTime(p.event_date) ?? p.event_date;
+    }
+
+    let endDt;
+    if (event_end_date !== undefined || end_date !== undefined) {
+      const raw = event_end_date !== undefined ? event_end_date : end_date;
+      if (raw == null || String(raw).trim() === '') {
+        endDt = null;
+      } else {
+        endDt = toMysqlDateTime(raw);
+        if (!endDt) return res.status(400).json({ error: 'Ongeldige einddatum/tijd' });
+      }
+    } else {
+      endDt = p.event_end_date == null ? null : toMysqlDateTime(p.event_end_date) ?? p.event_end_date;
+    }
+
+    const priceVal = normalizeEventPrice(price);
     await executeQuery(
-      'UPDATE events SET title = ?, description = ?, event_date = ?, end_date = ?, location = ?, status = ?, price = ?, image_url = ?, updated_at = NOW() WHERE id = ?',
-      [title ?? '', description ?? null, event_date ?? null, end_date ?? null, location ?? null, status ?? 'scheduled', price ?? null, image_url ?? null, id]
+      'UPDATE events SET title = ?, description = ?, event_date = ?, event_end_date = ?, location = ?, status = ?, price = ?, image_url = ?, updated_at = NOW() WHERE id = ?',
+      [
+        title ?? '',
+        description ?? null,
+        eventDateSql,
+        endDt,
+        location ?? null,
+        status ?? 'scheduled',
+        priceVal,
+        image_url ?? null,
+        id,
+      ]
     );
     const row = await executeQuery('SELECT id, title, event_date, status, updated_at FROM events WHERE id = ?', [id]);
     res.json({ event: row.rows[0] });
@@ -6099,6 +6270,22 @@ async function ensureHolwertRelationshipColumn() {
   } catch (e) {
     if (e.code === 'ER_DUP_FIELDNAME' || (e.message && e.message.includes('Duplicate'))) return;
     console.error('ensureHolwertRelationshipColumn error:', e.message);
+  }
+}
+
+async function ensureUsersPhoneColumn() {
+  try {
+    const result = await executeQuery(
+      "SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'phone'"
+    );
+    if (result.rows && result.rows.length > 0) {
+      return;
+    }
+    await executeQuery('ALTER TABLE users ADD COLUMN phone VARCHAR(20) NULL');
+    console.log('✅ phone kolom toegevoegd aan users');
+  } catch (e) {
+    if (e.code === 'ER_DUP_FIELDNAME' || (e.message && e.message.includes('Duplicate'))) return;
+    console.error('ensureUsersPhoneColumn error:', e.message);
   }
 }
 
