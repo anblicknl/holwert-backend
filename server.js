@@ -4123,13 +4123,20 @@ app.get('/api/events', async (req, res) => {
       params.push(status);
     }
     query += sqlPublicEventVisibility('e', 'o');
-    // Sortering: org-detail (verleden+toekomst) = meest recent eerst; algemene lijst met upcoming=false = eerst nog te gaan, dan verleden
+    // Sortering: org-detail = meest recent eerst. Algemene lijst upcoming=false: eerst komende (oplopend),
+    // daarna verleden met nieuwste eerst — anders vulden oude jan.-items de LIMIT vóór recent verleden.
     let orderClause = 'ORDER BY e.event_date ASC';
     if (hasOrgScope && !showOnlyUpcoming) {
       orderClause = 'ORDER BY e.event_date DESC';
     } else if (!hasOrgScope && !showOnlyUpcoming) {
-      orderClause =
-        'ORDER BY (GREATEST(e.event_date, COALESCE(e.event_end_date, e.event_date)) < CURDATE()) ASC, e.event_date ASC';
+      orderClause = `ORDER BY (
+          GREATEST(e.event_date, COALESCE(e.event_end_date, e.event_date)) < CURDATE()
+        ) ASC,
+        CASE WHEN GREATEST(e.event_date, COALESCE(e.event_end_date, e.event_date)) >= CURDATE()
+          THEN e.event_date END ASC,
+        CASE WHEN GREATEST(e.event_date, COALESCE(e.event_end_date, e.event_date)) < CURDATE()
+          THEN e.event_date END DESC,
+        e.id DESC`;
     }
     query += ` ${orderClause} LIMIT ? OFFSET ?`;
     params.push(parseInt(limit, 10), parseInt(offset, 10));
