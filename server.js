@@ -513,12 +513,12 @@ function normalizeEventPrice(value) {
 }
 
 /**
- * Publieke agenda: alleen events gekoppeld aan een goedgekeurde organisatie (of zonder org).
- * We filteren hier niet op `is_published`: in de praktijk staan veel rijen op 0/NULL waardoor
- * de app anders leeg blijft; moderatie blijft via het admin-paneel op basis van `is_published`.
+ * Extra WHERE voor publieke event-routes. Leeg bewust: goedkeuring van organisaties geldt voor
+ * de organisatielijst in de app, niet voor agenda-items — anders verdwijnen alle events van een
+ * nog-niet-goedgekeurde org (bv. "The Sound") terwijl ze wél in het org-dashboard staan.
  */
-function sqlPublicEventVisibility(eAlias = 'e', oAlias = 'o') {
-  return ` AND (${eAlias}.organization_id IS NULL OR ${oAlias}.is_approved = 1)`;
+function sqlPublicEventVisibility(_eAlias = 'e', _oAlias = 'o') {
+  return '';
 }
 
 // Test route
