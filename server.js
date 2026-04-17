@@ -4032,70 +4032,68 @@ app.get('/api/events/count', async (req, res) => {
 });
 
 // Alias route for mobile app expecting /api/events
+// Zelfde database-pad als org-CRUD (executeQuery): anders schrijft org naar directe MySQL
+// terwijl deze route alleen via de PHP-proxy las → events wel in dashboard, niet in app.
 app.get('/api/events', async (req, res) => {
   try {
-    // Check if events table exists (MySQL)
     const { page = 1, limit = 20, organization_id, status } = req.query;
     const offset = (page - 1) * limit;
     const showOnlyUpcoming = req.query.upcoming !== 'false';
 
-    // Haal events direct via de PHP-proxy (zeker de juiste MySQL-DB)
-    const proxyBody = {
-      action: 'execute',
-      query: `
-        SELECT e.*, o.name as organization_name, o.brand_color as organization_brand_color, o.logo_url as organization_logo
-        FROM events e
-        LEFT JOIN organizations o ON e.organization_id = o.id
-        WHERE 1=1
-        ${showOnlyUpcoming ? ' AND COALESCE(e.event_end_date, e.event_date) >= CURDATE()' : ''}
-        ${organization_id ? ' AND e.organization_id = ?' : ''}
-        ${status ? ' AND e.status = ?' : ''}
-        ORDER BY e.event_date ASC
-        LIMIT ? OFFSET ?
-      `,
-      params: [
-        ...(organization_id ? [parseInt(organization_id)] : []),
-        ...(status ? [status] : []),
-        parseInt(limit),
-        parseInt(offset)
-      ]
-    };
+    let query = `
+      SELECT e.*, o.name as organization_name, o.brand_color as organization_brand_color, o.logo_url as organization_logo
+      FROM events e
+      LEFT JOIN organizations o ON e.organization_id = o.id
+      WHERE 1=1
+    `;
+    const params = [];
+    if (showOnlyUpcoming) {
+      query += ` AND COALESCE(e.event_end_date, e.event_date) >= CURDATE()`;
+    }
+    if (organization_id) {
+      query += ` AND e.organization_id = ?`;
+      params.push(parseInt(organization_id, 10));
+    }
+    if (status) {
+      query += ` AND e.status = ?`;
+      params.push(status);
+    }
+    query += ` ORDER BY e.event_date ASC LIMIT ? OFFSET ?`;
+    params.push(parseInt(limit, 10), parseInt(offset, 10));
 
-    const proxyCountBody = {
-      action: 'execute',
-      query: `
-        SELECT COUNT(*) as total
-        FROM events e
-        WHERE 1=1
-        ${showOnlyUpcoming ? ' AND COALESCE(e.event_end_date, e.event_date) >= CURDATE()' : ''}
-        ${organization_id ? ' AND e.organization_id = ?' : ''}
-        ${status ? ' AND e.status = ?' : ''}
-      `,
-      params: [
-        ...(organization_id ? [parseInt(organization_id)] : []),
-        ...(status ? [status] : [])
-      ]
-    };
+    let countSql = `
+      SELECT COUNT(*) as total
+      FROM events e
+      WHERE 1=1
+    `;
+    const countParams = [];
+    if (showOnlyUpcoming) {
+      countSql += ` AND COALESCE(e.event_end_date, e.event_date) >= CURDATE()`;
+    }
+    if (organization_id) {
+      countSql += ` AND e.organization_id = ?`;
+      countParams.push(parseInt(organization_id, 10));
+    }
+    if (status) {
+      countSql += ` AND e.status = ?`;
+      countParams.push(status);
+    }
 
-    const proxyRes = await axios.post(PHP_PROXY_URL, proxyBody, {
-      headers: { 'X-API-Key': PHP_PROXY_API_KEY, 'Content-Type': 'application/json' },
-      timeout: 10000
-    });
-    const proxyCountRes = await axios.post(PHP_PROXY_URL, proxyCountBody, {
-      headers: { 'X-API-Key': PHP_PROXY_API_KEY, 'Content-Type': 'application/json' },
-      timeout: 10000
-    });
+    const [result, countResult] = await Promise.all([
+      executeQuery(query, params),
+      executeQuery(countSql, countParams)
+    ]);
 
-    const events = proxyRes.data.rows || [];
-    const total = proxyCountRes.data.rows?.[0]?.total || 0;
+    const events = result.rows || [];
+    const total = parseInt(countResult.rows?.[0]?.total ?? 0, 10) || 0;
 
     res.json({
       events,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total: parseInt(total),
-        pages: Math.ceil(total / limit)
+        page: parseInt(page, 10),
+        limit: parseInt(limit, 10),
+        total,
+        pages: Math.ceil(total / parseInt(limit, 10))
       }
     });
   } catch (error) {
