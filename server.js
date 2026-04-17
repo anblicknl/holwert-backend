@@ -4061,7 +4061,10 @@ app.get('/api/events/count', async (req, res) => {
 // terwijl deze route alleen via de PHP-proxy las → events wel in dashboard, niet in app.
 app.get('/api/events', async (req, res) => {
   try {
-    const { page = 1, limit = 20, organization_id, status } = req.query;
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const rawLimit = parseInt(req.query.limit, 10);
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 500) : 20;
+    const { organization_id, status } = req.query;
     const offset = (page - 1) * limit;
     const showOnlyUpcoming = req.query.upcoming !== 'false';
 
