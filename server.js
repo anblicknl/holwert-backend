@@ -1026,21 +1026,32 @@ async function uploadImageBufferToSharedHosting(buffer, originalname, mimetype, 
     : '00';
   form.append('folder', `uploads/${year}/${month}/${seg}/`);
 
-  const uploadResponse = await axios.post('https://holwert.appenvloed.com/upload/upload.php', form, {
-    headers: {
-      ...form.getHeaders(),
-      'User-Agent': 'HolwertBackend/1.0',
-      'Origin': 'https://holwert.appenvloed.com',
-      'Referer': 'https://holwert.appenvloed.com/',
-    },
-    timeout: 30000,
-    maxBodyLength: Infinity,
-    maxContentLength: Infinity,
-    httpsAgent: new https.Agent({ rejectUnauthorized: false }),
-  });
+  let uploadResponse;
+  try {
+    uploadResponse = await axios.post('https://holwert.appenvloed.com/upload/upload.php', form, {
+      headers: {
+        ...form.getHeaders(),
+        'User-Agent': 'HolwertBackend/1.0',
+        'Origin': 'https://holwert.appenvloed.com',
+        'Referer': 'https://holwert.appenvloed.com/',
+      },
+      timeout: 30000,
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
+      httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+    });
+  } catch (axErr) {
+    const status = axErr.response?.status ?? 'geen status';
+    const body = axErr.response?.data;
+    const bodyStr = typeof body === 'string' ? body.substring(0, 500) : JSON.stringify(body ?? '');
+    console.error('[upload.php] HTTP-fout:', status, bodyStr);
+    throw new Error(`upload.php gaf HTTP ${status} terug: ${bodyStr}`);
+  }
 
   if (!uploadResponse.data || !uploadResponse.data.success) {
-    throw new Error((uploadResponse.data && uploadResponse.data.message) || 'Upload failed');
+    const msg = (uploadResponse.data && uploadResponse.data.message) || JSON.stringify(uploadResponse.data);
+    console.error('[upload.php] success=false:', msg);
+    throw new Error(`Upload mislukt: ${msg}`);
   }
   const rawUrl = uploadResponse.data.url;
   if (!rawUrl || typeof rawUrl !== 'string') {
