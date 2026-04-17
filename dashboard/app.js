@@ -519,28 +519,59 @@
             if (!res.ok) throw new Error(data.error || 'Laden mislukt');
             const list = data.news || [];
             container.innerHTML = list.length
-                ? `<table class="data-table"><thead><tr><th>Titel</th><th>Status</th><th>Datum</th><th></th></tr></thead><tbody>${
+                ? `<table class="data-table"><thead><tr><th>Titel</th><th>Status</th><th>Datum</th><th class="cell-actions">Acties</th></tr></thead><tbody>${
                     list.map(n => `<tr>
                         <td>${escapeHtml(n.title || '')}</td>
                         <td>${n.is_published ? 'Gepubliceerd' : 'Concept'}</td>
                         <td>${n.published_at ? new Date(n.published_at).toLocaleDateString('nl-NL') : '-'}</td>
-                        <td><button type="button" class="btn btn-secondary btn-sm" data-edit-news="${n.id}">Bewerken</button></td>
+                        <td class="cell-actions">
+                            <div class="action-buttons">
+                                <button type="button" class="btn-icon btn-view" data-preview-news="${n.id}" title="Preview" aria-label="Preview"><i class="fas fa-eye"></i></button>
+                                <button type="button" class="btn-icon btn-edit" data-edit-news="${n.id}" title="Bewerken" aria-label="Bewerken"><i class="fas fa-edit"></i></button>
+                                <button type="button" class="btn-icon btn-delete" data-delete-news="${n.id}" data-news-title="${encodeURIComponent(n.title || '')}" title="Verwijderen" aria-label="Verwijderen"><i class="fas fa-trash"></i></button>
+                            </div>
+                        </td>
                     </tr>`).join('')
                 }</tbody></table>`
                 : '<p class="empty-message">Nog geen nieuwsartikelen.</p>';
+            container.querySelectorAll('[data-preview-news]').forEach(b => {
+                b.addEventListener('click', () => openNewsModal(parseInt(b.getAttribute('data-preview-news'), 10), true));
+            });
             container.querySelectorAll('[data-edit-news]').forEach(b => {
-                b.addEventListener('click', () => openNewsModal(parseInt(b.getAttribute('data-edit-news'), 10)));
+                b.addEventListener('click', () => openNewsModal(parseInt(b.getAttribute('data-edit-news'), 10), false));
+            });
+            container.querySelectorAll('[data-delete-news]').forEach(b => {
+                b.addEventListener('click', () => {
+                    const id = parseInt(b.getAttribute('data-delete-news'), 10);
+                    const t = b.getAttribute('data-news-title') || '';
+                    deleteOrgNews(id, t);
+                });
             });
         } catch (e) {
             container.innerHTML = `<p class="empty-message">Fout: ${e.message}</p>`;
         }
     }
 
-    document.getElementById('addNewsBtn')?.addEventListener('click', () => openNewsModal(null));
+    async function deleteOrgNews(newsId, encodedTitle) {
+        const title = encodedTitle ? decodeURIComponent(encodedTitle) : 'dit artikel';
+        if (!confirm(`Weet je zeker dat je "${title}" wilt verwijderen? Dit kan niet ongedaan worden gemaakt.`)) return;
+        try {
+            const r = await fetch(`${apiBase}/org/news/${newsId}`, { method: 'DELETE', headers: authHeaders() });
+            const j = await r.json().catch(() => ({}));
+            if (!r.ok) { alert(j.message || j.error || 'Verwijderen mislukt'); return; }
+            loadNews();
+        } catch (err) {
+            alert(err.message || 'Verwijderen mislukt');
+        }
+    }
 
-    function openNewsModal(id) {
+    document.getElementById('addNewsBtn')?.addEventListener('click', () => openNewsModal(null, false));
+
+    function openNewsModal(id, isPreview = false) {
         const overlay = document.createElement('div');
         overlay.className = 'modal-overlay show';
+        const ro = isPreview ? 'readonly' : '';
+        const dis = isPreview ? 'disabled' : '';
         const load = async () => {
             let article = null;
             if (id) {
@@ -551,77 +582,93 @@
             const imgPreview = article?.image_url
                 ? `<p style="margin:0 0 8px"><img src="${escapeHtml(article.image_url)}" alt="" style="max-height:120px;border-radius:6px"></p>`
                 : '';
+            const titleHtml = isPreview ? 'Artikel bekijken' : (article ? 'Artikel bewerken' : 'Nieuw artikel');
+            const publishedAtValue = article?.published_at
+                ? new Date(article.published_at).toISOString().slice(0, 16)
+                : '';
+            const imageEditable = !isPreview
+                ? `${imgPreview}
+                            <input type="file" id="newsImageFile" accept="image/*">
+                            <p class="form-hint">Optioneel: JPG/PNG, max. 9 MB. Wordt in jullie organisatiemap geplaatst.</p>
+                            <label style="margin-top:8px;display:block">Of afbeeldings-URL (https)</label>
+                            <input type="url" id="newsImageUrlInput" placeholder="https://..." value="${escapeHtml(article?.image_url || '')}">`
+                : (imgPreview || '<p class="form-hint">Geen afbeelding</p>');
             overlay.innerHTML = `
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h3>${article ? 'Artikel bewerken' : 'Nieuw artikel'}</h3>
+                        <h3>${titleHtml}</h3>
                         <button type="button" class="modal-close">&times;</button>
                     </div>
                     <div class="modal-body">
                         <div class="form-group">
                             <label>Titel</label>
-                            <input type="text" id="newsTitle" value="${escapeHtml(article?.title || '')}">
+                            <input type="text" id="newsTitle" value="${escapeHtml(article?.title || '')}" ${ro}>
                         </div>
                         <div class="form-group">
                             <label>Samenvatting</label>
-                            <textarea id="newsExcerpt" rows="2">${escapeHtml(article?.excerpt || '')}</textarea>
+                            <textarea id="newsExcerpt" rows="2" ${ro}>${escapeHtml(article?.excerpt || '')}</textarea>
                         </div>
                         <div class="form-group">
                             <label>Inhoud</label>
-                            <textarea id="newsContent" rows="6">${escapeHtml(article?.content || '')}</textarea>
+                            <textarea id="newsContent" rows="6" ${ro}>${escapeHtml(article?.content || '')}</textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>Publicatiedatum</label>
+                            <input type="datetime-local" id="newsPublishedAt" value="${publishedAtValue}" ${ro}>
+                            <p class="form-hint">Leeg laten = huidige datum bij opslaan.</p>
                         </div>
                         <div class="form-group">
                             <label>Afbeelding</label>
-                            ${imgPreview}
-                            <input type="file" id="newsImageFile" accept="image/*">
-                            <p class="form-hint">Optioneel: JPG/PNG, max. 9 MB. Wordt in jullie organisatiemap geplaatst.</p>
-                            <label style="margin-top:8px;display:block">Of afbeeldings-URL (https)</label>
-                            <input type="url" id="newsImageUrlInput" placeholder="https://..." value="${escapeHtml(article?.image_url || '')}">
+                            ${imageEditable}
                         </div>
                         <div class="form-group">
-                            <label><input type="checkbox" id="newsPublished" ${article?.is_published ? 'checked' : ''}> Gepubliceerd</label>
+                            <label><input type="checkbox" id="newsPublished" ${article?.is_published ? 'checked' : ''} ${dis}> Gepubliceerd</label>
                         </div>
                     </div>
                     <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary modal-close-btn">Annuleren</button>
-                        <button type="button" class="btn btn-primary" id="newsSaveBtn">Opslaan</button>
+                        <button type="button" class="btn btn-secondary modal-close-btn">${isPreview ? 'Sluiten' : 'Annuleren'}</button>
+                        ${!isPreview ? '<button type="button" class="btn btn-primary" id="newsSaveBtn">Opslaan</button>' : ''}
                     </div>
                 </div>`;
             overlay.querySelector('.modal-close').addEventListener('click', () => overlay.remove());
             overlay.querySelector('.modal-close-btn').addEventListener('click', () => overlay.remove());
-            overlay.querySelector('#newsSaveBtn').addEventListener('click', async () => {
-                const btn = overlay.querySelector('#newsSaveBtn');
-                const file = document.getElementById('newsImageFile')?.files?.[0];
-                let imageUrl = (document.getElementById('newsImageUrlInput')?.value || '').trim();
-                if (file) {
-                    btn.disabled = true;
-                    btn.textContent = 'Uploaden…';
-                    try {
-                        imageUrl = await uploadImageFile(file);
-                    } catch (err) {
-                        alert(err.message || 'Upload mislukt');
+            if (!isPreview) {
+                overlay.querySelector('#newsSaveBtn').addEventListener('click', async () => {
+                    const btn = overlay.querySelector('#newsSaveBtn');
+                    const file = document.getElementById('newsImageFile')?.files?.[0];
+                    let imageUrl = (document.getElementById('newsImageUrlInput')?.value || '').trim();
+                    if (file) {
+                        btn.disabled = true;
+                        btn.textContent = 'Uploaden…';
+                        try {
+                            imageUrl = await uploadImageFile(file);
+                        } catch (err) {
+                            alert(err.message || 'Upload mislukt');
+                            btn.disabled = false;
+                            btn.textContent = 'Opslaan';
+                            return;
+                        }
                         btn.disabled = false;
                         btn.textContent = 'Opslaan';
-                        return;
                     }
-                    btn.disabled = false;
-                    btn.textContent = 'Opslaan';
-                }
-                const payload = {
-                    title: document.getElementById('newsTitle').value.trim(),
-                    excerpt: document.getElementById('newsExcerpt').value.trim(),
-                    content: document.getElementById('newsContent').value.trim(),
-                    is_published: document.getElementById('newsPublished').checked,
-                    image_url: imageUrl || null
-                };
-                const url = id ? `${apiBase}/org/news/${id}` : `${apiBase}/org/news`;
-                const method = id ? 'PUT' : 'POST';
-                const r = await fetch(url, { method, headers: authHeaders(), body: JSON.stringify(payload) });
-                const newsSaveJson = await r.json().catch(() => ({}));
-                if (!r.ok) { alert(newsSaveJson.message || newsSaveJson.error || 'Opslaan mislukt'); return; }
-                overlay.remove();
-                loadNews();
-            });
+                    const publishedAtInput = (document.getElementById('newsPublishedAt')?.value || '').trim();
+                    const payload = {
+                        title: document.getElementById('newsTitle').value.trim(),
+                        excerpt: document.getElementById('newsExcerpt').value.trim(),
+                        content: document.getElementById('newsContent').value.trim(),
+                        is_published: document.getElementById('newsPublished').checked,
+                        image_url: imageUrl || null,
+                        published_at: publishedAtInput || null,
+                    };
+                    const url = id ? `${apiBase}/org/news/${id}` : `${apiBase}/org/news`;
+                    const method = id ? 'PUT' : 'POST';
+                    const r = await fetch(url, { method, headers: authHeaders(), body: JSON.stringify(payload) });
+                    const newsSaveJson = await r.json().catch(() => ({}));
+                    if (!r.ok) { alert(newsSaveJson.message || newsSaveJson.error || 'Opslaan mislukt'); return; }
+                    overlay.remove();
+                    loadNews();
+                });
+            }
         };
         load();
         document.body.appendChild(overlay);

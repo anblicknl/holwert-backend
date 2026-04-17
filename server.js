@@ -5070,18 +5070,35 @@ app.put('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req, re
   try {
     const orgId = req.organizationId;
     const id = parseInt(req.params.id);
-    const { title, content, excerpt, category, custom_category, image_url, is_published } = req.body || {};
+    const { title, content, excerpt, category, custom_category, image_url, is_published, published_at } = req.body || {};
     const existing = await executeQuery('SELECT id FROM news WHERE id = ? AND organization_id = ?', [id, orgId]);
     if (!existing.rows?.length) return res.status(404).json({ error: 'Artikel niet gevonden' });
+    const publishedAtSql = published_at ? toMysqlDateTime(published_at) : null;
+    const publishedAtVal = publishedAtSql || null;
     await executeQuery(
-      'UPDATE news SET title = ?, content = ?, excerpt = ?, category = ?, custom_category = ?, image_url = ?, is_published = ?, updated_at = NOW() WHERE id = ?',
-      [title ?? '', content ?? '', excerpt ?? null, category ?? null, custom_category ?? null, image_url ?? null, is_published === true, id]
+      'UPDATE news SET title = ?, content = ?, excerpt = ?, category = ?, custom_category = ?, image_url = ?, is_published = ?, published_at = COALESCE(?, published_at), updated_at = NOW() WHERE id = ?',
+      [title ?? '', content ?? '', excerpt ?? null, category ?? null, custom_category ?? null, image_url ?? null, is_published === true, publishedAtVal, id]
     );
-    const row = await executeQuery('SELECT id, title, excerpt, is_published, updated_at FROM news WHERE id = ?', [id]);
+    const row = await executeQuery('SELECT id, title, excerpt, is_published, COALESCE(published_at, created_at) as published_at, updated_at FROM news WHERE id = ?', [id]);
     res.json({ article: row.rows[0] });
   } catch (error) {
     console.error('PUT /api/org/news/:id error:', error);
     res.status(500).json({ error: 'Failed to update article', message: error.message });
+  }
+});
+
+app.delete('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req, res) => {
+  try {
+    const orgId = req.organizationId;
+    const id = parseInt(req.params.id, 10);
+    if (Number.isNaN(id)) return res.status(400).json({ error: 'Ongeldig id' });
+    const del = await executeQuery('DELETE FROM news WHERE id = ? AND organization_id = ?', [id, orgId]);
+    const n = del.rowCount ?? del.rows?.length ?? 0;
+    if (!n) return res.status(404).json({ error: 'Artikel niet gevonden' });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('DELETE /api/org/news/:id error:', error);
+    res.status(500).json({ error: 'Verwijderen mislukt', message: error.message });
   }
 });
 
