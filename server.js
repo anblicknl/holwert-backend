@@ -512,6 +512,33 @@ function normalizeEventPrice(value) {
   return n;
 }
 
+/** MySQL TEXT ≈ 64KB; te lange image_url (vaak base64) geeft ER_DATA_TOO_LONG → 500 bij opslaan. */
+function sanitizeEventImageUrlForDb(url) {
+  if (url == null || url === '') return null;
+  const s = String(url).trim();
+  if (s.length === 0) return null;
+  const bytes = Buffer.byteLength(s, 'utf8');
+  if (bytes > 65000) {
+    console.warn('[events] image_url te groot voor TEXT-kolom (bytes=' + bytes + '), wordt genegeerd');
+    return null;
+  }
+  return s;
+}
+
+function isMysqlMissingColumnError(err) {
+  if (!err) return false;
+  if (err.code === 'ER_BAD_FIELD_ERROR' || err.errno === 1054) return true;
+  const m = err.message || err.sqlMessage || '';
+  return typeof m === 'string' && m.includes('Unknown column');
+}
+
+function isMysqlDataTooLongError(err) {
+  if (!err) return false;
+  if (err.code === 'ER_DATA_TOO_LONG' || err.errno === 1406) return true;
+  const m = err.message || err.sqlMessage || '';
+  return typeof m === 'string' && (m.includes('Data too long') || m.includes('too long for column'));
+}
+
 /**
  * Extra WHERE voor publieke event-routes. Leeg bewust: goedkeuring van organisaties geldt voor
  * de organisatielijst in de app, niet voor agenda-items — anders verdwijnen alle events van een
@@ -5112,6 +5139,7 @@ app.post('/api/org/events', authenticateToken, requireOrgPortal, async (req, res
           : null;
     const endDt = endRaw != null ? toMysqlDateTime(endRaw) : null;
     const priceVal = normalizeEventPrice(price);
+    const imageUrlSafe = sanitizeEventImageUrlForDb(image_url);
     const orgCheck = await executeQuery('SELECT is_approved FROM organizations WHERE id = ?', [orgId]);
     const approved =
       orgCheck.rows?.[0] &&
@@ -5129,7 +5157,7 @@ app.post('/api/org/events', authenticateToken, requireOrgPortal, async (req, res
       status || 'scheduled',
       organizerId,
       priceVal,
-      image_url || null,
+      imageUrlSafe,
     ];
     let result;
     try {
@@ -5139,12 +5167,32 @@ app.post('/api/org/events', authenticateToken, requireOrgPortal, async (req, res
         [...insertParams, publishFlag]
       );
     } catch (insErr) {
-      if (insErr.code === 'ER_BAD_FIELD_ERROR' || insErr.errno === 1054) {
+      if (isMysqlMissingColumnError(insErr)) {
         result = await executeInsert(
           `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
           insertParams
         );
+      } else if (isMysqlDataTooLongError(insErr)) {
+        const insertNoImg = [...insertParams];
+        insertNoImg[9] = null;
+        try {
+          result = await executeInsert(
+            `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, is_published, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+            [...insertNoImg, publishFlag]
+          );
+        } catch (e2) {
+          if (isMysqlMissingColumnError(e2)) {
+            result = await executeInsert(
+              `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+              insertNoImg
+            );
+          } else {
+            throw e2;
+          }
+        }
       } else {
         throw insErr;
       }
@@ -5197,45 +5245,68 @@ app.put('/api/org/events/:id', authenticateToken, requireOrgPortal, async (req, 
     }
 
     const priceVal = normalizeEventPrice(price);
+    const imageUrlSafe = sanitizeEventImageUrlForDb(image_url ?? null);
     const orgAppr = await executeQuery('SELECT is_approved FROM organizations WHERE id = ?', [orgId]);
     const orgApproved =
       orgAppr.rows?.[0] &&
       (orgAppr.rows[0].is_approved === 1 || orgAppr.rows[0].is_approved === true);
     const publishVal = orgApproved ? 1 : 0;
+    const updateParamsWithPub = [
+      title ?? '',
+      description ?? null,
+      eventDateSql,
+      endDt,
+      location ?? null,
+      status ?? 'scheduled',
+      priceVal,
+      imageUrlSafe,
+      publishVal,
+      id,
+      orgId,
+    ];
+    const updateParamsNoPub = [
+      title ?? '',
+      description ?? null,
+      eventDateSql,
+      endDt,
+      location ?? null,
+      status ?? 'scheduled',
+      priceVal,
+      imageUrlSafe,
+      id,
+      orgId,
+    ];
     try {
       await executeQuery(
         'UPDATE events SET title = ?, description = ?, event_date = ?, event_end_date = ?, location = ?, status = ?, price = ?, image_url = ?, is_published = ?, updated_at = NOW() WHERE id = ? AND organization_id = ?',
-        [
-          title ?? '',
-          description ?? null,
-          eventDateSql,
-          endDt,
-          location ?? null,
-          status ?? 'scheduled',
-          priceVal,
-          image_url ?? null,
-          publishVal,
-          id,
-          orgId,
-        ]
+        updateParamsWithPub
       );
     } catch (updErr) {
-      if (updErr.code === 'ER_BAD_FIELD_ERROR' || updErr.errno === 1054) {
+      if (isMysqlMissingColumnError(updErr)) {
         await executeQuery(
           'UPDATE events SET title = ?, description = ?, event_date = ?, event_end_date = ?, location = ?, status = ?, price = ?, image_url = ?, updated_at = NOW() WHERE id = ? AND organization_id = ?',
-          [
-            title ?? '',
-            description ?? null,
-            eventDateSql,
-            endDt,
-            location ?? null,
-            status ?? 'scheduled',
-            priceVal,
-            image_url ?? null,
-            id,
-            orgId,
-          ]
+          updateParamsNoPub
         );
+      } else if (isMysqlDataTooLongError(updErr)) {
+        const noImgPub = [...updateParamsWithPub];
+        noImgPub[7] = null;
+        const noImg = [...updateParamsNoPub];
+        noImg[7] = null;
+        try {
+          await executeQuery(
+            'UPDATE events SET title = ?, description = ?, event_date = ?, event_end_date = ?, location = ?, status = ?, price = ?, image_url = ?, is_published = ?, updated_at = NOW() WHERE id = ? AND organization_id = ?',
+            noImgPub
+          );
+        } catch (e2) {
+          if (isMysqlMissingColumnError(e2)) {
+            await executeQuery(
+              'UPDATE events SET title = ?, description = ?, event_date = ?, event_end_date = ?, location = ?, status = ?, price = ?, image_url = ?, updated_at = NOW() WHERE id = ? AND organization_id = ?',
+              noImg
+            );
+          } else {
+            throw e2;
+          }
+        }
       } else {
         throw updErr;
       }
