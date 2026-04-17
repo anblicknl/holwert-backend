@@ -512,10 +512,13 @@ function normalizeEventPrice(value) {
   return n;
 }
 
-/** Publieke agenda: alleen gepubliceerde events en alleen van goedgekeurde organisaties (kolom is_published ontbreekt op oude DB → NULL telt als zichtbaar). */
+/**
+ * Publieke agenda: alleen events gekoppeld aan een goedgekeurde organisatie (of zonder org).
+ * We filteren hier niet op `is_published`: in de praktijk staan veel rijen op 0/NULL waardoor
+ * de app anders leeg blijft; moderatie blijft via het admin-paneel op basis van `is_published`.
+ */
 function sqlPublicEventVisibility(eAlias = 'e', oAlias = 'o') {
-  return ` AND (${eAlias}.is_published IS NULL OR ${eAlias}.is_published = 1)
-    AND (${eAlias}.organization_id IS NULL OR ${oAlias}.is_approved = 1)`;
+  return ` AND (${eAlias}.organization_id IS NULL OR ${oAlias}.is_approved = 1)`;
 }
 
 // Test route
