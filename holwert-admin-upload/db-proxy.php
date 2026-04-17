@@ -7,6 +7,25 @@
  * Header: X-API-Key: (zelfde waarde als Vercel env PHP_PROXY_API_KEY)
  */
 
+// Vang PHP-fatale fouten op en geef ze terug als JSON i.p.v. lege 500
+ob_start();
+register_shutdown_function(function () {
+    $err = error_get_last();
+    if ($err && in_array($err['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+        ob_end_clean();
+        if (!headers_sent()) {
+            http_response_code(500);
+            header('Content-Type: application/json; charset=utf-8');
+        }
+        echo json_encode([
+            'error'   => 'PHP fatal error',
+            'message' => $err['message'] . ' in ' . $err['file'] . ':' . $err['line'],
+        ]);
+    } else {
+        ob_end_flush();
+    }
+});
+
 // Fallback als de server geen env vars voor PHP zet (zelfde key als admin-panel en Vercel)
 if (!defined('DB_PROXY_API_KEY')) {
     define('DB_PROXY_API_KEY', getenv('DB_PROXY_API_KEY') ?: getenv('PHP_PROXY_API_KEY') ?: 'holwert-db-proxy-2026-secure-key-change-in-production');
