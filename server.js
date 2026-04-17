@@ -521,6 +521,16 @@ function sqlPublicEventVisibility(_eAlias = 'e', _oAlias = 'o') {
   return '';
 }
 
+/**
+ * Komende / nog lopende evenementen (serverdatum).
+ * Niet: COALESCE(eind, start) — als eind vóór start staat of fout in het verleden zit,
+ * verdween het hele item uit de app terwijl het wél in het org-dashboard stond.
+ * GREATEST(start, COALESCE(eind, start)) gebruikt effectief het laatst relevante moment.
+ */
+function sqlEventUpcomingCutoff(eAlias = 'e') {
+  return ` AND GREATEST(${eAlias}.event_date, COALESCE(${eAlias}.event_end_date, ${eAlias}.event_date)) >= CURDATE()`;
+}
+
 // Test route
 app.get('/', async (req, res) => {
   try {
@@ -4033,7 +4043,7 @@ app.get('/api/events/count', async (req, res) => {
     `;
     const params = [];
     if (showOnlyUpcoming) {
-      query += ` AND COALESCE(e.event_end_date, e.event_date) >= CURDATE()`;
+      query += sqlEventUpcomingCutoff('e');
     }
     query += sqlPublicEventVisibility('e', 'o');
     if (organization_id) {
@@ -4076,7 +4086,7 @@ app.get('/api/events', async (req, res) => {
     `;
     const params = [];
     if (showOnlyUpcoming) {
-      query += ` AND COALESCE(e.event_end_date, e.event_date) >= CURDATE()`;
+      query += sqlEventUpcomingCutoff('e');
     }
     if (organization_id) {
       query += ` AND e.organization_id = ?`;
@@ -4098,7 +4108,7 @@ app.get('/api/events', async (req, res) => {
     `;
     const countParams = [];
     if (showOnlyUpcoming) {
-      countSql += ` AND COALESCE(e.event_end_date, e.event_date) >= CURDATE()`;
+      countSql += sqlEventUpcomingCutoff('e');
     }
     if (organization_id) {
       countSql += ` AND e.organization_id = ?`;
