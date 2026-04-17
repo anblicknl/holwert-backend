@@ -512,6 +512,12 @@ function normalizeEventPrice(value) {
   return n;
 }
 
+/** Publieke agenda: alleen gepubliceerde events en alleen van goedgekeurde organisaties (kolom is_published ontbreekt op oude DB → NULL telt als zichtbaar). */
+function sqlPublicEventVisibility(eAlias = 'e', oAlias = 'o') {
+  return ` AND (${eAlias}.is_published IS NULL OR ${eAlias}.is_published = 1)
+    AND (${eAlias}.organization_id IS NULL OR ${oAlias}.is_approved = 1)`;
+}
+
 // Test route
 app.get('/', async (req, res) => {
   try {
@@ -3920,9 +3926,10 @@ app.get('/events', async (req, res) => {
       LEFT JOIN organizations o ON e.organization_id = o.id
       WHERE e.status = 'scheduled'
     `;
-    
+    query += sqlPublicEventVisibility('e', 'o');
+
     const params = [];
-    
+
     let paramCount = 0;
     if (organization_id) {
       const orgId = parseInt(organization_id);
@@ -3936,16 +3943,19 @@ app.get('/events', async (req, res) => {
       query += ` AND e.status = $${paramCount}`;
       params.push(status);
     }
-    
+
     query += ` ORDER BY e.event_date ASC LIMIT ? OFFSET ?`;
     params.push(parseInt(limit), parseInt(offset));
 
     const result = await executeQuery(query, params);
 
     // Get total count
-    let countQuery = `SELECT COUNT(*) as total FROM events e WHERE e.status = 'scheduled'`;
+    let countQuery = `SELECT COUNT(*) as total FROM events e
+      LEFT JOIN organizations o ON e.organization_id = o.id
+      WHERE e.status = 'scheduled'`;
+    countQuery += sqlPublicEventVisibility('e', 'o');
     const countParams = [];
-    
+
     if (organization_id) {
       const orgId = parseInt(organization_id);
       if (!isNaN(orgId)) {
@@ -3957,7 +3967,7 @@ app.get('/events', async (req, res) => {
       countParams.push(status);
       countQuery += ` AND e.status = $${countParams.length}`;
     }
-    
+
     const countResult = await executeQuery(countQuery, countParams);
 
     res.json({
@@ -3995,6 +4005,7 @@ app.get('/events/:id', async (req, res) => {
       FROM events e
       LEFT JOIN organizations o ON e.organization_id = o.id
       WHERE e.id = $1
+      ${sqlPublicEventVisibility('e', 'o')}
       LIMIT 1
     `, [parseInt(id)]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Event not found' });
@@ -4008,21 +4019,32 @@ app.get('/events/:id', async (req, res) => {
 // Get events count (public)
 app.get('/api/events/count', async (req, res) => {
   try {
-    const { organization_id } = req.query;
-    
-    // Use same logic as /api/events endpoint - check if events table exists
-    let query = 'SELECT COUNT(*) as total FROM events WHERE COALESCE(event_end_date, event_date) >= CURDATE()';
+    const { organization_id, status } = req.query;
+    const showOnlyUpcoming = req.query.upcoming !== 'false';
+
+    let query = `
+      SELECT COUNT(*) as total
+      FROM events e
+      LEFT JOIN organizations o ON e.organization_id = o.id
+      WHERE 1=1
+    `;
     const params = [];
-    
-    // Filter by organization_id if provided
-    if (organization_id) {
-      query += ' AND organization_id = ?';
-      params.push(parseInt(organization_id));
+    if (showOnlyUpcoming) {
+      query += ` AND COALESCE(e.event_end_date, e.event_date) >= CURDATE()`;
     }
-    
+    query += sqlPublicEventVisibility('e', 'o');
+    if (organization_id) {
+      query += ` AND e.organization_id = ?`;
+      params.push(parseInt(organization_id, 10));
+    }
+    if (status) {
+      query += ` AND e.status = ?`;
+      params.push(status);
+    }
+
     const result = await executeQuery(query, params);
     const total = result.rows[0]?.total || 0;
-    
+
     res.json({ total: parseInt(total) });
   } catch (error) {
     console.error('Get events count error:', error);
@@ -4058,12 +4080,14 @@ app.get('/api/events', async (req, res) => {
       query += ` AND e.status = ?`;
       params.push(status);
     }
+    query += sqlPublicEventVisibility('e', 'o');
     query += ` ORDER BY e.event_date ASC LIMIT ? OFFSET ?`;
     params.push(parseInt(limit, 10), parseInt(offset, 10));
 
     let countSql = `
       SELECT COUNT(*) as total
       FROM events e
+      LEFT JOIN organizations o ON e.organization_id = o.id
       WHERE 1=1
     `;
     const countParams = [];
@@ -4078,6 +4102,7 @@ app.get('/api/events', async (req, res) => {
       countSql += ` AND e.status = ?`;
       countParams.push(status);
     }
+    countSql += sqlPublicEventVisibility('e', 'o');
 
     const [result, countResult] = await Promise.all([
       executeQuery(query, params),
@@ -4121,6 +4146,7 @@ app.get('/api/events/:id', async (req, res) => {
       FROM events e
       LEFT JOIN organizations o ON e.organization_id = o.id
       WHERE e.id = $1
+      ${sqlPublicEventVisibility('e', 'o')}
       LIMIT 1
     `, [parseInt(id)]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Event not found' });
@@ -5029,22 +5055,43 @@ app.post('/api/org/events', authenticateToken, requireOrgPortal, async (req, res
           : null;
     const endDt = endRaw != null ? toMysqlDateTime(endRaw) : null;
     const priceVal = normalizeEventPrice(price);
-    const result = await executeInsert(
-      `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-      [
-        title || '',
-        description || null,
-        eventDateSql,
-        endDt,
-        location || null,
-        orgId,
-        status || 'scheduled',
-        organizerId,
-        priceVal,
-        image_url || null,
-      ]
-    );
+    const orgCheck = await executeQuery('SELECT is_approved FROM organizations WHERE id = ?', [orgId]);
+    const approved =
+      orgCheck.rows?.[0] &&
+      (orgCheck.rows[0].is_approved === 1 ||
+        orgCheck.rows[0].is_approved === true);
+    const publishFlag = approved ? 1 : 0;
+
+    const insertParams = [
+      title || '',
+      description || null,
+      eventDateSql,
+      endDt,
+      location || null,
+      orgId,
+      status || 'scheduled',
+      organizerId,
+      priceVal,
+      image_url || null,
+    ];
+    let result;
+    try {
+      result = await executeInsert(
+        `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, is_published, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        [...insertParams, publishFlag]
+      );
+    } catch (insErr) {
+      if (insErr.code === 'ER_BAD_FIELD_ERROR' || insErr.errno === 1054) {
+        result = await executeInsert(
+          `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+          insertParams
+        );
+      } else {
+        throw insErr;
+      }
+    }
     const id = result.insertId || (result.rows && result.rows[0] && result.rows[0].id);
     const row = await executeQuery('SELECT id, title, event_date, organization_id, created_at FROM events WHERE id = ?', [id]);
     res.status(201).json({ event: row.rows[0] });
@@ -5093,25 +5140,69 @@ app.put('/api/org/events/:id', authenticateToken, requireOrgPortal, async (req, 
     }
 
     const priceVal = normalizeEventPrice(price);
-    await executeQuery(
-      'UPDATE events SET title = ?, description = ?, event_date = ?, event_end_date = ?, location = ?, status = ?, price = ?, image_url = ?, updated_at = NOW() WHERE id = ?',
-      [
-        title ?? '',
-        description ?? null,
-        eventDateSql,
-        endDt,
-        location ?? null,
-        status ?? 'scheduled',
-        priceVal,
-        image_url ?? null,
-        id,
-      ]
-    );
+    const orgAppr = await executeQuery('SELECT is_approved FROM organizations WHERE id = ?', [orgId]);
+    const orgApproved =
+      orgAppr.rows?.[0] &&
+      (orgAppr.rows[0].is_approved === 1 || orgAppr.rows[0].is_approved === true);
+    const publishVal = orgApproved ? 1 : 0;
+    try {
+      await executeQuery(
+        'UPDATE events SET title = ?, description = ?, event_date = ?, event_end_date = ?, location = ?, status = ?, price = ?, image_url = ?, is_published = ?, updated_at = NOW() WHERE id = ? AND organization_id = ?',
+        [
+          title ?? '',
+          description ?? null,
+          eventDateSql,
+          endDt,
+          location ?? null,
+          status ?? 'scheduled',
+          priceVal,
+          image_url ?? null,
+          publishVal,
+          id,
+          orgId,
+        ]
+      );
+    } catch (updErr) {
+      if (updErr.code === 'ER_BAD_FIELD_ERROR' || updErr.errno === 1054) {
+        await executeQuery(
+          'UPDATE events SET title = ?, description = ?, event_date = ?, event_end_date = ?, location = ?, status = ?, price = ?, image_url = ?, updated_at = NOW() WHERE id = ? AND organization_id = ?',
+          [
+            title ?? '',
+            description ?? null,
+            eventDateSql,
+            endDt,
+            location ?? null,
+            status ?? 'scheduled',
+            priceVal,
+            image_url ?? null,
+            id,
+            orgId,
+          ]
+        );
+      } else {
+        throw updErr;
+      }
+    }
     const row = await executeQuery('SELECT id, title, event_date, status, updated_at FROM events WHERE id = ?', [id]);
     res.json({ event: row.rows[0] });
   } catch (error) {
     console.error('PUT /api/org/events/:id error:', error);
     res.status(500).json({ error: 'Failed to update event', message: error.message });
+  }
+});
+
+app.delete('/api/org/events/:id', authenticateToken, requireOrgPortal, async (req, res) => {
+  try {
+    const orgId = req.organizationId;
+    const id = parseInt(req.params.id, 10);
+    if (Number.isNaN(id)) return res.status(400).json({ error: 'Ongeldig id' });
+    const del = await executeQuery('DELETE FROM events WHERE id = ? AND organization_id = ?', [id, orgId]);
+    const n = del.rowCount ?? del.rows?.length ?? 0;
+    if (!n) return res.status(404).json({ error: 'Evenement niet gevonden' });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('DELETE /api/org/events/:id error:', error);
+    res.status(500).json({ error: 'Verwijderen mislukt', message: error.message });
   }
 });
 

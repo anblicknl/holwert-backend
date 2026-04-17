@@ -4,46 +4,112 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard - Holwert Dorpsapp</title>
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.css?v=20260412-events-actions">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
 <body>
     <!-- Login (zelfde stijl als admin) -->
     <div id="loginScreen" class="screen active">
-        <div id="loginPanel" class="login-container">
+        <div id="loginPanel" class="login-container login-card">
             <div class="login-header">
-                <div class="logo-icon">
+                <div class="logo-icon login-logo-ring">
                     <img src="logo.svg" alt="Holwert Logo" onerror="this.style.display='none'; this.nextElementSibling?.classList?.remove('hide');">
                     <i class="fas fa-building hide" style="font-size:48px; color:#333;"></i>
                 </div>
-                <h1>Dashboard</h1>
-                <p>Holwert Dorpsapp – jouw nieuws, agenda en organisatie</p>
+                <h1 class="login-title">Dashboard</h1>
+                <p class="login-lead">Holwert Dorpsapp – jouw nieuws, agenda en organisatie</p>
             </div>
             <form id="loginForm" class="login-form">
                 <div class="form-group">
                     <label for="email">E-mailadres</label>
                     <input type="email" id="email" name="email" placeholder="contact@organisatie.nl" required>
                 </div>
-                <div class="form-group">
+                <div class="form-group login-password-group">
                     <label for="password">Wachtwoord</label>
                     <input type="password" id="password" name="password" placeholder="••••••••" required>
+                    <button type="button" id="showForgotPasswordBtn" class="login-forgot-link">Wachtwoord vergeten?</button>
                 </div>
-                <button type="submit" class="btn btn-primary">
-                    <i class="fas fa-arrow-right"></i>
-                    <span>Inloggen</span>
+                <div class="login-actions-row" role="group" aria-label="Inloggen of aanmelden">
+                    <button type="submit" class="btn btn-primary login-submit login-submit-half">
+                        <span>Inloggen</span>
+                        <i class="fas fa-arrow-right" aria-hidden="true"></i>
+                    </button>
+                    <button type="button" id="showOrgRegisterBtn" class="btn btn-primary login-submit login-submit-half">
+                        <span>Organisatie aanmelden</span>
+                        <i class="fas fa-building" aria-hidden="true"></i>
+                    </button>
+                </div>
+            </form>
+            <div id="loginError" class="error-message login-feedback"></div>
+        </div>
+        <div id="forgotPasswordPanel" class="login-container login-card" style="display:none;">
+            <div class="login-header">
+                <div class="logo-icon login-logo-ring">
+                    <img src="logo.svg" alt="Holwert Logo" onerror="this.style.display='none'; this.nextElementSibling?.classList?.remove('hide');">
+                    <i class="fas fa-key hide" style="font-size:48px; color:#333;"></i>
+                </div>
+                <h1 class="login-title">Wachtwoord vergeten</h1>
+                <p class="login-lead">Vul het e-mailadres van je organisatie-account in. Je ontvangt een link om een nieuw wachtwoord te kiezen (als dit adres bij ons bekend is).</p>
+                <p class="login-panel-hint">Geen e-mail na enkele minuten? Controleer je spam-map of neem contact op met de dorpsapp-beheerder.</p>
+            </div>
+            <form id="forgotPasswordForm" class="login-form">
+                <div class="form-group">
+                    <label for="forgotEmail">E-mailadres</label>
+                    <input type="email" id="forgotEmail" name="forgotEmail" autocomplete="email" required placeholder="contact@organisatie.nl">
+                </div>
+                <button type="submit" class="btn btn-primary login-submit" id="forgotPasswordSubmitBtn">
+                    <i class="fas fa-paper-plane"></i>
+                    <span>Verstuur link</span>
                 </button>
             </form>
-            <div id="loginError" class="error-message"></div>
-            <p class="login-switch">Nog geen profiel in het systeem? <button type="button" id="showOrgRegisterBtn" class="link-btn">Organisatie aanmelden</button></p>
+            <div id="forgotPasswordMsg" class="error-message login-feedback login-feedback-below-form"></div>
+            <div class="login-back-wrap">
+                <button type="button" id="backFromForgotBtn" class="login-back-btn">
+                    <i class="fas fa-arrow-left" aria-hidden="true"></i>
+                    <span>Terug naar inloggen</span>
+                </button>
+            </div>
         </div>
-        <div id="registerOrgPanel" class="login-container register-org-panel" style="display:none;">
+        <div id="resetPasswordPanel" class="login-container login-card" style="display:none;">
             <div class="login-header">
-                <div class="logo-icon">
+                <div class="logo-icon login-logo-ring">
+                    <img src="logo.svg" alt="Holwert Logo" onerror="this.style.display='none'; this.nextElementSibling?.classList?.remove('hide');">
+                    <i class="fas fa-unlock-alt hide" style="font-size:48px; color:#333;"></i>
+                </div>
+                <h1 class="login-title">Nieuw wachtwoord</h1>
+                <p class="login-lead">Kies een nieuw wachtwoord voor je organisatie-dashboard (minimaal 6 tekens).</p>
+            </div>
+            <form id="resetPasswordForm" class="login-form">
+                <input type="hidden" id="resetPwToken" value="">
+                <div class="form-group">
+                    <label for="resetPw1">Nieuw wachtwoord</label>
+                    <input type="password" id="resetPw1" autocomplete="new-password" required minlength="6" placeholder="••••••••">
+                </div>
+                <div class="form-group">
+                    <label for="resetPw2">Bevestig wachtwoord</label>
+                    <input type="password" id="resetPw2" autocomplete="new-password" required minlength="6" placeholder="••••••••">
+                </div>
+                <button type="submit" class="btn btn-primary login-submit" id="resetPasswordSubmitBtn">
+                    <i class="fas fa-save"></i>
+                    <span>Opslaan</span>
+                </button>
+            </form>
+            <div id="resetPasswordMsg" class="error-message login-feedback login-feedback-below-form"></div>
+            <div class="login-back-wrap">
+                <button type="button" id="backFromResetBtn" class="login-back-btn">
+                    <i class="fas fa-arrow-left" aria-hidden="true"></i>
+                    <span>Terug naar inloggen</span>
+                </button>
+            </div>
+        </div>
+        <div id="registerOrgPanel" class="login-container register-org-panel login-card" style="display:none;">
+            <div class="login-header">
+                <div class="logo-icon login-logo-ring">
                     <img src="logo.svg" alt="Holwert Logo" onerror="this.style.display='none'; this.nextElementSibling?.classList?.remove('hide');">
                     <i class="fas fa-building hide" style="font-size:48px; color:#333;"></i>
                 </div>
-                <h1>Organisatie aanmelden</h1>
-                <p>Je organisatie verschijnt in de app na goedkeuring door de beheerder. Je ontvangt daarna toegang tot dit dashboard.</p>
+                <h1 class="login-title">Organisatie aanmelden</h1>
+                <p class="login-lead">Je organisatie verschijnt in de app na goedkeuring door de beheerder. Je ontvangt daarna toegang tot dit dashboard.</p>
             </div>
             <form id="orgRegisterForm" class="login-form">
                 <div class="form-group">
@@ -116,14 +182,17 @@
                     <label for="org_reg_privacy">Privacy statement (optioneel)</label>
                     <textarea id="org_reg_privacy" rows="5" maxlength="50000"></textarea>
                 </div>
-                <button type="submit" class="btn btn-primary" id="orgRegisterSubmitBtn">
+                <button type="submit" class="btn btn-primary login-submit" id="orgRegisterSubmitBtn">
                     <i class="fas fa-paper-plane"></i>
                     <span>Aanmelding versturen</span>
                 </button>
             </form>
-            <p class="login-switch" style="margin-top:1rem;">
-                <button type="button" id="backToLoginBtn" class="link-btn">Terug naar inloggen</button>
-            </p>
+            <div class="login-back-wrap">
+                <button type="button" id="backToLoginBtn" class="login-back-btn">
+                    <i class="fas fa-arrow-left" aria-hidden="true"></i>
+                    <span>Terug naar inloggen</span>
+                </button>
+            </div>
             <div id="orgRegisterError" class="error-message"></div>
         </div>
     </div>
@@ -172,10 +241,6 @@
                     <button type="button" id="saveProfileBtn" class="btn btn-primary"><i class="fas fa-save"></i> Opslaan</button>
                 </div>
                 <div id="profileForm" class="profile-form"></div>
-                <div class="section-header" style="margin-top:2rem;">
-                    <h2><i class="fas fa-shield-alt"></i> Privacy statement</h2>
-                </div>
-                <div id="privacyForm" class="profile-form"></div>
             </section>
         </main>
     </div>

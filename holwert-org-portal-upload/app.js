@@ -201,6 +201,22 @@
         document.body.appendChild(overlay);
     }
 
+    async function deleteOrgEvent(evId, encodedTitle) {
+        const title = encodedTitle ? decodeURIComponent(encodedTitle) : 'dit evenement';
+        if (!confirm(`Weet je zeker dat je "${title}" wilt verwijderen? Dit kan niet ongedaan worden gemaakt.`)) return;
+        try {
+            const r = await fetch(`${apiBase}/org/events/${evId}`, { method: 'DELETE', headers: authHeaders() });
+            const j = await r.json().catch(() => ({}));
+            if (!r.ok) {
+                alert(j.message || j.error || 'Verwijderen mislukt');
+                return;
+            }
+            loadEvents();
+        } catch (err) {
+            alert(err.message || 'Verwijderen mislukt');
+        }
+    }
+
     async function loadEvents() {
         const container = document.getElementById('eventsList');
         if (!container) return;
@@ -210,28 +226,45 @@
             if (!res.ok) throw new Error(data.error || 'Laden mislukt');
             const list = data.events || [];
             container.innerHTML = list.length
-                ? `<table class="data-table"><thead><tr><th>Titel</th><th>Datum</th><th>Locatie</th><th></th></tr></thead><tbody>${
+                ? `<table class="data-table"><thead><tr><th>Titel</th><th>Datum</th><th>Locatie</th><th class="cell-actions">Acties</th></tr></thead><tbody>${
                     list.map(e => `<tr>
                         <td>${escapeHtml(e.title || '')}</td>
                         <td>${e.event_date ? new Date(e.event_date).toLocaleDateString('nl-NL') : '-'}</td>
                         <td>${escapeHtml(e.location || '-')}</td>
-                        <td><button type="button" class="btn btn-secondary btn-sm" data-edit-event="${e.id}">Bewerken</button></td>
+                        <td class="cell-actions">
+                            <div class="action-buttons">
+                                <button type="button" class="btn-icon btn-view" data-view-event="${e.id}" title="Bekijken" aria-label="Bekijken"><i class="fas fa-eye"></i></button>
+                                <button type="button" class="btn-icon btn-edit" data-edit-event="${e.id}" title="Bewerken" aria-label="Bewerken"><i class="fas fa-edit"></i></button>
+                                <button type="button" class="btn-icon btn-delete" data-delete-event="${e.id}" data-event-title="${encodeURIComponent(e.title || '')}" title="Verwijderen" aria-label="Verwijderen"><i class="fas fa-trash"></i></button>
+                            </div>
+                        </td>
                     </tr>`).join('')
                 }</tbody></table>`
                 : '<p class="empty-message">Nog geen evenementen.</p>';
+            container.querySelectorAll('[data-view-event]').forEach(b => {
+                b.addEventListener('click', () => openEventModal(parseInt(b.getAttribute('data-view-event'), 10), 'view'));
+            });
             container.querySelectorAll('[data-edit-event]').forEach(b => {
-                b.addEventListener('click', () => openEventModal(parseInt(b.getAttribute('data-edit-event'), 10)));
+                b.addEventListener('click', () => openEventModal(parseInt(b.getAttribute('data-edit-event'), 10), 'edit'));
+            });
+            container.querySelectorAll('[data-delete-event]').forEach(b => {
+                b.addEventListener('click', () => {
+                    const id = parseInt(b.getAttribute('data-delete-event'), 10);
+                    const t = b.getAttribute('data-event-title') || '';
+                    deleteOrgEvent(id, t);
+                });
             });
         } catch (e) {
             container.innerHTML = `<p class="empty-message">Fout: ${e.message}</p>`;
         }
     }
 
-    document.getElementById('addEventBtn')?.addEventListener('click', () => openEventModal(null));
+    document.getElementById('addEventBtn')?.addEventListener('click', () => openEventModal(null, 'edit'));
 
-    function openEventModal(id) {
+    function openEventModal(id, mode = 'edit') {
         const overlay = document.createElement('div');
         overlay.className = 'modal-overlay show';
+        const isView = mode === 'view';
         const load = async () => {
             let event = null;
             if (id) {
@@ -239,51 +272,58 @@
                 const d = await r.json();
                 if (r.ok) event = d.event;
             }
+            const titleHtml = isView ? 'Evenement bekijken' : event ? 'Evenement bewerken' : 'Nieuw evenement';
+            const ro = isView ? 'readonly' : '';
+            const dis = isView ? 'disabled' : '';
             overlay.innerHTML = `
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h3>${event ? 'Evenement bewerken' : 'Nieuw evenement'}</h3>
+                        <h3>${titleHtml}</h3>
                         <button type="button" class="modal-close">&times;</button>
                     </div>
                     <div class="modal-body">
                         <div class="form-group">
                             <label>Titel</label>
-                            <input type="text" id="eventTitle" value="${escapeHtml(event?.title || '')}">
+                            <input type="text" id="eventTitle" value="${escapeHtml(event?.title || '')}" ${ro}>
                         </div>
                         <div class="form-group">
                             <label>Beschrijving</label>
-                            <textarea id="eventDescription" rows="3">${escapeHtml(event?.description || '')}</textarea>
+                            <textarea id="eventDescription" rows="3" ${ro}>${escapeHtml(event?.description || '')}</textarea>
                         </div>
                         <div class="form-group">
                             <label>Datum</label>
-                            <input type="datetime-local" id="eventDate" value="${event?.event_date ? new Date(event.event_date).toISOString().slice(0, 16) : ''}">
+                            <input type="datetime-local" id="eventDate" value="${event?.event_date ? new Date(event.event_date).toISOString().slice(0, 16) : ''}" ${dis}>
                         </div>
                         <div class="form-group">
                             <label>Locatie</label>
-                            <input type="text" id="eventLocation" value="${escapeHtml(event?.location || '')}">
+                            <input type="text" id="eventLocation" value="${escapeHtml(event?.location || '')}" ${ro}>
                         </div>
                     </div>
                     <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary modal-close-btn">Annuleren</button>
-                        <button type="button" class="btn btn-primary" id="eventSaveBtn">Opslaan</button>
+                        ${isView
+                            ? '<button type="button" class="btn btn-primary modal-close-btn">Sluiten</button>'
+                            : '<button type="button" class="btn btn-secondary modal-close-btn">Annuleren</button>\n                        <button type="button" class="btn btn-primary" id="eventSaveBtn">Opslaan</button>'}
                     </div>
                 </div>`;
             overlay.querySelector('.modal-close').addEventListener('click', () => overlay.remove());
             overlay.querySelector('.modal-close-btn').addEventListener('click', () => overlay.remove());
-            overlay.querySelector('#eventSaveBtn').addEventListener('click', async () => {
-                const payload = {
-                    title: document.getElementById('eventTitle').value.trim(),
-                    description: document.getElementById('eventDescription').value.trim(),
-                    event_date: document.getElementById('eventDate').value || null,
-                    location: document.getElementById('eventLocation').value.trim() || null
-                };
-                const url = id ? `${apiBase}/org/events/${id}` : `${apiBase}/org/events`;
-                const method = id ? 'PUT' : 'POST';
-                const r = await fetch(url, { method, headers: authHeaders(), body: JSON.stringify(payload) });
-                if (!r.ok) { alert((await r.json()).error || 'Opslaan mislukt'); return; }
-                overlay.remove();
-                loadEvents();
-            });
+            if (!isView) {
+                overlay.querySelector('#eventSaveBtn').addEventListener('click', async () => {
+                    const payload = {
+                        title: document.getElementById('eventTitle').value.trim(),
+                        description: document.getElementById('eventDescription').value.trim(),
+                        event_date: document.getElementById('eventDate').value || null,
+                        location: document.getElementById('eventLocation').value.trim() || null
+                    };
+                    const url = id ? `${apiBase}/org/events/${id}` : `${apiBase}/org/events`;
+                    const method = id ? 'PUT' : 'POST';
+                    const r = await fetch(url, { method, headers: authHeaders(), body: JSON.stringify(payload) });
+                    const j = await r.json().catch(() => ({}));
+                    if (!r.ok) { alert(j.message || j.error || 'Opslaan mislukt'); return; }
+                    overlay.remove();
+                    loadEvents();
+                });
+            }
         };
         load();
         document.body.appendChild(overlay);

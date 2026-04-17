@@ -1,9 +1,10 @@
 /**
  * Dashboard (organisaties) – zelfde inlog als admin, alleen eigen Nieuws / Agenda / Profiel.
- * API: /api/auth/login, /api/org/me, /api/org/news, /api/org/events, /api/org/profile, /api/upload
+ * API: /api/auth/login, /api/org/me, /api/org/me/password, /api/org/news, /api/org/events, /api/org/profile, /api/upload
  */
 (function () {
-    const apiBase = window.location.hostname === 'localhost'
+    const _host = window.location.hostname;
+    const apiBase = _host === 'localhost' || _host === '127.0.0.1'
         ? 'http://localhost:3000/api'
         : 'https://holwert-backend.vercel.app/api';
 
@@ -36,6 +37,79 @@
     const orgRegisterError = document.getElementById('orgRegisterError');
     const userInfo = document.getElementById('userInfo');
     const logoutBtn = document.getElementById('logoutBtn');
+    const forgotPasswordPanel = document.getElementById('forgotPasswordPanel');
+    const resetPasswordPanel = document.getElementById('resetPasswordPanel');
+    const forgotPasswordForm = document.getElementById('forgotPasswordForm');
+    const forgotPasswordMsg = document.getElementById('forgotPasswordMsg');
+    const resetPasswordForm = document.getElementById('resetPasswordForm');
+    const resetPasswordMsg = document.getElementById('resetPasswordMsg');
+
+    function showAuthPanel(which) {
+        const map = {
+            login: () => {
+                if (loginPanel) loginPanel.style.display = 'block';
+                if (registerOrgPanel) registerOrgPanel.style.display = 'none';
+                if (forgotPasswordPanel) forgotPasswordPanel.style.display = 'none';
+                if (resetPasswordPanel) resetPasswordPanel.style.display = 'none';
+            },
+            register: () => {
+                if (loginPanel) loginPanel.style.display = 'none';
+                if (registerOrgPanel) registerOrgPanel.style.display = 'block';
+                if (forgotPasswordPanel) forgotPasswordPanel.style.display = 'none';
+                if (resetPasswordPanel) resetPasswordPanel.style.display = 'none';
+            },
+            forgot: () => {
+                if (loginPanel) loginPanel.style.display = 'none';
+                if (registerOrgPanel) registerOrgPanel.style.display = 'none';
+                if (forgotPasswordPanel) forgotPasswordPanel.style.display = 'block';
+                if (resetPasswordPanel) resetPasswordPanel.style.display = 'none';
+            },
+            reset: () => {
+                if (loginPanel) loginPanel.style.display = 'none';
+                if (registerOrgPanel) registerOrgPanel.style.display = 'none';
+                if (forgotPasswordPanel) forgotPasswordPanel.style.display = 'none';
+                if (resetPasswordPanel) resetPasswordPanel.style.display = 'block';
+            },
+        };
+        const fn = map[which];
+        if (fn) fn();
+    }
+
+    function clearForgotResetMessages() {
+        if (forgotPasswordMsg) {
+            forgotPasswordMsg.textContent = '';
+            forgotPasswordMsg.classList.remove('show', 'login-feedback--success', 'login-feedback--error');
+        }
+        if (resetPasswordMsg) {
+            resetPasswordMsg.textContent = '';
+            resetPasswordMsg.classList.remove('show', 'login-feedback--success', 'login-feedback--error');
+        }
+    }
+
+    function clearResetQueryFromUrl() {
+        try {
+            const u = new URL(window.location.href);
+            u.searchParams.delete('reset');
+            const q = u.searchParams.toString();
+            window.history.replaceState({}, '', u.pathname + (q ? `?${q}` : '') + u.hash);
+        } catch (_) {
+            /* ignore */
+        }
+    }
+
+    (function initPasswordResetFromUrl() {
+        const p = new URLSearchParams(window.location.search);
+        const rt = (p.get('reset') || '').trim();
+        if (rt && /^[a-f0-9]{64}$/i.test(rt)) {
+            showAuthPanel('reset');
+            const hid = document.getElementById('resetPwToken');
+            if (hid) hid.value = rt;
+            const rp1 = document.getElementById('resetPw1');
+            const rp2 = document.getElementById('resetPw2');
+            if (rp1) rp1.value = '';
+            if (rp2) rp2.value = '';
+        }
+    })();
 
     let orgLogoPreviewObjectUrl = null;
     function clearOrgLogoPreview() {
@@ -71,19 +145,136 @@
     }
 
     document.getElementById('showOrgRegisterBtn')?.addEventListener('click', () => {
-        if (loginPanel) loginPanel.style.display = 'none';
-        if (registerOrgPanel) registerOrgPanel.style.display = 'block';
-        if (loginError) loginError.classList.remove('show');
+        showAuthPanel('register');
+        if (loginError) loginError.classList.remove('show', 'login-feedback--success', 'login-feedback--error');
         if (orgRegisterError) orgRegisterError.classList.remove('show');
     });
 
     document.getElementById('backToLoginBtn')?.addEventListener('click', () => {
         clearOrgLogoPreview();
-        if (registerOrgPanel) registerOrgPanel.style.display = 'none';
-        if (loginPanel) loginPanel.style.display = 'block';
+        showAuthPanel('login');
         if (orgRegisterError) {
             orgRegisterError.textContent = '';
             orgRegisterError.classList.remove('show');
+        }
+    });
+
+    document.getElementById('showForgotPasswordBtn')?.addEventListener('click', () => {
+        showAuthPanel('forgot');
+        clearForgotResetMessages();
+        if (loginError) loginError.classList.remove('show', 'login-feedback--success', 'login-feedback--error');
+        const fe = document.getElementById('forgotEmail');
+        const loginEmail = document.getElementById('email');
+        if (fe && loginEmail) fe.value = (loginEmail.value || '').trim();
+    });
+
+    document.getElementById('backFromForgotBtn')?.addEventListener('click', () => {
+        showAuthPanel('login');
+        clearForgotResetMessages();
+    });
+
+    document.getElementById('backFromResetBtn')?.addEventListener('click', () => {
+        clearResetQueryFromUrl();
+        showAuthPanel('login');
+        clearForgotResetMessages();
+    });
+
+    forgotPasswordForm?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        clearForgotResetMessages();
+        const email = (document.getElementById('forgotEmail')?.value || '').trim().toLowerCase();
+        if (!email) return;
+        const btn = document.getElementById('forgotPasswordSubmitBtn');
+        const span = btn?.querySelector('span');
+        if (span) span.textContent = 'Verzenden…';
+        if (btn) btn.disabled = true;
+        try {
+            const res = await fetch(`${apiBase}/auth/org-forgot-password`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || data.message || 'Mislukt');
+            if (forgotPasswordMsg) {
+                forgotPasswordMsg.textContent =
+                    data.message ||
+                    'Als dit adres bekend is, ontvang je een e-mail. Controleer ook je spam-map.';
+                forgotPasswordMsg.style.color = '';
+                forgotPasswordMsg.classList.remove('login-feedback--error');
+                forgotPasswordMsg.classList.add('login-feedback--success', 'show');
+            }
+        } catch (err) {
+            if (forgotPasswordMsg) {
+                forgotPasswordMsg.textContent = err.message || 'Netwerkfout';
+                forgotPasswordMsg.style.color = '';
+                forgotPasswordMsg.classList.remove('login-feedback--success');
+                forgotPasswordMsg.classList.add('login-feedback--error', 'show');
+            }
+        } finally {
+            if (span) span.textContent = 'Verstuur link';
+            if (btn) btn.disabled = false;
+        }
+    });
+
+    resetPasswordForm?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        clearForgotResetMessages();
+        const t = (document.getElementById('resetPwToken')?.value || '').trim();
+        const p1 = document.getElementById('resetPw1')?.value || '';
+        const p2 = document.getElementById('resetPw2')?.value || '';
+        if (!/^[a-f0-9]{64}$/i.test(t)) {
+            if (resetPasswordMsg) {
+                resetPasswordMsg.textContent = 'Ongeldige link. Vraag opnieuw een reset aan.';
+                resetPasswordMsg.style.color = '';
+                resetPasswordMsg.classList.remove('login-feedback--success');
+                resetPasswordMsg.classList.add('login-feedback--error', 'show');
+            }
+            return;
+        }
+        if (p1.length < 6) {
+            if (resetPasswordMsg) {
+                resetPasswordMsg.textContent = 'Minimaal 6 tekens.';
+                resetPasswordMsg.style.color = '';
+                resetPasswordMsg.classList.remove('login-feedback--success');
+                resetPasswordMsg.classList.add('login-feedback--error', 'show');
+            }
+            return;
+        }
+        if (p1 !== p2) {
+            if (resetPasswordMsg) {
+                resetPasswordMsg.textContent = 'Wachtwoorden komen niet overeen.';
+                resetPasswordMsg.style.color = '';
+                resetPasswordMsg.classList.remove('login-feedback--success');
+                resetPasswordMsg.classList.add('login-feedback--error', 'show');
+            }
+            return;
+        }
+        const btn = document.getElementById('resetPasswordSubmitBtn');
+        const span = btn?.querySelector('span');
+        if (span) span.textContent = 'Opslaan…';
+        if (btn) btn.disabled = true;
+        try {
+            const res = await fetch(`${apiBase}/auth/org-reset-password`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: t, password: p1 }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || data.message || 'Mislukt');
+            clearResetQueryFromUrl();
+            showAuthPanel('login');
+            showError(data.message || 'Je wachtwoord is bijgewerkt. Je kunt nu inloggen.', false);
+        } catch (err) {
+            if (resetPasswordMsg) {
+                resetPasswordMsg.textContent = err.message || 'Netwerkfout';
+                resetPasswordMsg.style.color = '';
+                resetPasswordMsg.classList.remove('login-feedback--success');
+                resetPasswordMsg.classList.add('login-feedback--error', 'show');
+            }
+        } finally {
+            if (span) span.textContent = 'Opslaan';
+            if (btn) btn.disabled = false;
         }
     });
 
@@ -190,7 +381,9 @@
     function showError(msg, isError = true) {
         if (!loginError) return;
         loginError.textContent = msg;
-        loginError.style.color = isError ? '#c00' : '#080';
+        loginError.style.color = '';
+        loginError.classList.remove('login-feedback--success', 'login-feedback--error');
+        loginError.classList.add(isError ? 'login-feedback--error' : 'login-feedback--success');
         loginError.classList.add('show');
     }
 
@@ -237,7 +430,7 @@
         e.preventDefault();
         const email = document.getElementById('email').value.trim();
         const password = document.getElementById('password').value;
-        loginError.classList.remove('show');
+        loginError.classList.remove('show', 'login-feedback--success', 'login-feedback--error');
         const btn = loginForm.querySelector('button[type="submit"]');
         const span = btn?.querySelector('span');
         if (span) span.textContent = 'Inloggen...';
@@ -261,7 +454,6 @@
                 if (span) span.textContent = 'Inloggen';
                 return;
             }
-            if (span) span.textContent = 'Succesvol!';
             const meRes = await fetch(`${apiBase}/org/me`, { headers: authHeaders() });
             if (!meRes.ok) {
                 const err = await meRes.json().catch(() => ({}));
@@ -270,12 +462,17 @@
             const meData = await meRes.json();
             organization = meData.organization;
             currentUser = meData.user;
+            if (span) span.textContent = 'Succesvol!';
+            showError('Je bent ingelogd.', false);
+            await new Promise((r) => setTimeout(r, 450));
+            loginError.classList.remove('show', 'login-feedback--success', 'login-feedback--error');
             loginScreen.classList.remove('active');
             mainScreen.classList.add('active');
             if (userInfo) userInfo.textContent = organization?.name || currentUser.email;
             loadNews();
             loadEvents();
             loadProfile();
+            if (span) span.textContent = 'Inloggen';
         } catch (err) {
             showError(err.message || 'Inloggen mislukt');
             if (span) span.textContent = 'Inloggen';
@@ -289,11 +486,13 @@
         clearStoredToken();
         mainScreen.classList.remove('active');
         loginScreen.classList.add('active');
-        if (registerOrgPanel) registerOrgPanel.style.display = 'none';
-        if (loginPanel) loginPanel.style.display = 'block';
+        showAuthPanel('login');
+        clearForgotResetMessages();
         document.getElementById('email').value = '';
         document.getElementById('password').value = '';
-        loginError.classList.remove('show');
+        const loginSubmitSpan = loginForm?.querySelector('button[type="submit"] span');
+        if (loginSubmitSpan) loginSubmitSpan.textContent = 'Inloggen';
+        loginError.classList.remove('show', 'login-feedback--success', 'login-feedback--error');
         if (orgRegisterError) {
             orgRegisterError.textContent = '';
             orgRegisterError.classList.remove('show');
@@ -418,13 +617,30 @@
                 const url = id ? `${apiBase}/org/news/${id}` : `${apiBase}/org/news`;
                 const method = id ? 'PUT' : 'POST';
                 const r = await fetch(url, { method, headers: authHeaders(), body: JSON.stringify(payload) });
-                if (!r.ok) { alert((await r.json()).error || 'Opslaan mislukt'); return; }
+                const newsSaveJson = await r.json().catch(() => ({}));
+                if (!r.ok) { alert(newsSaveJson.message || newsSaveJson.error || 'Opslaan mislukt'); return; }
                 overlay.remove();
                 loadNews();
             });
         };
         load();
         document.body.appendChild(overlay);
+    }
+
+    async function deleteOrgEvent(evId, encodedTitle) {
+        const title = encodedTitle ? decodeURIComponent(encodedTitle) : 'dit evenement';
+        if (!confirm(`Weet je zeker dat je "${title}" wilt verwijderen? Dit kan niet ongedaan worden gemaakt.`)) return;
+        try {
+            const r = await fetch(`${apiBase}/org/events/${evId}`, { method: 'DELETE', headers: authHeaders() });
+            const j = await r.json().catch(() => ({}));
+            if (!r.ok) {
+                alert(j.message || j.error || 'Verwijderen mislukt');
+                return;
+            }
+            loadEvents();
+        } catch (err) {
+            alert(err.message || 'Verwijderen mislukt');
+        }
     }
 
     async function loadEvents() {
@@ -436,24 +652,40 @@
             if (!res.ok) throw new Error(data.error || 'Laden mislukt');
             const list = data.events || [];
             container.innerHTML = list.length
-                ? `<table class="data-table"><thead><tr><th>Titel</th><th>Datum</th><th>Locatie</th><th></th></tr></thead><tbody>${
+                ? `<table class="data-table"><thead><tr><th>Titel</th><th>Datum</th><th>Locatie</th><th class="cell-actions">Acties</th></tr></thead><tbody>${
                     list.map(e => `<tr>
                         <td>${escapeHtml(e.title || '')}</td>
                         <td>${e.event_date ? new Date(e.event_date).toLocaleDateString('nl-NL') : '-'}</td>
                         <td>${escapeHtml(e.location || '-')}</td>
-                        <td><button type="button" class="btn btn-secondary btn-sm" data-edit-event="${e.id}">Bewerken</button></td>
+                        <td class="cell-actions">
+                            <div class="action-buttons">
+                                <button type="button" class="btn-icon btn-view" data-view-event="${e.id}" title="Bekijken" aria-label="Bekijken"><i class="fas fa-eye"></i></button>
+                                <button type="button" class="btn-icon btn-edit" data-edit-event="${e.id}" title="Bewerken" aria-label="Bewerken"><i class="fas fa-edit"></i></button>
+                                <button type="button" class="btn-icon btn-delete" data-delete-event="${e.id}" data-event-title="${encodeURIComponent(e.title || '')}" title="Verwijderen" aria-label="Verwijderen"><i class="fas fa-trash"></i></button>
+                            </div>
+                        </td>
                     </tr>`).join('')
                 }</tbody></table>`
                 : '<p class="empty-message">Nog geen evenementen.</p>';
+            container.querySelectorAll('[data-view-event]').forEach(b => {
+                b.addEventListener('click', () => openEventModal(parseInt(b.getAttribute('data-view-event'), 10), 'view'));
+            });
             container.querySelectorAll('[data-edit-event]').forEach(b => {
-                b.addEventListener('click', () => openEventModal(parseInt(b.getAttribute('data-edit-event'), 10)));
+                b.addEventListener('click', () => openEventModal(parseInt(b.getAttribute('data-edit-event'), 10), 'edit'));
+            });
+            container.querySelectorAll('[data-delete-event]').forEach(b => {
+                b.addEventListener('click', () => {
+                    const id = parseInt(b.getAttribute('data-delete-event'), 10);
+                    const t = b.getAttribute('data-event-title') || '';
+                    deleteOrgEvent(id, t);
+                });
             });
         } catch (e) {
             container.innerHTML = `<p class="empty-message">Fout: ${e.message}</p>`;
         }
     }
 
-    document.getElementById('addEventBtn')?.addEventListener('click', () => openEventModal(null));
+    document.getElementById('addEventBtn')?.addEventListener('click', () => openEventModal(null, 'edit'));
 
     /**
      * Kalenderdag als YYYY-MM-DD (zelfde logica voor datetime-local en API-datums).
@@ -499,9 +731,10 @@
             '. Je kunt dit evenement gewoon opslaan; kies bewust of je liever een andere dag pakt om meer bezoekers te trekken.';
     }
 
-    function openEventModal(id) {
+    function openEventModal(id, mode = 'edit') {
         const overlay = document.createElement('div');
         overlay.className = 'modal-overlay show';
+        const isView = mode === 'view';
         const load = async () => {
             let event = null;
             if (id) {
@@ -512,42 +745,49 @@
             const evImg = event?.image_url
                 ? `<p style="margin:0 0 8px"><img src="${escapeHtml(event.image_url)}" alt="" style="max-height:120px;border-radius:6px"></p>`
                 : '';
+            const titleHtml = isView ? 'Evenement bekijken' : event ? 'Evenement bewerken' : 'Nieuw evenement';
+            const ro = isView ? 'readonly' : '';
+            const dis = isView ? 'disabled' : '';
+            const imageEditable = !isView
+                ? `${evImg}
+                            <input type="file" id="eventImageFile" accept="image/*">
+                            <p class="form-hint">Optioneel, max. 9 MB.</p>
+                            <label style="margin-top:8px;display:block">Of URL</label>
+                            <input type="url" id="eventImageUrlInput" placeholder="https://..." value="${escapeHtml(event?.image_url || '')}">`
+                : (evImg || '<p class="form-hint">Geen afbeelding</p>');
             overlay.innerHTML = `
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h3>${event ? 'Evenement bewerken' : 'Nieuw evenement'}</h3>
+                        <h3>${titleHtml}</h3>
                         <button type="button" class="modal-close">&times;</button>
                     </div>
                     <div class="modal-body">
                         <div class="form-group">
                             <label>Titel</label>
-                            <input type="text" id="eventTitle" value="${escapeHtml(event?.title || '')}">
+                            <input type="text" id="eventTitle" value="${escapeHtml(event?.title || '')}" ${ro}>
                         </div>
                         <div class="form-group">
                             <label>Beschrijving</label>
-                            <textarea id="eventDescription" rows="3">${escapeHtml(event?.description || '')}</textarea>
+                            <textarea id="eventDescription" rows="3" ${ro}>${escapeHtml(event?.description || '')}</textarea>
                         </div>
                         <div class="form-group">
                             <label>Datum</label>
-                            <input type="datetime-local" id="eventDate" value="${event?.event_date ? new Date(event.event_date).toISOString().slice(0, 16) : ''}">
+                            <input type="datetime-local" id="eventDate" value="${event?.event_date ? new Date(event.event_date).toISOString().slice(0, 16) : ''}" ${dis}>
                             <div id="eventSameDayWarning" class="event-same-day-warning" hidden role="status" aria-live="polite"></div>
                         </div>
                         <div class="form-group">
                             <label>Locatie</label>
-                            <input type="text" id="eventLocation" value="${escapeHtml(event?.location || '')}">
+                            <input type="text" id="eventLocation" value="${escapeHtml(event?.location || '')}" ${ro}>
                         </div>
                         <div class="form-group">
                             <label>Afbeelding</label>
-                            ${evImg}
-                            <input type="file" id="eventImageFile" accept="image/*">
-                            <p class="form-hint">Optioneel, max. 9 MB.</p>
-                            <label style="margin-top:8px;display:block">Of URL</label>
-                            <input type="url" id="eventImageUrlInput" placeholder="https://..." value="${escapeHtml(event?.image_url || '')}">
+                            ${imageEditable}
                         </div>
                     </div>
                     <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary modal-close-btn">Annuleren</button>
-                        <button type="button" class="btn btn-primary" id="eventSaveBtn">Opslaan</button>
+                        ${isView
+                            ? '<button type="button" class="btn btn-primary modal-close-btn">Sluiten</button>'
+                            : '<button type="button" class="btn btn-secondary modal-close-btn">Annuleren</button>\n                        <button type="button" class="btn btn-primary" id="eventSaveBtn">Opslaan</button>'}
                     </div>
                 </div>`;
             overlay.querySelector('.modal-close').addEventListener('click', () => overlay.remove());
@@ -565,115 +805,311 @@
             }
             const dateInputEl = document.getElementById('eventDate');
             const runSameDayCheck = () => refreshEventSameDayWarning(allOrgEvents, id);
-            if (dateInputEl) {
+            if (!isView && dateInputEl) {
                 dateInputEl.addEventListener('input', runSameDayCheck);
                 dateInputEl.addEventListener('change', runSameDayCheck);
+                runSameDayCheck();
             }
-            runSameDayCheck();
 
-            overlay.querySelector('#eventSaveBtn').addEventListener('click', async () => {
-                const btn = overlay.querySelector('#eventSaveBtn');
-                const file = document.getElementById('eventImageFile')?.files?.[0];
-                let imageUrl = (document.getElementById('eventImageUrlInput')?.value || '').trim();
-                if (file) {
-                    btn.disabled = true;
-                    btn.textContent = 'Uploaden…';
-                    try {
-                        imageUrl = await uploadImageFile(file);
-                    } catch (err) {
-                        alert(err.message || 'Upload mislukt');
+            if (!isView) {
+                overlay.querySelector('#eventSaveBtn').addEventListener('click', async () => {
+                    const btn = overlay.querySelector('#eventSaveBtn');
+                    const file = document.getElementById('eventImageFile')?.files?.[0];
+                    let imageUrl = (document.getElementById('eventImageUrlInput')?.value || '').trim();
+                    if (file) {
+                        btn.disabled = true;
+                        btn.textContent = 'Uploaden…';
+                        try {
+                            imageUrl = await uploadImageFile(file);
+                        } catch (err) {
+                            alert(err.message || 'Upload mislukt');
+                            btn.disabled = false;
+                            btn.textContent = 'Opslaan';
+                            return;
+                        }
                         btn.disabled = false;
                         btn.textContent = 'Opslaan';
-                        return;
                     }
-                    btn.disabled = false;
-                    btn.textContent = 'Opslaan';
-                }
-                const payload = {
-                    title: document.getElementById('eventTitle').value.trim(),
-                    description: document.getElementById('eventDescription').value.trim(),
-                    event_date: document.getElementById('eventDate').value || null,
-                    location: document.getElementById('eventLocation').value.trim() || null,
-                    image_url: imageUrl || null
-                };
-                const url = id ? `${apiBase}/org/events/${id}` : `${apiBase}/org/events`;
-                const method = id ? 'PUT' : 'POST';
-                const r = await fetch(url, { method, headers: authHeaders(), body: JSON.stringify(payload) });
-                if (!r.ok) { alert((await r.json()).error || 'Opslaan mislukt'); return; }
-                overlay.remove();
-                loadEvents();
-            });
+                    const payload = {
+                        title: document.getElementById('eventTitle').value.trim(),
+                        description: document.getElementById('eventDescription').value.trim(),
+                        event_date: document.getElementById('eventDate').value || null,
+                        location: document.getElementById('eventLocation').value.trim() || null,
+                        image_url: imageUrl || null
+                    };
+                    const url = id ? `${apiBase}/org/events/${id}` : `${apiBase}/org/events`;
+                    const method = id ? 'PUT' : 'POST';
+                    const r = await fetch(url, { method, headers: authHeaders(), body: JSON.stringify(payload) });
+                    const evSaveJson = await r.json().catch(() => ({}));
+                    if (!r.ok) { alert(evSaveJson.message || evSaveJson.error || 'Opslaan mislukt'); return; }
+                    overlay.remove();
+                    loadEvents();
+                });
+            }
         };
         load();
         document.body.appendChild(overlay);
     }
 
+    function profileBrandPickerDefault(brandColor) {
+        const s = (brandColor && String(brandColor).trim()) || '';
+        return /^#[0-9A-Fa-f]{6}$/i.test(s) ? s : '#0f46ae';
+    }
+
     async function loadProfile() {
+        const root = document.getElementById('profileForm');
+        if (!root) return;
         try {
             const res = await fetch(`${apiBase}/org/profile`, { headers: authHeaders() });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || 'Profiel laden mislukt');
             const org = data.organization || {};
-            const fields = [
-                { key: 'name', label: 'Naam', readonly: true },
-                { key: 'description', label: 'Beschrijving' },
-                { key: 'website', label: 'Website' },
-                { key: 'email', label: 'E-mail' },
-                { key: 'phone', label: 'Telefoon' },
-                { key: 'address', label: 'Adres' }
-            ];
+            const brandVal = profileBrandPickerDefault(org.brand_color);
             const logoBlock = org.logo_url
-                ? `<p style="margin:0 0 8px"><img src="${escapeHtml(org.logo_url)}" alt="Logo" style="max-height:80px;border-radius:6px"></p>`
-                : '<p class="form-hint">Nog geen logo geüpload.</p>';
-            document.getElementById('profileForm').innerHTML = `
+                ? `<p style="margin:0 0 8px"><img src="${escapeHtml(org.logo_url)}" alt="Logo" style="max-height:100px;border-radius:8px;border:1px solid #e8ecf4"></p>`
+                : '<p class="form-hint">Nog geen logo.</p>';
+            root.innerHTML = `
+                <p class="form-hint" style="margin-bottom:1.25rem;">Dezelfde gegevens als in het beheerderspaneel (behalve <strong>goedkeuring</strong> — dat blijft bij de beheerder).</p>
+
+                <h3 class="profile-subheading">Basis</h3>
+                <div class="form-group">
+                    <label for="profile_name">Naam *</label>
+                    <input type="text" id="profile_name" required maxlength="255" value="${escapeHtml(org.name || '')}">
+                </div>
+                <div class="form-group">
+                    <label for="profile_category">Categorie</label>
+                    <input type="text" id="profile_category" maxlength="120" placeholder="bijv. Muziek, Vereniging" value="${escapeHtml(org.category || '')}">
+                </div>
+                <div class="form-group">
+                    <label for="profile_description">Beschrijving</label>
+                    <textarea id="profile_description" rows="3" placeholder="Korte beschrijving">${escapeHtml(org.description || '')}</textarea>
+                </div>
+                <div class="form-group">
+                    <label for="profile_bio">Bio</label>
+                    <textarea id="profile_bio" rows="2" placeholder="Optionele bio">${escapeHtml(org.bio || '')}</textarea>
+                </div>
+
+                <h3 class="profile-subheading">Contact &amp; website</h3>
+                <div class="form-group">
+                    <label for="profile_website">Website</label>
+                    <input type="url" id="profile_website" placeholder="https://…" value="${escapeHtml(org.website || '')}">
+                </div>
+                <div class="form-group">
+                    <label for="profile_email">E-mail (contact)</label>
+                    <input type="email" id="profile_email" value="${escapeHtml(org.email || '')}">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="profile_phone">Telefoon</label>
+                        <input type="text" id="profile_phone" value="${escapeHtml(org.phone || '')}">
+                    </div>
+                    <div class="form-group">
+                        <label for="profile_whatsapp">WhatsApp</label>
+                        <input type="text" id="profile_whatsapp" placeholder="Nummer of link" value="${escapeHtml(org.whatsapp || '')}">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="profile_address">Adres</label>
+                    <input type="text" id="profile_address" value="${escapeHtml(org.address || '')}">
+                </div>
+
+                <h3 class="profile-subheading">Social media</h3>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="profile_facebook">Facebook</label>
+                        <input type="url" id="profile_facebook" placeholder="https://…" value="${escapeHtml(org.facebook || '')}">
+                    </div>
+                    <div class="form-group">
+                        <label for="profile_instagram">Instagram</label>
+                        <input type="url" id="profile_instagram" placeholder="https://…" value="${escapeHtml(org.instagram || '')}">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="profile_twitter">X / Twitter</label>
+                        <input type="url" id="profile_twitter" placeholder="https://…" value="${escapeHtml(org.twitter || '')}">
+                    </div>
+                    <div class="form-group">
+                        <label for="profile_linkedin">LinkedIn</label>
+                        <input type="url" id="profile_linkedin" placeholder="https://…" value="${escapeHtml(org.linkedin || '')}">
+                    </div>
+                </div>
+
+                <h3 class="profile-subheading">Huisstijl</h3>
+                <div class="form-group">
+                    <label for="profile_brand_color_hex">Brandkleur (hex)</label>
+                    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                        <input type="color" id="profile_brand_color_picker" value="${escapeHtml(brandVal)}" style="width:48px;height:40px;padding:0;border:1px solid #ddd;border-radius:6px;cursor:pointer;" title="Kies kleur">
+                        <input type="text" id="profile_brand_color_hex" placeholder="#RRGGBB" style="flex:1;min-width:140px;" value="${escapeHtml((org.brand_color && String(org.brand_color).trim()) || '')}">
+                    </div>
+                    <p class="form-hint">Wordt o.a. in de app gebruikt bij jullie organisatie.</p>
+                </div>
                 <div class="form-group">
                     <label>Logo</label>
                     ${logoBlock}
                     <input type="file" id="profileLogoFile" accept="image/*">
-                    <p class="form-hint">Nieuw logo: kies bestand (max. 9 MB) en klik op Opslaan.</p>
-                </div>` + fields.map(f => `
+                    <p class="form-hint">Nieuw bestand uploaden: kies afbeelding (max. 9 MB) en klik bovenaan op Opslaan.</p>
+                    <label style="margin-top:10px;display:block">Of logo-URL</label>
+                    <input type="url" id="profile_logo_url" placeholder="https://…" value="${escapeHtml(org.logo_url || '')}">
+                </div>
+
+                <h3 class="profile-subheading"><i class="fas fa-shield-alt" style="margin-right:6px;"></i>Privacy statement</h3>
                 <div class="form-group">
-                    <label>${f.label}</label>
-                    <input type="text" id="profile_${f.key}" value="${escapeHtml(org[f.key] || '')}" ${f.readonly ? 'readonly' : ''}>
-                </div>`).join('');
-            document.getElementById('privacyForm').innerHTML = `
+                    <label for="profile_privacy_statement">Tekst voor in de app</label>
+                    <textarea id="profile_privacy_statement" rows="6" placeholder="Optioneel">${escapeHtml(org.privacy_statement || '')}</textarea>
+                </div>
+
+                <h3 class="profile-subheading">Account (dashboard-inlog)</h3>
+                <p class="form-hint" style="margin-bottom:1rem;">Wachtwoord voor <strong>dit dashboard</strong>, los van het contact-e-mailadres hierboven.</p>
                 <div class="form-group">
-                    <label>Privacy statement (wordt in de app getoond)</label>
-                    <textarea id="profile_privacy_statement" rows="8">${escapeHtml(org.privacy_statement || '')}</textarea>
-                </div>`;
+                    <label for="accountCurrentPassword">Huidig wachtwoord</label>
+                    <input type="password" id="accountCurrentPassword" autocomplete="current-password">
+                </div>
+                <div class="form-group">
+                    <label for="accountNewPassword">Nieuw wachtwoord</label>
+                    <input type="password" id="accountNewPassword" autocomplete="new-password" minlength="6" placeholder="Minimaal 6 tekens">
+                </div>
+                <div class="form-group">
+                    <label for="accountNewPassword2">Nieuw wachtwoord (herhalen)</label>
+                    <input type="password" id="accountNewPassword2" autocomplete="new-password" minlength="6">
+                </div>
+                <button type="button" class="btn btn-secondary" id="changeAccountPasswordBtn"><i class="fas fa-key"></i> Alleen wachtwoord wijzigen</button>
+                <p id="accountPasswordMsg" class="form-hint" style="margin-top:0.75rem;display:none;" aria-live="polite"></p>`;
+
+            const picker = document.getElementById('profile_brand_color_picker');
+            const hexEl = document.getElementById('profile_brand_color_hex');
+            if (picker && hexEl) {
+                picker.addEventListener('input', () => {
+                    hexEl.value = picker.value.toUpperCase();
+                });
+                hexEl.addEventListener('change', () => {
+                    const v = hexEl.value.trim();
+                    if (/^#[0-9A-Fa-f]{6}$/i.test(v)) picker.value = v;
+                });
+            }
         } catch (e) {
-            document.getElementById('profileForm').innerHTML = `<p class="empty-message">Fout: ${e.message}</p>`;
+            root.innerHTML = `<p class="empty-message">Fout: ${escapeHtml(e.message)}</p>`;
+        }
+        document.getElementById('changeAccountPasswordBtn')?.addEventListener('click', onChangeAccountPasswordClick);
+    }
+
+    async function onChangeAccountPasswordClick() {
+        const msgEl = document.getElementById('accountPasswordMsg');
+        const setMsg = (text, isError) => {
+            if (!msgEl) return;
+            msgEl.textContent = text;
+            msgEl.style.display = text ? 'block' : 'none';
+            msgEl.style.color = isError ? '#b00020' : '#1a6b1a';
+        };
+        setMsg('', false);
+        const cur = document.getElementById('accountCurrentPassword')?.value || '';
+        const n1 = document.getElementById('accountNewPassword')?.value || '';
+        const n2 = document.getElementById('accountNewPassword2')?.value || '';
+        if (!cur) {
+            setMsg('Vul je huidige wachtwoord in.', true);
+            return;
+        }
+        if (n1.length < 6) {
+            setMsg('Nieuw wachtwoord: minimaal 6 tekens.', true);
+            return;
+        }
+        if (n1 !== n2) {
+            setMsg('De twee nieuwe wachtwoorden komen niet overeen.', true);
+            return;
+        }
+        const btn = document.getElementById('changeAccountPasswordBtn');
+        if (btn) btn.disabled = true;
+        try {
+            const res = await fetch(`${apiBase}/org/me/password`, {
+                method: 'PUT',
+                headers: authHeaders(),
+                body: JSON.stringify({ current_password: cur, new_password: n1 }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                throw new Error(data.error || data.message || 'Wijzigen mislukt');
+            }
+            setMsg(data.message || 'Wachtwoord bijgewerkt.', false);
+            const c = document.getElementById('accountCurrentPassword');
+            const a = document.getElementById('accountNewPassword');
+            const b = document.getElementById('accountNewPassword2');
+            if (c) c.value = '';
+            if (a) a.value = '';
+            if (b) b.value = '';
+        } catch (err) {
+            setMsg(err.message || 'Netwerkfout', true);
+        } finally {
+            if (btn) btn.disabled = false;
         }
     }
 
     document.getElementById('saveProfileBtn')?.addEventListener('click', async () => {
         const btn = document.getElementById('saveProfileBtn');
-        const payload = {
-            description: document.getElementById('profile_description')?.value?.trim(),
-            website: document.getElementById('profile_website')?.value?.trim(),
-            email: document.getElementById('profile_email')?.value?.trim(),
-            phone: document.getElementById('profile_phone')?.value?.trim(),
-            address: document.getElementById('profile_address')?.value?.trim(),
-            privacy_statement: document.getElementById('profile_privacy_statement')?.value?.trim()
-        };
+        const name = document.getElementById('profile_name')?.value?.trim() || '';
+        if (!name) {
+            alert('Vul een organisatienaam in.');
+            return;
+        }
+        const hexRaw = document.getElementById('profile_brand_color_hex')?.value?.trim() || '';
+        const brand_color = /^#[0-9A-Fa-f]{6}$/i.test(hexRaw) ? hexRaw : undefined;
+
+        let logo_url = (document.getElementById('profile_logo_url')?.value || '').trim();
         const logoFile = document.getElementById('profileLogoFile')?.files?.[0];
         if (logoFile) {
             if (btn) { btn.disabled = true; btn.textContent = 'Logo uploaden…'; }
             try {
-                payload.logo_url = await uploadImageFile(logoFile);
+                logo_url = await uploadImageFile(logoFile);
             } catch (err) {
                 alert(err.message || 'Logo-upload mislukt');
                 if (btn) { btn.disabled = false; btn.textContent = 'Opslaan'; }
                 return;
             }
             if (btn) { btn.disabled = false; btn.textContent = 'Opslaan'; }
+        } else if (logo_url === '') {
+            logo_url = null;
         }
-        const r = await fetch(`${apiBase}/org/profile`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify(payload) });
-        const data = await r.json().catch(() => ({}));
-        if (!r.ok) { alert(data.error || 'Opslaan mislukt'); return; }
-        alert('Opgeslagen.');
-        organization = data.organization;
-        loadProfile();
+
+        const norm = (id) => {
+            const el = document.getElementById(id);
+            if (!el) return undefined;
+            const t = el.value != null ? String(el.value).trim() : '';
+            return t === '' ? null : t;
+        };
+
+        const payload = {
+            name,
+            category: norm('profile_category'),
+            description: norm('profile_description'),
+            bio: norm('profile_bio'),
+            website: norm('profile_website'),
+            email: norm('profile_email'),
+            phone: norm('profile_phone'),
+            whatsapp: norm('profile_whatsapp'),
+            address: norm('profile_address'),
+            facebook: norm('profile_facebook'),
+            instagram: norm('profile_instagram'),
+            twitter: norm('profile_twitter'),
+            linkedin: norm('profile_linkedin'),
+            privacy_statement: norm('profile_privacy_statement'),
+        };
+        if (brand_color !== undefined) payload.brand_color = brand_color;
+        if (logo_url !== undefined) payload.logo_url = logo_url;
+
+        if (btn) { btn.disabled = true; btn.textContent = 'Opslaan…'; }
+        try {
+            const r = await fetch(`${apiBase}/org/profile`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify(payload) });
+            const data = await r.json().catch(() => ({}));
+            if (!r.ok) {
+                alert(data.message || data.error || 'Opslaan mislukt');
+                return;
+            }
+            alert('Opgeslagen.');
+            organization = data.organization;
+            if (userInfo) userInfo.textContent = organization?.name || currentUser?.email;
+            loadProfile();
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = 'Opslaan'; }
+        }
     });
 
     function escapeHtml(s) {
