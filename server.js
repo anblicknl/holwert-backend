@@ -382,16 +382,19 @@ async function executeQueryViaProxy(query, params = [], action = 'execute') {
     };
   } catch (error) {
     console.error('[PHP Proxy] Error:', error.message);
-    if (error.response?.data) {
-      console.error('[PHP Proxy] Response status:', error.response.status);
-      console.error('[PHP Proxy] Response data:', error.response.data);
-      const proxyMsg = error.response.data.message || error.response.data.error;
-      if (proxyMsg) {
-        const err = new Error(proxyMsg);
-        err.code = error.response.data.code;
-        err.originalError = error;
-        throw err;
-      }
+    if (error.response) {
+      const status = error.response.status;
+      const data = error.response.data;
+      console.error('[PHP Proxy] Response status:', status);
+      console.error('[PHP Proxy] Response data:', typeof data === 'string' ? data.substring(0, 500) : JSON.stringify(data));
+      const proxyMsg = (data && typeof data === 'object')
+        ? (data.message || data.error)
+        : (typeof data === 'string' ? data.substring(0, 300) : null);
+      const msgStr = proxyMsg || `HTTP ${status} van db-proxy.php`;
+      const err = new Error(msgStr);
+      if (data && typeof data === 'object') err.code = data.code;
+      err.originalError = error;
+      throw err;
     }
     throw error;
   }
