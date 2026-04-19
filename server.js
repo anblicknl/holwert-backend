@@ -645,7 +645,7 @@ app.get('/api/setup-admin', async (req, res) => {
           role: 'admin' 
         },
         JWT_SECRET,
-        { expiresIn: '24h' }
+        { expiresIn: '30d' }
       );
       
       res.json({ 
@@ -678,7 +678,7 @@ app.get('/api/setup-admin', async (req, res) => {
           role: 'admin' 
         },
         JWT_SECRET,
-        { expiresIn: '24h' }
+        { expiresIn: '30d' }
       );
       
       res.json({ 
@@ -2536,7 +2536,7 @@ app.post('/api/auth/login', loginRateLimiter, async (req, res) => {
         ...(organizationId != null && !isNaN(organizationId) ? { organizationId } : {})
       },
       JWT_SECRET,
-      { expiresIn: '24h' }
+      { expiresIn: '30d' }
     );
 
     // Return success response
@@ -2790,7 +2790,7 @@ const handleRegister = async (req, res) => {
     const token = jwt.sign(
       { userId: user.id, email: user.email, role: user.role },
       JWT_SECRET,
-      { expiresIn: '24h' }
+      { expiresIn: '30d' }
     );
 
     res.status(201).json({
