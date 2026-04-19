@@ -162,8 +162,8 @@
                                 <i class="fas fa-building"></i> Organisaties
                             </button>
                         </div>
-                        <button id="addUserBtn" class="btn btn-primary" style="margin-left: auto;">
-                            <i class="fas fa-plus"></i> Nieuwe Gebruiker
+                        <button id="addUserBtn" class="btn btn-primary" style="margin-left: auto;" title="Account voor de dorpsapp (niet voor organisatie-dashboard)">
+                            <i class="fas fa-plus"></i> Nieuwe dorpsbewoner (app)
                         </button>
                     </div>
                 </div>
@@ -176,9 +176,14 @@
             <section id="organizations" class="content-section">
                 <div class="section-header">
                     <h2><i class="fas fa-building"></i> Organisaties</h2>
-                    <button id="addOrganizationBtn" class="btn btn-primary">
-                        <i class="fas fa-plus"></i> Nieuwe Organisatie
-                    </button>
+                    <div class="organizations-header-actions" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                        <button type="button" id="addOrgDashboardAccountBtn" class="btn btn-secondary" title="Alleen e-mail, wachtwoord en organisatie (web-dashboard)">
+                            <i class="fas fa-id-card"></i> Dashboard-account
+                        </button>
+                        <button id="addOrganizationBtn" class="btn btn-primary">
+                            <i class="fas fa-plus"></i> Nieuwe Organisatie
+                        </button>
+                    </div>
                 </div>
                 <div class="filters">
                     <input type="text" id="orgSearch" placeholder="Zoek organisaties...">
@@ -394,6 +399,6 @@
         console.log('🔧 VERSION: ADMIN-ORG-EVENTS-20260225-1');
     </script>
     <!-- Cache-busting query parameter zodat nieuwe app.js altijd wordt opgehaald -->
-    <script src="app.js?v=1744496500"></script>
+    <script src="app.js?v=20260412-login"></script>
 </body>
 </html>

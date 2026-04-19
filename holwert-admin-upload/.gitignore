@@ -1,0 +1,2 @@
+# Bevat DB-wachtwoord; maak lokaal van .sample, upload via FTP, commit nooit
+db-proxy-credentials.php

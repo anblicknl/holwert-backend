@@ -2,8 +2,10 @@ console.log('=== SCRIPT LOADED - VERSION 2026-03-03-21:PRAKTISCH-ICONS ===');
 
 class HolwertAdmin {
     constructor() {
-        // Use production API if available, otherwise localhost
-        this.apiBaseUrl = window.location.hostname === 'localhost' 
+        // Lokaal (localhost of 127.0.0.1) → backend op poort 3000; anders productie-API
+        const host = window.location.hostname;
+        const isLocalDev = host === 'localhost' || host === '127.0.0.1';
+        this.apiBaseUrl = isLocalDev
             ? 'http://localhost:3000/api'
             : 'https://holwert-backend.vercel.app/api';
         this.token = localStorage.getItem('authToken');
@@ -34,6 +36,30 @@ class HolwertAdmin {
         const d = document.createElement('div');
         d.textContent = String(s);
         return d.innerHTML;
+    }
+
+    /** Gelijk aan server `normalizeAdminRole`: robuuste vergelijking van rollen. */
+    normalizeAdminPanelRole(roleRaw) {
+        if (roleRaw == null || roleRaw === '') return '';
+        const s = String(roleRaw).trim().toLowerCase();
+        if (!s || s === 'null' || s === 'undefined') return '';
+        return s;
+    }
+
+    /** Rol uit JWT-payload (zonder verify) als fallback wanneer `user.role` ontbreekt in het login-antwoord. */
+    roleFromAccessToken(jwtToken) {
+        if (!jwtToken || typeof jwtToken !== 'string') return '';
+        try {
+            const parts = jwtToken.split('.');
+            if (parts.length < 2) return '';
+            let b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+            const pad = b64.length % 4;
+            if (pad) b64 += '='.repeat(4 - pad);
+            const payload = JSON.parse(atob(b64));
+            return this.normalizeAdminPanelRole(payload.role);
+        } catch {
+            return '';
+        }
     }
 
     setupEventListeners() {
@@ -83,6 +109,13 @@ class HolwertAdmin {
         if (addOrganizationBtn) {
             addOrganizationBtn.addEventListener('click', () => {
                 this.showCreateOrganizationModal();
+            });
+        }
+
+        const addOrgDashboardAccountBtn = document.getElementById('addOrgDashboardAccountBtn');
+        if (addOrgDashboardAccountBtn) {
+            addOrgDashboardAccountBtn.addEventListener('click', () => {
+                void this.showCreateOrgDashboardUserModal();
             });
         }
 
@@ -335,7 +368,9 @@ class HolwertAdmin {
 
     async handleLogin() {
         console.log('=== LOGIN START ===');
-        
+        /** Voorkomt dat `finally` meteen «Succesvol!» overschrijft (daardoor leek inloggen «niets» te doen). */
+        let loginSucceeded = false;
+
         const emailEl = document.getElementById('email');
         const passwordEl = document.getElementById('password');
         const errorDiv = document.getElementById('loginError');
@@ -397,38 +432,35 @@ class HolwertAdmin {
                 console.log('Login successful!');
                 this.token = data.token;
                 const elevated = new Set(['admin', 'superadmin', 'editor']);
-                let profileRole = '';
+                // Toegang baseren op login-antwoord + JWT-payload; profiel-fetch blokkeert niet meer de login
+                // (was: lege rol als /auth/profile faalt of JSON breekt → geen toegang).
+                let panelRole = this.normalizeAdminPanelRole(data.user && data.user.role);
+                if (!panelRole) panelRole = this.roleFromAccessToken(data.token);
+
+                if (!panelRole || !elevated.has(panelRole)) {
+                    this.token = null;
+                    if (errorDiv) {
+                        errorDiv.innerHTML = 'Dit account heeft geen rechten voor het beheerderspaneel. Je rol moet <strong>admin</strong>, <strong>superadmin</strong> of <strong>editor</strong> zijn (niet alleen «gebruiker»).';
+                        errorDiv.style.display = 'block';
+                        errorDiv.style.color = 'red';
+                    }
+                    return;
+                }
+
+                this.currentUser = data.user || null;
                 try {
                     const profRes = await fetch(`${this.apiBaseUrl}/auth/profile`, {
                         headers: { 'Authorization': `Bearer ${this.token}` }
                     });
                     if (profRes.ok) {
                         const profData = await profRes.json();
-                        profileRole = profData.user && profData.user.role != null
-                            ? String(profData.user.role).trim().toLowerCase()
-                            : '';
-                        this.currentUser = profData.user || data.user;
+                        if (profData.user) this.currentUser = profData.user;
                     }
                 } catch (e) {
-                    console.warn('Kon profiel na login niet laden:', e);
+                    console.warn('Kon profiel na login niet laden (niet kritiek):', e);
                 }
-                if (!profileRole) {
-                    profileRole = data.user && data.user.role != null
-                        ? String(data.user.role).trim().toLowerCase()
-                        : '';
-                }
-                if (!profileRole || !elevated.has(profileRole)) {
-                    this.token = null;
-                    if (errorDiv) {
-                        errorDiv.innerHTML = 'Dit account heeft geen rechten voor het beheerderspaneel. In de database moet je rol <strong>admin</strong>, <strong>superadmin</strong> of <strong>editor</strong> zijn.';
-                        errorDiv.style.display = 'block';
-                        errorDiv.style.color = 'red';
-                    }
-                    return;
-                }
-                if (!this.currentUser) {
-                    this.currentUser = data.user;
-                }
+
+                loginSucceeded = true;
                 localStorage.setItem('authToken', this.token);
                 
                 if (span) span.textContent = 'Succesvol!';
@@ -442,13 +474,16 @@ class HolwertAdmin {
                 
                 setTimeout(() => {
                     console.log('Switching to main screen');
+                    const loginSpan = document.querySelector('#loginForm button[type="submit"] span');
+                    if (loginSpan) loginSpan.textContent = 'Inloggen';
                     this.showMainScreen();
                     this.showSection('dashboard');
                 }, 1000);
             } else {
                 console.log('Login failed:', data);
                 if (errorDiv) {
-                    errorDiv.innerHTML = data.message || 'Inloggen mislukt';
+                    const msg = data.error || data.message || 'Inloggen mislukt';
+                    errorDiv.textContent = typeof msg === 'string' ? msg : 'Inloggen mislukt';
                     errorDiv.style.display = 'block';
                     errorDiv.style.color = 'red';
                 }
@@ -462,7 +497,7 @@ class HolwertAdmin {
             }
         } finally {
             if (submitBtn) submitBtn.disabled = false;
-            if (span) span.textContent = 'Inloggen';
+            if (!loginSucceeded && span) span.textContent = 'Inloggen';
             console.log('=== LOGIN END ===');
         }
     }
@@ -707,23 +742,25 @@ class HolwertAdmin {
     async getModerationCount() {
         try {
             const response = await fetch(`${this.apiBaseUrl}/admin/moderation/count`, {
-                headers: { 'Authorization': `Bearer ${this.token}` }
+                headers: { 'Authorization': `Bearer ${this.token}` },
+                cache: 'no-store',
             });
             if (response.ok) {
                 const data = await response.json();
-                return data.count || 0;
+                // Alleen concept-evenementen: openstaande organisaties hebben een eigen bolletje bij «Organisaties».
+                return parseInt(data.events, 10) || 0;
             }
         } catch (error) {
             console.error('Error getting moderation count:', error);
         }
-        // Fallback: return 0 if endpoint doesn't exist
         return 0;
     }
 
     async getPendingOrganizationsCount() {
         try {
             const response = await fetch(`${this.apiBaseUrl}/admin/organizations?status=pending&limit=1`, {
-                headers: { 'Authorization': `Bearer ${this.token}` }
+                headers: { 'Authorization': `Bearer ${this.token}` },
+                cache: 'no-store',
             });
             if (response.ok) {
                 const data = await response.json();
@@ -874,6 +911,104 @@ class HolwertAdmin {
         }
     }
 
+    /** Publieke inlog-URL van het organisatie-dashboard (zelfde domein als dit beheer). */
+    getOrganizationDashboardPublicUrl() {
+        try {
+            return new URL('/dashboard/', window.location.origin).href;
+        } catch {
+            return `${window.location.origin}/dashboard/`;
+        }
+    }
+
+    async copyTextToClipboard(text, okMsg = 'Gekopieerd naar het klembord') {
+        const t = text != null ? String(text) : '';
+        if (!t) {
+            this.showNotification('Niets om te kopiëren.', 'error');
+            return;
+        }
+        try {
+            await navigator.clipboard.writeText(t);
+            this.showNotification(okMsg, 'success');
+        } catch {
+            this.showNotification('Kopiëren mislukt; selecteer de tekst handmatig.', 'error');
+        }
+    }
+
+    /** Eenmalig tonen na auto-aanmaak dashboard-gebruiker bij goedkeuren organisatie. */
+    showOrganizationDashboardCredentialsModal(result) {
+        const email = result.dashboard_login_email != null ? String(result.dashboard_login_email) : '';
+        const pw = result.temporary_password != null ? String(result.temporary_password) : '';
+        const notice = result.user_notice != null ? String(result.user_notice) : '';
+        const dashUrl = this.getOrganizationDashboardPublicUrl();
+
+        const modal = document.createElement('div');
+        modal.className = 'modal-overlay';
+        modal.style.display = 'flex';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width: 32rem;">
+                <div class="modal-header">
+                    <h3>Dashboard-account</h3>
+                    <button type="button" class="modal-close" aria-label="Sluiten">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <p style="margin-top:0;">Er is een inlog voor het <strong>organisatie-dashboard</strong> aangemaakt (zelfde e-mail als bij de organisatie).</p>
+                    <p style="margin-bottom:0.75rem;">
+                        <a href="${this.escHtml(dashUrl)}" target="_blank" rel="noopener noreferrer">Open inlogpagina dashboard</a>
+                        <small style="display:block;margin-top:0.35rem;color:#666;">Als het pad bij jullie anders is, gebruik dan die URL (meestal <code>/dashboard/</code> op hetzelfde domein).</small>
+                    </p>
+                    <div id="orgDashCredNotice" class="org-dash-cred-notice" style="display:none;margin-bottom:1rem;padding:0.65rem 0.75rem;background:#fff3cd;border:1px solid #ffc107;border-radius:6px;color:#664d03;font-size:0.9rem;"></div>
+                    <div class="form-group">
+                        <label for="orgDashCredEmail">E-mail (inlognaam)</label>
+                        <div style="display:flex;gap:0.5rem;align-items:center;">
+                            <input type="text" id="orgDashCredEmail" readonly class="org-dash-cred-field" style="flex:1;font-family:ui-monospace,monospace;">
+                            <button type="button" class="btn btn-secondary" id="orgDashCredCopyEmail">Kopiëren</button>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="orgDashCredPw">Tijdelijk wachtwoord</label>
+                        <div style="display:flex;gap:0.5rem;align-items:center;">
+                            <input type="text" id="orgDashCredPw" readonly class="org-dash-cred-field" style="flex:1;font-family:ui-monospace,monospace;">
+                            <button type="button" class="btn btn-secondary" id="orgDashCredCopyPw">Kopiëren</button>
+                        </div>
+                    </div>
+                    <p style="margin-bottom:0;font-size:0.9rem;color:#666;">Bewaar dit wachtwoord niet in e-mail of chat; geef het zo mogelijk persoonlijk door. De organisatie kan daarna het wachtwoord wijzigen na inloggen (of jij wijzigt het onder Gebruikers).</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-primary" data-org-dash-cred-close>Sluiten</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        const emailInput = modal.querySelector('#orgDashCredEmail');
+        const pwInput = modal.querySelector('#orgDashCredPw');
+        if (emailInput) emailInput.value = email;
+        if (pwInput) pwInput.value = pw;
+
+        const noticeEl = modal.querySelector('#orgDashCredNotice');
+        if (noticeEl && notice) {
+            noticeEl.textContent = notice;
+            noticeEl.style.display = 'block';
+        }
+
+        const close = () => modal.remove();
+        modal.querySelector('.modal-close')?.addEventListener('click', close);
+        modal.querySelector('[data-org-dash-cred-close]')?.addEventListener('click', close);
+        modal.querySelector('.modal-content')?.addEventListener('click', (e) => e.stopPropagation());
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) close();
+        });
+
+        modal.querySelector('#orgDashCredCopyEmail')?.addEventListener('click', () => {
+            void this.copyTextToClipboard(emailInput?.value, 'E-mail gekopieerd');
+        });
+        modal.querySelector('#orgDashCredCopyPw')?.addEventListener('click', () => {
+            void this.copyTextToClipboard(pwInput?.value, 'Wachtwoord gekopieerd');
+        });
+    }
+
     // Content moderation functions
     async approveContent(type, id) {
         try {
@@ -907,12 +1042,22 @@ class HolwertAdmin {
             if (response.ok) {
                 const result = await response.json().catch(() => ({}));
                 this.showNotification(result.message || 'Goedgekeurd', 'success');
+                if (type === 'organization' && result) {
+                    if (result.temporary_password && result.dashboard_login_email) {
+                        this.showOrganizationDashboardCredentialsModal(result);
+                    } else if (result.user_notice) {
+                        this.showNotification(this.escHtml(result.user_notice), 'info');
+                    }
+                }
                 this.loadDashboard();
                 this.loadPendingContent();
                 this.loadModeration();
                 this.loadNotificationCounts();
                 if (typeof this.loadOrganizations === 'function') {
                     this.loadOrganizations();
+                }
+                if (typeof this.loadUsers === 'function') {
+                    this.loadUsers();
                 }
             } else {
                 const error = await response.json().catch(() => ({}));
@@ -1223,44 +1368,55 @@ class HolwertAdmin {
 
     async showCreateUserModal() {
         const self = this;
-        await this.ensureOrganizationsListForUsers();
         const modal = document.createElement('div');
         modal.className = 'modal-overlay';
         modal.style.display = 'flex';
         modal.innerHTML = `
             <div class="modal-content">
                 <div class="modal-header">
-                    <h3>Nieuwe gebruiker</h3>
+                    <h3>Nieuwe dorpsbewoner (app)</h3>
                     <button type="button" class="modal-close">
                         <i class="fas fa-times"></i>
                     </button>
                 </div>
                 <div class="modal-body">
                     <form id="createUserForm" class="edit-form">
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="createFirstName">Voornaam *</label>
-                                <input type="text" id="createFirstName" name="first_name" required>
-                            </div>
-                            <div class="form-group">
-                                <label for="createLastName">Achternaam *</label>
-                                <input type="text" id="createLastName" name="last_name" required>
-                            </div>
-                        </div>
+                        <p class="text-muted" style="font-size:0.9rem;margin-bottom:1rem;line-height:1.45;">
+                            Account voor de dorpsapp. Voor een organisatie-webdashboard: ga naar <strong>Organisaties</strong> en kies <strong>Dashboard-account</strong>.
+                        </p>
                         <div class="form-group">
                             <label for="createEmail">E-mail *</label>
-                            <input type="email" id="createEmail" name="email" required>
+                            <input type="email" id="createEmail" name="email" required autocomplete="email">
                         </div>
                         <div class="form-group">
                             <label for="createPassword">Wachtwoord *</label>
-                            <input type="password" id="createPassword" name="password" required minlength="6">
+                            <input type="password" id="createPassword" name="password" required minlength="6" autocomplete="new-password">
+                        </div>
+                        <div class="form-row" id="createNameRow">
+                            <div class="form-group">
+                                <label for="createFirstName">Voornaam *</label>
+                                <input type="text" id="createFirstName" name="first_name" required autocomplete="given-name">
+                            </div>
+                            <div class="form-group">
+                                <label for="createLastName">Achternaam *</label>
+                                <input type="text" id="createLastName" name="last_name" required autocomplete="family-name">
+                            </div>
                         </div>
                         <div class="form-group">
-                            <label for="createOrganizationId">Organisatie (dashboard)</label>
-                            <select id="createOrganizationId" name="organization_id">
-                                ${this.buildOrganizationSelectHtml(null)}
+                            <label for="createPhone">Telefoon</label>
+                            <input type="tel" id="createPhone" name="phone" autocomplete="tel" placeholder="Optioneel">
+                        </div>
+                        <div class="form-group">
+                            <label for="createRelationship">Relatie met Holwert *</label>
+                            <select id="createRelationship" name="relationship_with_holwert" required>
+                                <option value="" disabled selected>— Kies —</option>
+                                <option value="resident">Inwoner</option>
+                                <option value="former_resident">Oud-inwoner</option>
+                                <option value="vacation_home">Vakantiewoning</option>
+                                <option value="interested">Geïnteresseerde</option>
+                                <option value="tourist">Toerist</option>
                             </select>
-                            <small style="display:block;margin-top:0.35rem;color:#666;">Kies een organisatie voor een contactpersoon die het organisatie-dashboard gebruikt. Laat leeg voor een gewone dorpsbewoner.</small>
+                            <small style="display:block;margin-top:0.35rem;color:#666;">Zelfde opties als in de app; nodig voor een volledig profiel.</small>
                         </div>
                     </form>
                 </div>
@@ -1287,41 +1443,180 @@ class HolwertAdmin {
             const last_name = document.getElementById('createLastName')?.value?.trim();
             const email = document.getElementById('createEmail')?.value?.trim();
             const password = document.getElementById('createPassword')?.value;
-            if (!first_name || !last_name || !email || !password || password.length < 6) {
-                this.showNotification('Vul alle velden in. Wachtwoord minimaal 6 tekens.', 'error');
+            const phoneRaw = document.getElementById('createPhone')?.value?.trim();
+            const relationship_with_holwert = document.getElementById('createRelationship')?.value?.trim();
+            if (!email || !password || password.length < 6) {
+                this.showNotification('Vul e-mail en wachtwoord in (minimaal 6 tekens).', 'error');
+                return;
+            }
+            if (!first_name || !last_name) {
+                this.showNotification('Voornaam en achternaam zijn verplicht.', 'error');
+                return;
+            }
+            if (!relationship_with_holwert) {
+                this.showNotification('Kies een relatie met Holwert.', 'error');
                 return;
             }
             if (!this.token) {
                 this.showNotification('Niet ingelogd. Log opnieuw in.', 'error');
                 return;
             }
-            const orgRaw = document.getElementById('createOrganizationId')?.value;
-            let organization_id = null;
-            if (orgRaw && orgRaw !== '') {
-                const n = parseInt(orgRaw, 10);
-                if (!Number.isNaN(n)) organization_id = n;
-            }
+            const payload = {
+                email,
+                password,
+                role: 'user',
+                is_active: true,
+                first_name,
+                last_name,
+                relationship_with_holwert,
+            };
+            if (phoneRaw) payload.phone = phoneRaw;
             const res = await fetch(`${this.apiBaseUrl}/admin/users`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${this.token}`
                 },
-                body: JSON.stringify({
-                    first_name,
-                    last_name,
-                    email,
-                    password,
-                    role: 'user',
-                    is_active: true,
-                    organization_id
-                })
+                body: JSON.stringify(payload),
             });
             const data = await res.json().catch(() => ({}));
             if (res.ok) {
-                this.showNotification('Gebruiker succesvol aangemaakt', 'success');
+                this.showNotification('Dorpsbewoner succesvol aangemaakt', 'success');
                 document.getElementById('createFirstName')?.closest('.modal-overlay')?.remove();
                 this.loadUsers();
+            } else {
+                const msg = data.error || data.message || `HTTP ${res.status}`;
+                this.showNotification(msg, 'error');
+            }
+        } catch (e) {
+            this.showNotification('Fout: ' + (e?.message || e), 'error');
+        }
+    }
+
+    /** Organisatie-dashboard: alleen e-mail, wachtwoord en organisatie (naam volgt organisatie op de server). */
+    async showCreateOrgDashboardUserModal() {
+        const self = this;
+        if (!this.token) {
+            this.showNotification('Niet ingelogd. Log opnieuw in.', 'error');
+            return;
+        }
+        this.organizationsList = [];
+        await this.ensureOrganizationsListForUsers();
+        const modal = document.createElement('div');
+        modal.className = 'modal-overlay';
+        modal.style.display = 'flex';
+        const hasOrgs = (this.organizationsList || []).length > 0;
+        modal.innerHTML = `
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Dashboard-account (organisatie)</h3>
+                    <button type="button" class="modal-close" aria-label="Sluiten">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <form id="createOrgDashUserForm" class="edit-form">
+                        <p class="text-muted" style="font-size:0.9rem;margin-bottom:1rem;line-height:1.45;">
+                            Alleen voor inlog op het organisatie-webdashboard. De weergavenaam wordt de organisatienaam. Voor dorpsapp-bewoners: gebruik <strong>Gebruikers → Nieuwe dorpsbewoner</strong>.
+                        </p>
+                        ${
+                            !hasOrgs
+                                ? `<p class="text-muted" style="margin-bottom:1rem;">Er is nog geen organisatie. Maak eerst een organisatie aan (knop hieronder), daarna kun je het account koppelen.</p>`
+                                : ''
+                        }
+                        <div class="form-group">
+                            <label for="createOrgDashOrganizationId">Organisatie *</label>
+                            <select id="createOrgDashOrganizationId" name="organization_id" required ${!hasOrgs ? 'disabled' : ''}>
+                                ${hasOrgs ? this.buildOrganizationSelectHtml(null, { requiredPick: true }) : '<option value="">— Geen organisaties —</option>'}
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <button type="button" class="btn btn-secondary btn-sm" id="createOrgDashNewOrgBtn">
+                                <i class="fas fa-plus"></i> Eerst nieuwe organisatie aanmaken
+                            </button>
+                        </div>
+                        <div class="form-group">
+                            <label for="createOrgDashEmail">E-mail *</label>
+                            <input type="email" id="createOrgDashEmail" required autocomplete="email">
+                        </div>
+                        <div class="form-group">
+                            <label for="createOrgDashPassword">Wachtwoord *</label>
+                            <input type="password" id="createOrgDashPassword" required minlength="6" autocomplete="new-password">
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-modal-close>Annuleren</button>
+                    <button type="button" class="btn btn-primary" id="createOrgDashSubmitBtn" ${!hasOrgs ? 'disabled' : ''}>Account aanmaken</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        const close = () => modal.remove();
+        modal.querySelector('.modal-close')?.addEventListener('click', close);
+        modal.querySelector('[data-modal-close]')?.addEventListener('click', close);
+        modal.querySelector('.modal-content')?.addEventListener('click', (e) => e.stopPropagation());
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) close();
+        });
+        modal.querySelector('#createOrgDashNewOrgBtn')?.addEventListener('click', () => {
+            self.showCreateOrganizationModal((createdOrg) => {
+                const sel = document.getElementById('createOrgDashOrganizationId');
+                const submitBtn = document.getElementById('createOrgDashSubmitBtn');
+                if (!sel) return;
+                sel.removeAttribute('disabled');
+                sel.innerHTML = self.buildOrganizationSelectHtml(createdOrg?.id, { requiredPick: true });
+                sel.value = String(createdOrg.id);
+                if (submitBtn) submitBtn.removeAttribute('disabled');
+            });
+        });
+        modal.querySelector('#createOrgDashSubmitBtn')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            void self.saveNewOrgDashboardUser();
+        });
+    }
+
+    async saveNewOrgDashboardUser() {
+        try {
+            const orgRaw = document.getElementById('createOrgDashOrganizationId')?.value;
+            const email = document.getElementById('createOrgDashEmail')?.value?.trim();
+            const password = document.getElementById('createOrgDashPassword')?.value;
+            const n = parseInt(orgRaw, 10);
+            if (!orgRaw || Number.isNaN(n) || n <= 0) {
+                this.showNotification('Kies een organisatie.', 'error');
+                return;
+            }
+            if (!email || !password || password.length < 6) {
+                this.showNotification('Vul e-mail en wachtwoord in (minimaal 6 tekens).', 'error');
+                return;
+            }
+            if (!this.token) {
+                this.showNotification('Niet ingelogd. Log opnieuw in.', 'error');
+                return;
+            }
+            const payload = {
+                email,
+                password,
+                role: 'user',
+                is_active: true,
+                organization_id: n,
+                first_name: '',
+                last_name: '',
+            };
+            const res = await fetch(`${this.apiBaseUrl}/admin/users`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.token}`
+                },
+                body: JSON.stringify(payload),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok) {
+                this.showNotification('Dashboard-account aangemaakt', 'success');
+                document.getElementById('createOrgDashEmail')?.closest('.modal-overlay')?.remove();
+                this.loadUsers();
+                if (typeof this.loadOrganizations === 'function') this.loadOrganizations();
             } else {
                 const msg = data.error || data.message || `HTTP ${res.status}`;
                 this.showNotification(msg, 'error');
@@ -1428,6 +1723,7 @@ class HolwertAdmin {
                     this.displayOrganizations(sorted);
                 } else {
                     console.log('No organizations found in response');
+                    this.organizationsList = [];
                     const container = document.getElementById('organizationsTableBody');
                     if (container) {
                         container.innerHTML = '<tr><td colspan="5" class="empty-message">Geen organisaties gevonden</td></tr>';
@@ -1485,9 +1781,20 @@ class HolwertAdmin {
         }
     }
 
-    buildOrganizationSelectHtml(selectedId) {
+    /**
+     * @param {number|string|null|undefined} selectedId
+     * @param {{ requiredPick?: boolean }} [opts] — `requiredPick`: geen «geen organisatie»; eerste optie is placeholder.
+     */
+    buildOrganizationSelectHtml(selectedId, opts = {}) {
         const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
-        let html = `<option value="">${esc('— Geen (geen organisatie-dashboard) —')}</option>`;
+        const requiredPick = !!opts.requiredPick;
+        let html = '';
+        if (requiredPick) {
+            const selPh = selectedId == null || selectedId === '' ? ' selected' : '';
+            html += `<option value="" disabled${selPh}>${esc('— Kies een organisatie —')}</option>`;
+        } else {
+            html += `<option value="">${esc('— Geen (geen organisatie-dashboard) —')}</option>`;
+        }
         for (const org of this.organizationsList || []) {
             const sel = String(selectedId ?? '') === String(org.id) ? ' selected' : '';
             html += `<option value="${org.id}"${sel}>${esc(org.name || `Organisatie ${org.id}`)}</option>`;
@@ -1526,7 +1833,10 @@ class HolwertAdmin {
         return uploadJson.imageUrl || null;
     }
 
-    showCreateOrganizationModal() {
+    /**
+     * @param {(createdOrganization: object) => void} [onCreatedOrg] — optioneel, na succesvol aanmaken (bijv. dashboard-accountmodal bijwerken).
+     */
+    showCreateOrganizationModal(onCreatedOrg) {
         const self = this;
         if (!this.token) {
             this.showNotification('Niet ingelogd. Log opnieuw in.', 'error');
@@ -1685,6 +1995,7 @@ class HolwertAdmin {
                     return;
                 }
                 const newId = data.organization?.id;
+                const createdOrg = data.organization;
                 if (logoFile && newId) {
                     try {
                         const uploaded = await self.uploadOrganizationLogo(newId, logoFile);
@@ -1703,9 +2014,16 @@ class HolwertAdmin {
                         self.showNotification(`Organisatie aangemaakt, maar logo upload mislukt: ${upErr.message || upErr}`, 'warning');
                     }
                 }
+                await self.loadOrganizations();
                 self.showNotification('Organisatie aangemaakt', 'success');
+                if (typeof onCreatedOrg === 'function' && createdOrg) {
+                    try {
+                        onCreatedOrg(createdOrg);
+                    } catch (cbErr) {
+                        console.warn('onCreatedOrg:', cbErr);
+                    }
+                }
                 close();
-                self.loadOrganizations();
             } catch (e) {
                 console.error(e);
                 self.showNotification('Fout bij aanmaken organisatie', 'error');
@@ -1995,18 +2313,7 @@ class HolwertAdmin {
                     });
                 }
                 
-                // Add pending news
-                if (data.news && data.news.length > 0) {
-                    data.news.forEach((news) => {
-                        allPending.push({
-                            type: 'news',
-                            id: news.id,
-                            title: news.name || news.title || 'Zonder titel',
-                            meta: `Nieuws • ${this.formatDate(news.published_at || news.created_at)}`,
-                            icon: 'newspaper',
-                        });
-                    });
-                }
+                // Geen nieuws in moderatie: organisaties beheren publicatie/concept zelf in hun dashboard.
 
                 if (data.events && data.events.length > 0) {
                     data.events.forEach((event) => {
