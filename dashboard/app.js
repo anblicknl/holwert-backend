@@ -772,14 +772,11 @@
     function refreshEventSameDayWarning(allEvents, excludeId) {
         const box = document.getElementById('eventSameDayWarning');
         const dateInput = document.getElementById('eventDate');
-        if (!box || !dateInput) { console.warn('[overlap] box of dateInput niet gevonden'); return; }
-        // Gebruik ook de losse datuminput als datetime-local nog geen volledige waarde heeft
+        if (!box || !dateInput) return;
+        // Gebruik ook de einddatuminput als datetime-local nog geen volledige waarde heeft
         const rawVal = dateInput.value || document.getElementById('eventEndDate')?.value || '';
         const dayKey = calendarDayKey(rawVal);
-        console.log('[overlap] check — dayKey:', dayKey, '| events in lijst:', allEvents.length, '| excludeId:', excludeId);
-        console.log('[overlap] event_date-waardes:', allEvents.map(e => e.event_date));
         const others = otherEventsOnSameCalendarDay(allEvents, dayKey, excludeId);
-        console.log('[overlap] gevonden op zelfde dag:', others.map(e => e.title));
         if (!others.length) {
             box.hidden = true;
             box.style.display = '';
