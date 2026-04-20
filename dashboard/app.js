@@ -786,12 +786,15 @@
             box.textContent = '';
             return;
         }
-        const names = others.map((e) => e.title || 'Zonder titel').map((t) => escapeHtml(t)).join(', ');
+        const nameList = others.map((e) => {
+            const org = e.organization_name ? ` (${escapeHtml(e.organization_name)})` : '';
+            return '<em>' + escapeHtml(e.title || 'Zonder titel') + '</em>' + org;
+        }).join(', ');
         box.hidden = false;
         box.style.display = 'block';
         box.innerHTML =
-            '⚠️ <strong>LET OP:</strong> jullie hebben op <strong>deze dag</strong> al een evenement gepland: ' +
-            '<em>' + names + '</em>' +
+            '⚠️ <strong>LET OP:</strong> er staat op <strong>deze dag</strong> al een evenement in de agenda: ' +
+            nameList +
             '. Je kunt dit evenement gewoon opslaan — kies bewust of je liever een andere dag pakt om meer bezoekers te trekken.';
     }
 
@@ -871,21 +874,13 @@
             overlay.querySelector('.modal-close').addEventListener('click', () => overlay.remove());
             overlay.querySelector('.modal-close-btn').addEventListener('click', () => overlay.remove());
 
+            // Haal ALLE events van ALLE organisaties op voor de overlap-check.
+            // Gebruik de publieke /api/events route (geen auth vereist, max 500 items).
             let allOrgEvents = [];
             try {
-                // Haal alle events op (ook archief) zodat de overlap-check volledig is
-                const [futRes, pastRes] = await Promise.all([
-                    fetch(`${apiBase}/org/events?limit=200`, { headers: authHeaders() }),
-                    fetch(`${apiBase}/org/events?limit=200&upcoming=false`, { headers: authHeaders() }),
-                ]);
-                if (futRes.ok) allOrgEvents.push(...((await futRes.json()).events || []));
-                if (pastRes.ok) {
-                    const pastEvs = (await pastRes.json()).events || [];
-                    // Dedup op id
-                    const existingIds = new Set(allOrgEvents.map((e) => e.id));
-                    pastEvs.forEach((e) => { if (!existingIds.has(e.id)) allOrgEvents.push(e); });
-                }
-            } catch (e) { /* geen extra melding; waarschuwing werkt dan niet */ }
+                const allRes = await fetch(`${apiBase}/events?limit=500`);
+                if (allRes.ok) allOrgEvents = (await allRes.json()).events || [];
+            } catch (e) { /* geen melding; waarschuwing werkt dan niet */ }
 
             const dateInputEl = document.getElementById('eventDate');
             const endDateInputEl = document.getElementById('eventEndDate');
