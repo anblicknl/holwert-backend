@@ -584,7 +584,7 @@
                 : '';
             const titleHtml = isPreview ? 'Artikel bekijken' : (article ? 'Artikel bewerken' : 'Nieuw artikel');
             const publishedAtValue = article?.published_at
-                ? new Date(article.published_at).toISOString().slice(0, 16)
+                ? toDatetimeInputValue(article.published_at)
                 : '';
             const imageEditable = !isPreview
                 ? `${imgPreview}
@@ -735,6 +735,16 @@
     document.getElementById('addEventBtn')?.addEventListener('click', () => openEventModal(null, 'edit'));
 
     /**
+     * Zet een datum-string (MySQL "YYYY-MM-DD HH:MM:SS" of ISO met Z) om naar
+     * een waarde voor <input type="datetime-local"> ZONDER UTC-conversie.
+     * Evenementtijden worden als naïeve lokale Amsterdam-tijd behandeld.
+     */
+    function toDatetimeInputValue(val) {
+        if (!val) return '';
+        return String(val).replace(' ', 'T').replace(/Z$/, '').replace(/\+\d{2}:\d{2}$/, '').slice(0, 16);
+    }
+
+    /**
      * Kalenderdag als YYYY-MM-DD (zelfde logica voor datetime-local en API-datums).
      * Begint de string met een datum, dan die eerste 10 tekens (voorkomt timezone-shift).
      */
@@ -819,7 +829,7 @@
                         </div>
                         <div class="form-group">
                             <label>Datum</label>
-                            <input type="datetime-local" id="eventDate" value="${event?.event_date ? new Date(event.event_date).toISOString().slice(0, 16) : ''}" ${dis}>
+                            <input type="datetime-local" id="eventDate" value="${event?.event_date ? toDatetimeInputValue(event.event_date) : ''}" ${dis}>
                             <div id="eventSameDayWarning" class="event-same-day-warning" hidden role="status" aria-live="polite"></div>
                         </div>
                         <div class="form-group">
