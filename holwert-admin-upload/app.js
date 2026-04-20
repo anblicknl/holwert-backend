@@ -2619,6 +2619,18 @@ class HolwertAdmin {
         });
     }
 
+    /**
+     * Zet een datum-string (MySQL "YYYY-MM-DD HH:MM:SS" of ISO met Z) om naar
+     * een waarde voor <input type="datetime-local"> ZONDER UTC-conversie.
+     * Alle event-tijden worden als naïeve lokale tijd behandeld; de opgeslagen
+     * waarde moet 1-op-1 terugkomen in het veld om tijdverschuiving te voorkomen.
+     */
+    _toDatetimeInputValue(value) {
+        if (!value) return '';
+        // Normaliseer spatie → T, strip Z of +HH:MM timezone suffix
+        return String(value).replace(' ', 'T').replace(/Z$/, '').replace(/\+\d{2}:\d{2}$/, '').slice(0, 16);
+    }
+
     /** Lokale kalenderdatum voor <input type="date"> (niet UTC via toISOString). */
     _newsLocalDateForInput(value) {
         if (value == null || value === '') return '';
@@ -3500,11 +3512,13 @@ class HolwertAdmin {
         const modal = document.createElement('div');
         modal.className = 'modal-overlay';
         
-        // Format dates for input fields
-        const startDate = event.event_date ? new Date(event.event_date).toISOString().split('T')[0] : '';
-        const startTime = event.event_date ? new Date(event.event_date).toTimeString().slice(0, 5) : '';
-        const endDate = event.event_end_date ? new Date(event.event_end_date).toISOString().split('T')[0] : '';
-        const endTime = event.event_end_date ? new Date(event.event_end_date).toTimeString().slice(0, 5) : '';
+        // Format dates for input fields — gebruik _toDatetimeInputValue zodat de opgeslagen
+        // tijd (behandeld als lokaal/naïef) 1-op-1 terugkomt in het veld, zonder UTC-verschuiving.
+        const _dtv = (v) => this._toDatetimeInputValue(v);
+        const startDate = event.event_date ? _dtv(event.event_date).slice(0, 10) : '';
+        const startTime = event.event_date ? _dtv(event.event_date).slice(11, 16) : '';
+        const endDate = event.event_end_date ? _dtv(event.event_end_date).slice(0, 10) : '';
+        const endTime = event.event_end_date ? _dtv(event.event_end_date).slice(11, 16) : '';
         
         modal.innerHTML = `
             <div class="modal-content">
@@ -5436,8 +5450,8 @@ class HolwertAdmin {
                     initial = {
                         title: ev.title || '',
                         description: ev.description || '',
-                        event_date: ev.event_date ? new Date(ev.event_date).toISOString().slice(0,16) : '',
-                        event_end_date: ev.event_end_date ? new Date(ev.event_end_date).toISOString().slice(0,16) : (ev.event_date ? new Date(ev.event_date).toISOString().slice(0,16) : ''),
+                        event_date: ev.event_date ? this._toDatetimeInputValue(ev.event_date) : '',
+                        event_end_date: ev.event_end_date ? this._toDatetimeInputValue(ev.event_end_date) : (ev.event_date ? this._toDatetimeInputValue(ev.event_date) : ''),
                         location: ev.location || '',
                         organization_id: ev.organization_id || '',
                         organization_name: ev.organization_name || '',
@@ -5733,8 +5747,8 @@ class HolwertAdmin {
             const body = {
                 title,
                 description,
-                event_date: new Date(event_date_raw).toISOString(),
-                event_end_date: event_end_date_raw ? new Date(event_end_date_raw).toISOString() : null,
+                event_date: event_date_raw,
+                event_end_date: event_end_date_raw || null,
                 location,
                 organization_id,
                 is_published: true

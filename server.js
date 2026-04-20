@@ -4408,8 +4408,8 @@ app.put('/api/admin/events/:id', authenticateToken, requireAdmin, async (req, re
     const push = (v) => { params.push(v); return `?`; };
     if (title !== undefined) sets.push(`title = ${push(title)}`);
     if (description !== undefined) sets.push(`description = ${push(description)}`);
-    if (event_date !== undefined) sets.push(`event_date = ${push(event_date)}`);
-    if (end_date !== undefined || event_end_date !== undefined) sets.push(`event_end_date = ${push(event_end_date !== undefined ? event_end_date : end_date)}`);
+    if (event_date !== undefined) sets.push(`event_date = ${push(toMysqlDateTime(event_date))}`);
+    if (end_date !== undefined || event_end_date !== undefined) sets.push(`event_end_date = ${push(toMysqlDateTime(event_end_date !== undefined ? event_end_date : end_date))}`);
     if (location !== undefined) sets.push(`location = ${push(location)}`);
     if (organization_id !== undefined) sets.push(`organization_id = ${push(organization_id)}`);
     if (status !== undefined) sets.push(`status = ${push(status)}`);
