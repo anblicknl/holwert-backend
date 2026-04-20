@@ -773,19 +773,23 @@
         const box = document.getElementById('eventSameDayWarning');
         const dateInput = document.getElementById('eventDate');
         if (!box || !dateInput) return;
-        const dayKey = calendarDayKey(dateInput.value);
+        // Gebruik ook de losse datuminput als datetime-local nog geen volledige waarde heeft
+        const rawVal = dateInput.value || document.getElementById('eventEndDate')?.value || '';
+        const dayKey = calendarDayKey(rawVal);
         const others = otherEventsOnSameCalendarDay(allEvents, dayKey, excludeId);
         if (!others.length) {
             box.hidden = true;
+            box.style.display = '';
             box.textContent = '';
             return;
         }
         const names = others.map((e) => e.title || 'Zonder titel').map((t) => escapeHtml(t)).join(', ');
         box.hidden = false;
+        box.style.display = 'block';
         box.innerHTML =
-            '<strong>LET OP:</strong> er staat op <strong>deze dag</strong> al een evenement in jullie agenda: ' +
-            names +
-            '. Je kunt dit evenement gewoon opslaan; kies bewust of je liever een andere dag pakt om meer bezoekers te trekken.';
+            '⚠️ <strong>LET OP:</strong> jullie hebben op <strong>deze dag</strong> al een evenement gepland: ' +
+            '<em>' + names + '</em>' +
+            '. Je kunt dit evenement gewoon opslaan — kies bewust of je liever een andere dag pakt om meer bezoekers te trekken.';
     }
 
     function openEventModal(id, mode = 'edit') {
@@ -827,14 +831,28 @@
                             <label>Beschrijving</label>
                             <textarea id="eventDescription" rows="3" ${ro}>${escapeHtml(event?.description || '')}</textarea>
                         </div>
-                        <div class="form-group">
-                            <label>Datum</label>
-                            <input type="datetime-local" id="eventDate" value="${event?.event_date ? toDatetimeInputValue(event.event_date) : ''}" ${dis}>
-                            <div id="eventSameDayWarning" class="event-same-day-warning" hidden role="status" aria-live="polite"></div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Begindatum &amp; -tijd *</label>
+                                <input type="datetime-local" id="eventDate" value="${event?.event_date ? toDatetimeInputValue(event.event_date) : ''}" ${dis}>
+                                <div id="eventSameDayWarning" class="event-same-day-warning" hidden role="status" aria-live="polite"></div>
+                            </div>
+                            <div class="form-group">
+                                <label>Einddatum &amp; -tijd</label>
+                                <input type="datetime-local" id="eventEndDate" value="${event?.event_end_date ? toDatetimeInputValue(event.event_end_date) : ''}" ${dis}>
+                                <p class="form-hint">Leeg laten voor eendaags evenement.</p>
+                            </div>
                         </div>
-                        <div class="form-group">
-                            <label>Locatie</label>
-                            <input type="text" id="eventLocation" value="${escapeHtml(event?.location || '')}" ${ro}>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Locatie</label>
+                                <input type="text" id="eventLocation" value="${escapeHtml(event?.location || '')}" ${ro}>
+                            </div>
+                            <div class="form-group">
+                                <label>Prijs</label>
+                                <input type="number" id="eventPrice" min="0" step="0.01" placeholder="0.00 = gratis" value="${event?.price != null ? event.price : ''}" ${ro}>
+                                <p class="form-hint">Leeg laten of 0 = gratis toegang.</p>
+                            </div>
                         </div>
                         <div class="form-group">
                             <label>Afbeelding</label>
@@ -852,19 +870,30 @@
 
             let allOrgEvents = [];
             try {
-                const evRes = await fetch(`${apiBase}/org/events?limit=200`, { headers: authHeaders() });
-                if (evRes.ok) {
-                    const evData = await evRes.json();
-                    allOrgEvents = evData.events || [];
+                // Haal alle events op (ook archief) zodat de overlap-check volledig is
+                const [futRes, pastRes] = await Promise.all([
+                    fetch(`${apiBase}/org/events?limit=200`, { headers: authHeaders() }),
+                    fetch(`${apiBase}/org/events?limit=200&upcoming=false`, { headers: authHeaders() }),
+                ]);
+                if (futRes.ok) allOrgEvents.push(...((await futRes.json()).events || []));
+                if (pastRes.ok) {
+                    const pastEvs = (await pastRes.json()).events || [];
+                    // Dedup op id
+                    const existingIds = new Set(allOrgEvents.map((e) => e.id));
+                    pastEvs.forEach((e) => { if (!existingIds.has(e.id)) allOrgEvents.push(e); });
                 }
-            } catch (e) {
-                /* geen extra melding; waarschuwing werkt dan niet */
-            }
+            } catch (e) { /* geen extra melding; waarschuwing werkt dan niet */ }
+
             const dateInputEl = document.getElementById('eventDate');
+            const endDateInputEl = document.getElementById('eventEndDate');
             const runSameDayCheck = () => refreshEventSameDayWarning(allOrgEvents, id);
             if (!isView && dateInputEl) {
                 dateInputEl.addEventListener('input', runSameDayCheck);
                 dateInputEl.addEventListener('change', runSameDayCheck);
+                if (endDateInputEl) {
+                    endDateInputEl.addEventListener('input', runSameDayCheck);
+                    endDateInputEl.addEventListener('change', runSameDayCheck);
+                }
                 runSameDayCheck();
             }
 
@@ -887,11 +916,15 @@
                         btn.disabled = false;
                         btn.textContent = 'Opslaan';
                     }
+                    const rawEndDate = document.getElementById('eventEndDate')?.value || '';
+                    const rawPrice = document.getElementById('eventPrice')?.value || '';
                     const payload = {
                         title: document.getElementById('eventTitle').value.trim(),
                         description: document.getElementById('eventDescription').value.trim(),
                         event_date: document.getElementById('eventDate').value || null,
+                        event_end_date: rawEndDate || null,
                         location: document.getElementById('eventLocation').value.trim() || null,
+                        price: rawPrice !== '' ? parseFloat(rawPrice) : null,
                         image_url: imageUrl || null
                     };
                     const url = id ? `${apiBase}/org/events/${id}` : `${apiBase}/org/events`;
