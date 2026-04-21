@@ -6417,7 +6417,7 @@ async function ensurePracticalInfoTable() {
       id INT AUTO_INCREMENT PRIMARY KEY,
       title VARCHAR(255) NOT NULL,
       subtitle VARCHAR(255),
-      icon VARCHAR(50) DEFAULT 'information-circle-outline',
+      icon VARCHAR(500) DEFAULT 'information-circle-outline',
       content TEXT,
       type ENUM('info','schedule','link','phone') DEFAULT 'info',
       url VARCHAR(500),
@@ -6426,6 +6426,10 @@ async function ensurePracticalInfoTable() {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )`);
+    // Vergroot de icon-kolom als die nog VARCHAR(50) is (legacy).
+    await executeQuery(
+      `ALTER TABLE practical_info MODIFY COLUMN icon VARCHAR(500) DEFAULT 'information-circle-outline'`
+    );
   } catch (e) {
     console.error('ensurePracticalInfoTable error:', e.message);
   }
