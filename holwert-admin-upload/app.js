@@ -4055,71 +4055,9 @@ class HolwertAdmin {
                         <div class="form-group">
                             <label for="practicalIcon">Icoon (voor in de app)</label>
                             <input type="text" id="practicalIcon" value="${(item?.icon || 'information-circle-outline').replace(/"/g, '&quot;')}" placeholder="Ionicons-naam, of kies hieronder">
-                            <p class="text-muted" style="margin: 0.5rem 0 0.25rem 0; font-size: 0.85rem;">Icooncatalogus – klik op een icoon om het veld in te vullen:</p>
-                            <div class="practical-icon-grid">
-                                <div class="practical-icon-group-label">Algemeen</div>
-                                <button type="button" class="practical-icon-option" data-icon="information-circle-outline" title="Info"><i class="fas fa-info-circle"></i><span>Info</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="help-circle-outline" title="Vraag / FAQ"><i class="fas fa-question-circle"></i><span>FAQ</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="alert-circle-outline" title="Waarschuwing"><i class="fas fa-exclamation-circle"></i><span>Waarschuwing</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="star-outline" title="Bijzonder"><i class="fas fa-star"></i><span>Uitgelicht</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="bookmark-outline" title="Opslaan / Opmerken"><i class="fas fa-bookmark"></i><span>Notitie</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="megaphone-outline" title="Aankondiging"><i class="fas fa-bullhorn"></i><span>Aankondiging</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="notifications-outline" title="Melding"><i class="fas fa-bell"></i><span>Melding</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="document-text-outline" title="Document"><i class="fas fa-file-alt"></i><span>Document</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="newspaper-outline" title="Nieuws / Krant"><i class="fas fa-newspaper"></i><span>Nieuws</span></button>
-                                <div class="practical-icon-group-label">Contact &amp; Communicatie</div>
-                                <button type="button" class="practical-icon-option" data-icon="call-outline" title="Telefoon"><i class="fas fa-phone"></i><span>Telefoon</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="mail-outline" title="E-mail"><i class="fas fa-envelope"></i><span>E-mail</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="chatbubble-outline" title="Bericht / Chat"><i class="fas fa-comment"></i><span>Bericht</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="globe-outline" title="Website"><i class="fas fa-globe"></i><span>Website</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="open-outline" title="Externe link"><i class="fas fa-external-link-alt"></i><span>Link</span></button>
-                                <div class="practical-icon-group-label">Mensen &amp; Organisaties</div>
-                                <button type="button" class="practical-icon-option" data-icon="person-outline" title="Persoon"><i class="fas fa-user"></i><span>Persoon</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="people-outline" title="Groep / Vereniging"><i class="fas fa-users"></i><span>Groep</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="person-circle-outline" title="Contactpersoon"><i class="fas fa-user-circle"></i><span>Contact</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="shield-outline" title="Politie / Wijkagent / Veiligheid"><i class="fas fa-shield-alt"></i><span>Politie</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="briefcase-outline" title="Werk / Beroep"><i class="fas fa-briefcase"></i><span>Werk</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="business-outline" title="Bedrijf / Gebouw"><i class="fas fa-building"></i><span>Bedrijf</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="school-outline" title="School"><i class="fas fa-school"></i><span>School</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="library-outline" title="Bibliotheek"><i class="fas fa-book"></i><span>Bibliotheek</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="accessibility-outline" title="Toegankelijkheid"><i class="fas fa-wheelchair"></i><span>Toegankelijk</span></button>
-                                <div class="practical-icon-group-label">Locatie &amp; Gebouwen</div>
-                                <button type="button" class="practical-icon-option" data-icon="map-outline" title="Locatie / Adres"><i class="fas fa-map-marker-alt"></i><span>Locatie</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="home-outline" title="Woning / Thuis"><i class="fas fa-home"></i><span>Woning</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="storefront-outline" title="Winkel"><i class="fas fa-store"></i><span>Winkel</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="restaurant-outline" title="Horeca / Eten"><i class="fas fa-utensils"></i><span>Horeca</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="cafe-outline" title="Café / Koffie"><i class="fas fa-coffee"></i><span>Café</span></button>
-                                <div class="practical-icon-group-label">Zorg &amp; Veiligheid</div>
-                                <button type="button" class="practical-icon-option" data-icon="medkit-outline" title="Huisarts / EHBO"><i class="fas fa-medkit"></i><span>EHBO</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="heart-outline" title="Zorg / Welzijn"><i class="fas fa-heart"></i><span>Welzijn</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="fitness-outline" title="Gezondheid"><i class="fas fa-heartbeat"></i><span>Gezondheid</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="flame-outline" title="Brandweer / Brandgevaar"><i class="fas fa-fire"></i><span>Brandweer</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="bandage-outline" title="Verbandmiddelen"><i class="fas fa-band-aid"></i><span>Verbandmiddelen</span></button>
-                                <div class="practical-icon-group-label">Vervoer</div>
-                                <button type="button" class="practical-icon-option" data-icon="car-outline" title="Auto / Parkeren"><i class="fas fa-car"></i><span>Auto</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="bus-outline" title="Bus"><i class="fas fa-bus"></i><span>Bus</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="train-outline" title="Trein"><i class="fas fa-train"></i><span>Trein</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="bicycle-outline" title="Fiets"><i class="fas fa-bicycle"></i><span>Fiets</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="walk-outline" title="Wandelen"><i class="fas fa-walking"></i><span>Wandelen</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="boat-outline" title="Boot / Water"><i class="fas fa-ship"></i><span>Boot</span></button>
-                                <div class="practical-icon-group-label">Natuur &amp; Omgeving</div>
-                                <button type="button" class="practical-icon-option" data-icon="leaf-outline" title="Natuur / Groen"><i class="fas fa-leaf"></i><span>Natuur</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="water-outline" title="Water"><i class="fas fa-tint"></i><span>Water</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="flower-outline" title="Tuin / Plant"><i class="fas fa-seedling"></i><span>Tuin</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="paw-outline" title="Dieren"><i class="fas fa-paw"></i><span>Dieren</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="trash-outline" title="Afval / Containers"><i class="fas fa-trash"></i><span>Afval</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="sunny-outline" title="Weer / Zon"><i class="fas fa-sun"></i><span>Weer</span></button>
-                                <div class="practical-icon-group-label">Activiteiten &amp; Vrije tijd</div>
-                                <button type="button" class="practical-icon-option" data-icon="calendar-outline" title="Agenda / Evenement"><i class="fas fa-calendar-alt"></i><span>Agenda</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="time-outline" title="Openingstijden"><i class="fas fa-clock"></i><span>Tijden</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="musical-notes-outline" title="Muziek"><i class="fas fa-music"></i><span>Muziek</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="football-outline" title="Sport"><i class="fas fa-running"></i><span>Sport</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="camera-outline" title="Fotografie"><i class="fas fa-camera"></i><span>Foto</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="film-outline" title="Film / Theater"><i class="fas fa-film"></i><span>Film</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="book-outline" title="Lezen / Literatuur"><i class="fas fa-book-open"></i><span>Lezen</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="hammer-outline" title="Klussen / Onderhoud"><i class="fas fa-hammer"></i><span>Klussen</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="cash-outline" title="Geld / Kosten"><i class="fas fa-money-bill"></i><span>Kosten</span></button>
-                            </div>
+                            <p class="text-muted" style="margin: 0.5rem 0 0.25rem 0; font-size: 0.85rem;">Alle iconen – zoek of scroll en klik om te selecteren:</p>
+                            <input type="search" id="practicalIconSearch" class="practical-icon-search" placeholder="Zoek bijv. 'phone', 'home', 'heart', 'mobile'…">
+                            <div id="practicalIconCatalog" class="practical-icon-catalog"></div>
                             <p class="text-muted" style="margin: 0.75rem 0 0.25rem 0; font-size: 0.85rem;"><i class="fas fa-portrait" style="margin-right: 4px;"></i> Of upload een eigen foto als icoon (bijv. wijkagent, logo van partner):</p>
                             <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 0.5rem; flex-wrap: wrap;">
                                 <label class="btn btn-secondary" style="cursor: pointer; margin: 0; padding: 0.35rem 0.75rem; font-size: 0.85rem;">
@@ -4186,33 +4124,152 @@ class HolwertAdmin {
             this.savePractical(item || null);
         });
 
-        // Icon catalog: klik op een icoon vult het veld
+        // ── Volledige Ionicons catalogus ──────────────────────────────────────
         const iconInput = overlay.querySelector('#practicalIcon');
-        const iconButtons = overlay.querySelectorAll('.practical-icon-option');
         const currentIcon = (item?.icon || 'information-circle-outline').trim();
-        iconButtons.forEach((btn) => {
-            if ((btn.getAttribute('data-icon') || '') === currentIcon) {
-                btn.classList.add('active');
-            }
-            btn.addEventListener('click', () => {
-                const value = btn.getAttribute('data-icon') || '';
-                if (iconInput) iconInput.value = value;
-                iconButtons.forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                // Verwijder eventuele foto-preview als een catalogus-icoon wordt gekozen
-                const previewEl = overlay.querySelector('#practicalIconPreview');
-                const statusEl = overlay.querySelector('#practicalIconUploadStatus');
-                if (previewEl) previewEl.style.display = 'none';
-                if (statusEl) statusEl.textContent = '';
+
+        // Alle Ionicons 5 outline-namen (opgeslagen als "naam-outline" in de app).
+        // Logo-iconen hebben geen -outline variant en staan al als volledige naam.
+        const ICONS_OUTLINE = [
+            'accessibility','add','add-circle','airplane','alarm','albums','alert','alert-circle',
+            'american-football','analytics','aperture','apps','archive',
+            'arrow-back','arrow-back-circle','arrow-down','arrow-down-circle',
+            'arrow-forward','arrow-forward-circle','arrow-redo','arrow-redo-circle',
+            'arrow-undo','arrow-undo-circle','arrow-up','arrow-up-circle',
+            'at','attach','backspace','bag','bag-add','bag-check','bag-handle','bag-remove',
+            'balloon','ban','bandage','bar-chart','barbell','barcode','baseball',
+            'basket','basketball','battery-charging','battery-dead','battery-full','battery-half',
+            'beaker','bed','beer','bicycle','bluetooth','boat','body','bonfire',
+            'book','bookmark','bookmarks','bowling-ball','briefcase','browsers','brush','bug',
+            'build','bulb','bus','business','cafe','calculator',
+            'calendar','calendar-clear','calendar-number',
+            'call','camera','camera-reverse','car','car-sport','card',
+            'caret-back','caret-back-circle','caret-down','caret-down-circle',
+            'caret-forward','caret-forward-circle','caret-up','caret-up-circle',
+            'cart','cash','cellular','chatbox','chatbox-ellipses',
+            'chatbubble','chatbubble-ellipses','chatbubbles',
+            'checkbox','checkmark','checkmark-circle','checkmark-done','checkmark-done-circle',
+            'chevron-back','chevron-down','chevron-down-circle',
+            'chevron-forward','chevron-up','chevron-up-circle',
+            'clipboard','close','close-circle','cloud','cloud-circle',
+            'cloud-done','cloud-download','cloud-offline','cloud-upload',
+            'code','code-slash','code-working','cog','color-fill','color-filter',
+            'color-palette','color-wand','compass','construct','contract','contrast',
+            'copy','create','crop','cube','cut','desktop','disc','document',
+            'document-attach','document-lock','document-text','documents','download',
+            'duplicate','ear','earth','easel','egg','ellipse',
+            'ellipsis-horizontal','ellipsis-horizontal-circle','ellipsis-vertical',
+            'enter','exit','expand','extension-puzzle','eye','eye-off','eyedrop',
+            'fast-food','female','file-tray','file-tray-full','file-tray-stacked',
+            'film','filter','finger-print','fish','fitness','flag','flame',
+            'flash','flash-off','flashlight','flask','flower','folder','folder-open',
+            'football','footsteps','funnel','game-controller','gift',
+            'git-branch','git-commit','git-compare','git-merge','git-network','git-pull-request',
+            'glasses','globe','golf','grid','hammer','hand-left','hand-right',
+            'happy','hardware-chip','headset','heart','heart-circle',
+            'heart-dislike','heart-dislike-circle','heart-half',
+            'help','help-buoy','help-circle','home','hourglass','ice-cream','id-card',
+            'image','images','infinite','information','information-circle',
+            'key','keypad','language','laptop','layers','leaf','library',
+            'link','list','locate','location','lock-closed','lock-open',
+            'log-in','log-out','magnet','mail','mail-open','mail-unread',
+            'male','male-female','man','map','medal','medkit','medical','megaphone',
+            'menu','mic','mic-circle','mic-off','mic-off-circle','mirror','moon','move',
+            'musical-note','musical-notes','navigate','newspaper',
+            'notifications','notifications-circle','notifications-off','notifications-off-circle',
+            'nuclear','nutrition','open','options','paper-plane','partly-sunny','pause',
+            'pause-circle','paw','pencil','people','person','person-add',
+            'person-circle','person-remove','phone-landscape','phone-portrait',
+            'pie-chart','pin','pint','pizza','planet','play','play-back',
+            'play-back-circle','play-circle','play-forward','play-forward-circle',
+            'play-skip-back','play-skip-back-circle','play-skip-forward','play-skip-forward-circle',
+            'podium','power','print','prism','pulse','push','qr-code',
+            'radio','radio-button-off','radio-button-on','rainy','reader','receipt',
+            'recording','refresh','refresh-circle','reload','reload-circle',
+            'remove','remove-circle','reorder-four','reorder-three','reorder-two',
+            'repeat','resize','restaurant','return-down-back','return-down-forward',
+            'return-up-back','return-up-forward','ribbon','rocket','rose','sad',
+            'save','scan','scan-circle','school','search','search-circle',
+            'send','server','settings','shapes','share','share-social',
+            'shield','shield-checkmark','shirt','shuffle','skull','snow','speedometer',
+            'square','star','star-half','stopwatch','storefront','subway','sunny',
+            'swap-horizontal','swap-vertical','telescope','tennisball','terminal',
+            'thermometer','thumbs-down','thumbs-up','thunderstorm','ticket',
+            'time','timer','today','toggle','trail-sign','train','transgender',
+            'trash','trash-bin','trending-down','trending-up','triangle','trophy','tv',
+            'umbrella','unlink','videocam','videocam-off',
+            'volume-high','volume-low','volume-medium','volume-mute','volume-off',
+            'walk','wallet','warning','watch','water','wifi','woman',
+        ];
+        const ICONS_LOGO = [
+            'logo-amazon','logo-android','logo-angular','logo-apple','logo-behance',
+            'logo-bitcoin','logo-chrome','logo-discord','logo-docker','logo-dribbble',
+            'logo-dropbox','logo-edge','logo-electron','logo-euro','logo-facebook',
+            'logo-figma','logo-firebase','logo-firefox','logo-flickr','logo-github',
+            'logo-gitlab','logo-google','logo-google-playstore','logo-html5',
+            'logo-instagram','logo-ionic','logo-javascript','logo-laravel',
+            'logo-linkedin','logo-markdown','logo-mastodon','logo-medium',
+            'logo-microsoft','logo-nodejs','logo-npm','logo-paypal','logo-pinterest',
+            'logo-python','logo-react','logo-reddit','logo-rss','logo-sass',
+            'logo-skype','logo-slack','logo-snapchat','logo-stackoverflow',
+            'logo-steam','logo-tumblr','logo-twitch','logo-twitter','logo-usd',
+            'logo-vercel','logo-vimeo','logo-vue','logo-whatsapp',
+            'logo-windows','logo-wordpress','logo-xbox','logo-yahoo','logo-youtube',
+        ];
+
+        // Bouw alle icon-namen: outline-iconen krijgen suffix -outline, logo's staan al als volledige naam
+        const ALL_ICONS = [
+            ...ICONS_OUTLINE.map(n => n + '-outline'),
+            ...ICONS_LOGO,
+        ];
+
+        const catalog = overlay.querySelector('#practicalIconCatalog');
+        const searchInput = overlay.querySelector('#practicalIconSearch');
+
+        const renderCatalog = (filter) => {
+            const q = (filter || '').toLowerCase().trim();
+            const filtered = q ? ALL_ICONS.filter(n => n.includes(q)) : ALL_ICONS;
+            catalog.innerHTML = '';
+            filtered.forEach(iconName => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'practical-icon-option' + (iconName === currentIcon ? ' active' : '');
+                btn.dataset.icon = iconName;
+                btn.title = iconName;
+                btn.innerHTML = '<ion-icon name="' + iconName + '"></ion-icon><span>' + iconName.replace(/-outline$/, '').replace(/^logo-/, '') + '</span>';
+                btn.addEventListener('click', () => {
+                    if (iconInput) iconInput.value = iconName;
+                    catalog.querySelectorAll('.practical-icon-option').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    const previewEl = overlay.querySelector('#practicalIconPreview');
+                    const statusEl = overlay.querySelector('#practicalIconUploadStatus');
+                    if (previewEl) previewEl.style.display = 'none';
+                    if (statusEl) statusEl.textContent = '';
+                });
+                catalog.appendChild(btn);
             });
+            if (!filtered.length) {
+                catalog.innerHTML = '<p style="padding: 1rem; color: #999; font-size: 0.85rem;">Geen iconen gevonden voor "' + q + '".</p>';
+            }
+        };
+
+        renderCatalog('');
+
+        if (searchInput) {
+            searchInput.addEventListener('input', () => renderCatalog(searchInput.value));
+        }
+
+        // Scroll het actieve icoon in beeld
+        requestAnimationFrame(() => {
+            const active = catalog.querySelector('.practical-icon-option.active');
+            if (active) active.scrollIntoView({ block: 'nearest' });
         });
 
-        // Foto-upload als icoon
+        // ── Foto-upload als icoon ─────────────────────────────────────────────
         const iconUploadInput = overlay.querySelector('#practicalIconUpload');
         const iconUploadStatus = overlay.querySelector('#practicalIconUploadStatus');
         const iconPreview = overlay.querySelector('#practicalIconPreview');
 
-        // Als er al een foto-URL in het veld staat, toon preview
         if (currentIcon.startsWith('http') && iconPreview) {
             iconPreview.src = currentIcon;
             iconPreview.style.display = 'block';
@@ -4244,7 +4301,7 @@ class HolwertAdmin {
                         iconInput.value = imgUrl;
                         if (iconPreview) { iconPreview.src = imgUrl; iconPreview.style.display = 'block'; }
                         if (iconUploadStatus) iconUploadStatus.textContent = 'Foto geüpload ✓';
-                        iconButtons.forEach(b => b.classList.remove('active'));
+                        catalog.querySelectorAll('.practical-icon-option').forEach(b => b.classList.remove('active'));
                     }
                 } catch (err) {
                     if (iconUploadStatus) iconUploadStatus.textContent = 'Upload mislukt: ' + err.message;
