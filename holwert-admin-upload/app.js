@@ -362,8 +362,30 @@ class HolwertAdmin {
         } else {
             console.error('Main screen element not found!');
         }
+
+        // Start automatische polling van notificatie-badges (elke 30 seconden)
+        this.startBadgePolling();
         
         console.log('=== END SHOW MAIN SCREEN ===');
+    }
+
+    startBadgePolling() {
+        // Voorkomen dat er meerdere intervals tegelijk lopen
+        if (this._badgePollTimer) clearInterval(this._badgePollTimer);
+        this._badgePollTimer = setInterval(() => {
+            if (this.token) {
+                this.loadNotificationCounts();
+            } else {
+                this.stopBadgePolling();
+            }
+        }, 30_000); // elke 30 seconden
+    }
+
+    stopBadgePolling() {
+        if (this._badgePollTimer) {
+            clearInterval(this._badgePollTimer);
+            this._badgePollTimer = null;
+        }
     }
 
     async handleLogin() {
@@ -573,6 +595,7 @@ class HolwertAdmin {
     }
 
     handleLogout() {
+        this.stopBadgePolling();
         this.token = null;
         this.currentUser = null;
         localStorage.removeItem('authToken');
@@ -747,8 +770,10 @@ class HolwertAdmin {
             });
             if (response.ok) {
                 const data = await response.json();
-                // Alleen concept-evenementen: openstaande organisaties hebben een eigen bolletje bij «Organisaties».
-                return parseInt(data.events, 10) || 0;
+                // Totaal openstaande items (organisaties + nieuws + evenementen)
+                return (parseInt(data.organizations, 10) || 0)
+                     + (parseInt(data.news, 10) || 0)
+                     + (parseInt(data.events, 10) || 0);
             }
         } catch (error) {
             console.error('Error getting moderation count:', error);
