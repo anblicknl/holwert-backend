@@ -5746,6 +5746,53 @@ app.get('/api/organizations', async (req, res) => {
 
 // Publieke organisatie-registratie (bv. formulier op holwert.appenvloed.com)
 // Maakt een organisatie aan met is_approved = false; verschijnt in admin voor moderatie.
+/**
+ * Stuur een notificatie-e-mail naar de beheerder wanneer een nieuwe organisatie
+ * zich heeft aangemeld. Gebruikt dezelfde Resend-integratie als wachtwoord-reset.
+ * Het doeladres staat in de env-variabele ADMIN_NOTIFICATION_EMAIL.
+ */
+async function sendNewOrgNotificationEmail({ orgName, orgEmail, orgId }) {
+  const key = process.env.RESEND_API_KEY;
+  const from = process.env.RESEND_FROM || 'Holwert Dorpsapp <onboarding@resend.dev>';
+  const to = process.env.ADMIN_NOTIFICATION_EMAIL;
+  if (!key || !to) {
+    console.log('[register] Notificatie-mail overgeslagen (RESEND_API_KEY of ADMIN_NOTIFICATION_EMAIL ontbreekt).');
+    return;
+  }
+  const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const adminUrl = 'https://holwert.appenvloed.com/admin/#organizations';
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      from,
+      to: [to],
+      subject: `🔔 Nieuwe aanmelding: ${orgName}`,
+      html: `
+        <h2 style="color:#1a1a2e">Nieuwe organisatie aangemeld</h2>
+        <p>Er heeft zich zojuist een nieuwe organisatie aangemeld voor de <strong>Holwert Dorpsapp</strong>.</p>
+        <table style="border-collapse:collapse;margin:1rem 0">
+          <tr><td style="padding:4px 12px 4px 0;color:#555">Naam</td><td><strong>${esc(orgName)}</strong></td></tr>
+          <tr><td style="padding:4px 12px 4px 0;color:#555">E-mail</td><td>${esc(orgEmail)}</td></tr>
+          <tr><td style="padding:4px 12px 4px 0;color:#555">ID</td><td>${esc(orgId)}</td></tr>
+        </table>
+        <p>
+          <a href="${adminUrl}" style="background:#1a1a2e;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block">
+            Bekijk in admin-panel →
+          </a>
+        </p>
+        <p style="color:#999;font-size:0.85em">Holwert Dorpsapp · automatische melding</p>
+      `,
+    }),
+  });
+  if (!res.ok) {
+    const t = await res.text();
+    console.error('[register] Resend-fout:', res.status, t);
+  } else {
+    console.log('[register] Notificatie-mail verstuurd naar', to);
+  }
+}
+
 app.post('/api/organizations/register', orgRegisterRateLimiter, async (req, res) => {
   try {
     const {
@@ -5817,6 +5864,12 @@ app.post('/api/organizations/register', orgRegisterRateLimiter, async (req, res)
     invalidateCache('/api/admin/pending');
 
     console.log('[POST /api/organizations/register] New organization registered:', { id, name: name.trim() });
+
+    // Stuur notificatie-e-mail naar de beheerder (fire-and-forget, nooit blocking)
+    sendNewOrgNotificationEmail({ orgName: name.trim(), orgEmail: email?.trim() ?? '', orgId: id }).catch(
+      (err) => console.error('[register] notificatie-mail mislukt:', err.message)
+    );
+
     res.status(201).json({
       success: true,
       message: 'Organisatie aangemeld. Deze wordt zichtbaar in de app na goedkeuring door de beheerder.',
