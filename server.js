@@ -2096,6 +2096,7 @@ app.get('/api/news/head', async (req, res) => {
 // Get single published news (public, with optional bookmark status if authenticated)
 app.get('/api/news/:id', async (req, res) => {
   try {
+    await ensureNewsColumns();
     await ensureBookmarksTable();
     const { id } = req.params;
     
@@ -2112,9 +2113,9 @@ app.get('/api/news/:id', async (req, res) => {
       }
     }
     
-    // Check if published_at column exists, if not use created_at
     const result = await executeQuery(`
-      SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt, n.image_url,
+      SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt,
+             n.image_url, n.youtube_url, n.source_name, n.source_url,
              n.created_at, n.updated_at, 
              COALESCE(n.published_at, n.created_at) as published_at,
              n.category, n.custom_category, n.is_published,
@@ -5701,6 +5702,7 @@ app.get('/api/organizations/:id', async (req, res) => {
 // ===== PUBLIC ORGANIZATIONS ENDPOINT =====
 app.get('/api/organizations', async (req, res) => {
   try {
+    await ensureOrgColumns();
     const { page = 1, limit = 20, category, search, minimal = false } = req.query;
     const offset = (page - 1) * limit;
 
