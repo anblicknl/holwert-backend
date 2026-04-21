@@ -2849,6 +2849,20 @@ class HolwertAdmin {
                             </div>
                             
                             <div class="form-group">
+                                <label>Bronvermelding (optioneel)</label>
+                                <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                                    <div style="flex:1;min-width:160px;">
+                                        <label for="newsSourceName" style="font-size:0.82rem;color:#555;margin-bottom:3px;display:block;">Naam bron</label>
+                                        <input type="text" id="newsSourceName" value="${escQ(article?.source_name)}" placeholder="bijv. NOS, Omrop Fryslân…">
+                                    </div>
+                                    <div style="flex:2;min-width:200px;">
+                                        <label for="newsSourceUrl" style="font-size:0.82rem;color:#555;margin-bottom:3px;display:block;">URL (link naar bron)</label>
+                                        <input type="url" id="newsSourceUrl" value="${escQ(article?.source_url)}" placeholder="https://…">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="form-group">
                                 <label for="newsYoutubeUrl">YouTube-video (optioneel)</label>
                                 <input type="url" id="newsYoutubeUrl" name="youtube_url"
                                     value="${article?.youtube_url || ''}"
@@ -3091,6 +3105,9 @@ class HolwertAdmin {
 
             // YouTube-link meesturen (altijd, ook als leeg om te wissen)
             body.youtube_url = (document.getElementById('newsYoutubeUrl')?.value || '').trim() || null;
+            // Bronvermelding
+            body.source_name = (document.getElementById('newsSourceName')?.value || '').trim() || null;
+            body.source_url  = (document.getElementById('newsSourceUrl')?.value  || '').trim() || null;
 
             const url = actualNewsId ? `${this.apiBaseUrl}/admin/news/${actualNewsId}` : `${this.apiBaseUrl}/news`;
             const method = actualNewsId ? 'PUT' : 'POST';

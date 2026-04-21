@@ -622,6 +622,24 @@
                             ${imageEditable}
                         </div>
                         <div class="form-group">
+                            <label>Bronvermelding (optioneel)</label>
+                            ${!isPreview
+                                ? `<div style="display:flex;gap:10px;flex-wrap:wrap;">
+                                       <div style="flex:1;min-width:140px;">
+                                           <label style="font-size:0.82rem;color:#555;margin-bottom:3px;display:block;">Naam bron</label>
+                                           <input type="text" id="newsSourceName" placeholder="bijv. NOS, Leeuwarder Courant…" value="${escapeHtml(article?.source_name || '')}">
+                                       </div>
+                                       <div style="flex:2;min-width:180px;">
+                                           <label style="font-size:0.82rem;color:#555;margin-bottom:3px;display:block;">URL (link naar bron)</label>
+                                           <input type="url" id="newsSourceUrl" placeholder="https://…" value="${escapeHtml(article?.source_url || '')}">
+                                       </div>
+                                   </div>`
+                                : (article?.source_name
+                                    ? `<p style="margin:0">Bron: <a href="${escapeHtml(article.source_url || '#')}" target="_blank" rel="noopener">${escapeHtml(article.source_name)}</a></p>`
+                                    : '<p class="form-hint">Geen bronvermelding</p>')
+                            }
+                        </div>
+                        <div class="form-group">
                             <label>YouTube-video (optioneel)</label>
                             ${!isPreview
                                 ? `<input type="url" id="newsYoutubeUrl" placeholder="https://www.youtube.com/watch?v=... of https://youtu.be/..." value="${escapeHtml(article?.youtube_url || '')}">
@@ -668,7 +686,9 @@
                         content: document.getElementById('newsContent').value.trim(),
                         is_published: document.getElementById('newsPublished').checked,
                         image_url: imageUrl || null,
-                        youtube_url: (document.getElementById('newsYoutubeUrl')?.value || '').trim() || null,
+                        youtube_url:  (document.getElementById('newsYoutubeUrl')?.value  || '').trim() || null,
+                        source_name: (document.getElementById('newsSourceName')?.value || '').trim() || null,
+                        source_url:  (document.getElementById('newsSourceUrl')?.value  || '').trim() || null,
                         published_at: publishedAtInput || null,
                     };
                     const url = id ? `${apiBase}/org/news/${id}` : `${apiBase}/org/news`;
