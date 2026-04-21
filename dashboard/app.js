@@ -981,7 +981,12 @@
                 </div>
                 <div class="form-group">
                     <label for="profile_email">E-mail (contact)</label>
-                    <input type="email" id="profile_email" value="${escapeHtml(org.email || '')}">
+                    <input type="email" id="profile_email" value="${escapeHtml(org.email || '')}" placeholder="Optioneel">
+                    <label class="checkbox-label" style="margin-top:6px;font-size:0.85rem;">
+                        <input type="checkbox" id="profile_show_email" ${org.show_email !== false ? 'checked' : ''}>
+                        Toon e-mailadres publiek in de app
+                    </label>
+                    <small class="text-muted">Als je dit uitschakelt, sla je het e-mailadres intern op maar is het niet zichtbaar voor bezoekers.</small>
                 </div>
                 <div class="form-row">
                     <div class="form-group">
@@ -1168,6 +1173,7 @@
             bio: norm('profile_bio'),
             website: norm('profile_website'),
             email: norm('profile_email'),
+            show_email: document.getElementById('profile_show_email')?.checked !== false,
             phone: norm('profile_phone'),
             whatsapp: norm('profile_whatsapp'),
             address: norm('profile_address'),

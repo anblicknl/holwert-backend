@@ -2112,7 +2112,12 @@ class HolwertAdmin {
                             </div>
                             <div class="form-group">
                                 <label for="editOrgEmail">E-mail</label>
-                                <input type="email" id="editOrgEmail" value="${escQ(org.email)}">
+                                <input type="email" id="editOrgEmail" value="${escQ(org.email)}" placeholder="Optioneel">
+                                <label class="checkbox-label" style="margin-top:6px;font-size:0.85rem;">
+                                    <input type="checkbox" id="editOrgShowEmail" ${org.show_email !== false ? 'checked' : ''}>
+                                    Toon e-mailadres publiek in de app
+                                </label>
+                                <small class="text-muted">Als je dit vinkje uitschakelt, is het e-mailadres alleen intern zichtbaar.</small>
                             </div>
                             <div class="form-group">
                                 <label for="editOrgWebsite">Website</label>
@@ -2226,7 +2231,8 @@ class HolwertAdmin {
                     category: document.getElementById('editOrgCategory').value.trim() || undefined,
                     description: document.getElementById('editOrgDescription').value.trim() || undefined,
                     bio: document.getElementById('editOrgBio').value.trim() || undefined,
-                    email: document.getElementById('editOrgEmail').value.trim() || undefined,
+                    email: document.getElementById('editOrgEmail').value.trim() || null,
+                    show_email: document.getElementById('editOrgShowEmail')?.checked !== false,
                     website: document.getElementById('editOrgWebsite').value.trim() || undefined,
                     phone: document.getElementById('editOrgPhone').value.trim() || undefined,
                     whatsapp: document.getElementById('editOrgWhatsapp').value.trim() || undefined,

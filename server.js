@@ -3528,7 +3528,7 @@ app.get('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (
     }
     
     const result = await executeQuery(
-      `SELECT id, name, category, description, bio, is_approved, website, email, phone, whatsapp, address, 
+      `SELECT id, name, category, description, bio, is_approved, website, email, show_email, phone, whatsapp, address, 
               facebook, instagram, twitter, linkedin, brand_color, logo_url, privacy_statement, created_at, updated_at
        FROM organizations 
        WHERE id = $1`,
@@ -3718,7 +3718,7 @@ app.post('/api/admin/organizations', authenticateToken, requireAdmin, async (req
 app.put('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, category, description, bio, is_approved, website, email, phone, whatsapp, address, 
+    const { name, category, description, bio, is_approved, website, email, show_email, phone, whatsapp, address, 
             facebook, instagram, twitter, linkedin, brand_color, logo_url, privacy_statement } = req.body;
     const sets = [];
     const params = [];
@@ -3730,6 +3730,7 @@ app.put('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (
     if (is_approved !== undefined) sets.push(`is_approved = ${push(is_approved)}`);
     if (website !== undefined) sets.push(`website = ${push(website)}`);
     if (email !== undefined) sets.push(`email = ${push(email)}`);
+    if (show_email !== undefined) sets.push(`show_email = ${push(!!show_email)}`);
     if (phone !== undefined) sets.push(`phone = ${push(phone)}`);
     if (whatsapp !== undefined) sets.push(`whatsapp = ${push(whatsapp)}`);
     if (address !== undefined) sets.push(`address = ${push(address)}`);
@@ -4889,7 +4890,7 @@ app.get('/api/org/profile', authenticateToken, requireOrgPortal, async (req, res
   try {
     const orgId = req.organizationId;
     const result = await executeQuery(
-      `SELECT id, name, category, description, bio, website, email, phone, whatsapp, address,
+      `SELECT id, name, category, description, bio, website, email, show_email, phone, whatsapp, address,
        facebook, instagram, twitter, linkedin, brand_color, logo_url, privacy_statement, is_approved, created_at, updated_at
        FROM organizations WHERE id = ?`,
       [orgId]
@@ -4914,6 +4915,7 @@ app.put('/api/org/profile', authenticateToken, requireOrgPortal, async (req, res
       'bio',
       'website',
       'email',
+      'show_email',
       'phone',
       'whatsapp',
       'address',
@@ -4937,6 +4939,7 @@ app.put('/api/org/profile', authenticateToken, requireOrgPortal, async (req, res
       if (raw[key] !== undefined) {
         let v = raw[key];
         if (key === 'name') v = String(v).trim();
+        if (key === 'show_email') v = !!v; // zorg dat het altijd een boolean is
         sets.push(`${key} = ?`);
         values.push(v);
       }
@@ -5610,7 +5613,9 @@ app.get('/api/organizations/:id', async (req, res) => {
     const result = await executeQuery(
       `SELECT 
         id, name, category, description, bio,
-        website, email, phone, whatsapp, address,
+        website,
+        CASE WHEN show_email = true OR show_email IS NULL THEN email ELSE NULL END AS email,
+        phone, whatsapp, address,
         facebook, instagram, twitter, linkedin,
         brand_color, logo_url, is_approved,
         created_at, updated_at
@@ -5650,7 +5655,7 @@ app.get('/api/organizations', async (req, res) => {
         name,
         description,
         bio,
-        email,
+        CASE WHEN show_email = true OR show_email IS NULL THEN email ELSE NULL END AS email,
         phone,
         whatsapp,
         address,
@@ -6065,6 +6070,7 @@ app.post('/api/setup-mysql-database', async (req, res) => {
           bio TEXT,
           website VARCHAR(255),
           email VARCHAR(255),
+          show_email BOOLEAN DEFAULT true,
           phone VARCHAR(20),
           whatsapp VARCHAR(20),
           address TEXT,
@@ -6084,6 +6090,12 @@ app.post('/api/setup-mysql-database', async (req, res) => {
       `);
       results.created.push('organizations');
     } else {
+      // Voeg show_email toe aan bestaande tabel als die kolom er nog niet is
+      try {
+        await executeQuery(
+          `ALTER TABLE organizations ADD COLUMN IF NOT EXISTS show_email BOOLEAN DEFAULT true`
+        );
+      } catch (_) { /* kolom bestaat al, geen actie nodig */ }
       results.skipped.push('organizations');
     }
 
