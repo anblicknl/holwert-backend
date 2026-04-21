@@ -70,6 +70,9 @@ if (!JWT_SECRET) {
   throw new Error('[SECURITY] JWT_SECRET environment variable is required but not set');
 }
 
+/** Optioneel: Personal Access Token van expo.dev/settings/access-tokens als Bearer op de push-API. Vereist als enhanced push security aan staat. */
+const EXPO_PUSH_ACCESS_TOKEN = (process.env.EXPO_PUSH_ACCESS_TOKEN || '').trim();
+
 // PHP Proxy URL (fallback als direct MySQL niet werkt)
 const PHP_PROXY_URL = process.env.PHP_PROXY_URL || 'https://holwert.appenvloed.com/admin/db-proxy.php';
 const PHP_PROXY_API_KEY = process.env.PHP_PROXY_API_KEY || 'holwert-db-proxy-2026-secure-key-change-in-production';
@@ -6433,17 +6436,20 @@ async function sendPushNotification(pushTokens, notification) {
       channelId: 'default'
     }));
     
-    // Send to Expo Push API
+    const pushHeaders = {
+      Accept: 'application/json',
+      'Accept-Encoding': 'gzip, deflate',
+      'Content-Type': 'application/json',
+    };
+    if (EXPO_PUSH_ACCESS_TOKEN) {
+      pushHeaders.Authorization = `Bearer ${EXPO_PUSH_ACCESS_TOKEN}`;
+    }
+
+    // Send to Expo Push API (https://docs.expo.dev/push-notifications/sending-notifications/)
     const response = await axios.post(
       'https://exp.host/--/api/v2/push/send',
       messages,
-      {
-        headers: {
-          'Accept': 'application/json',
-          'Accept-Encoding': 'gzip, deflate',
-          'Content-Type': 'application/json'
-        }
-      }
+      { headers: pushHeaders }
     );
     
     console.log(`✅ Sent ${validTokens.length} push notification(s)`);
