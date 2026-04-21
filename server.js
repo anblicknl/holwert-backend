@@ -6450,7 +6450,8 @@ async function sendPushNotification(pushTokens, notification) {
     
     // Log results
     if (response.data && response.data.data) {
-      const tickets = response.data.data;
+      const rawTickets = response.data.data;
+      const tickets = Array.isArray(rawTickets) ? rawTickets : [rawTickets];
       const successCount = tickets.filter(t => t.status === 'ok').length;
       const errorCount = tickets.filter(t => t.status === 'error').length;
       
