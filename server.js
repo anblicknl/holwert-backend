@@ -579,6 +579,21 @@ function stripHeavyMediaFromEventRow(row) {
   return out;
 }
 
+/** Zorg dat de app altijd `event_end_date` krijgt (proxy/legacy-sleutels). */
+function normalizePublicEventRow(row) {
+  if (!row || typeof row !== 'object') return row;
+  const e = stripHeavyMediaFromEventRow(row);
+  const end =
+    e.event_end_date ??
+    e.end_date ??
+    e.EVENT_END_DATE ??
+    e.eventEndDate;
+  if (end != null && String(end).trim() !== '') {
+    e.event_end_date = String(end).trim();
+  }
+  return e;
+}
+
 // Test route
 app.get('/', async (req, res) => {
   try {
@@ -4267,7 +4282,7 @@ app.get('/api/events', async (req, res) => {
       executeQuery(countSql, countParams)
     ]);
 
-    const events = (result.rows || []).map(stripHeavyMediaFromEventRow);
+    const events = (result.rows || []).map(normalizePublicEventRow);
     const total = parseInt(countResult.rows?.[0]?.total ?? 0, 10) || 0;
 
     res.json({
@@ -4308,7 +4323,7 @@ app.get('/api/events/:id', async (req, res) => {
       LIMIT 1
     `, [parseInt(id)]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Event not found' });
-    res.json({ event: result.rows[0] });
+    res.json({ event: normalizePublicEventRow(result.rows[0]) });
   } catch (error) {
     console.error('Get event (alias) error:', error);
     res.status(500).json({ error: 'Failed to get event', message: error.message });
@@ -5187,7 +5202,7 @@ app.get('/api/org/events', authenticateToken, requireOrgPortal, async (req, res)
       [orgId]
     );
     res.json({
-      events: result.rows,
+      events: (result.rows || []).map(normalizePublicEventRow),
       pagination: { page: parseInt(page), limit: parseInt(limit), total: parseInt(countResult.rows[0].total), pages: Math.ceil(countResult.rows[0].total / limit) }
     });
   } catch (error) {
@@ -5204,7 +5219,7 @@ app.get('/api/org/events/:id', authenticateToken, requireOrgPortal, async (req, 
       [req.params.id, orgId]
     );
     if (!result.rows?.length) return res.status(404).json({ error: 'Evenement niet gevonden' });
-    res.json({ event: result.rows[0] });
+    res.json({ event: normalizePublicEventRow(result.rows[0]) });
   } catch (error) {
     console.error('GET /api/org/events/:id error:', error);
     res.status(500).json({ error: 'Failed to load event', message: error.message });
