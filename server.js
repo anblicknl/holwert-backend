@@ -5990,6 +5990,26 @@ app.get('/api/migrate-organizations', async (req, res) => {
 });
 
 // MySQL Database Setup Endpoint (voor server-side setup)
+// Handmatige kolom-migratie (open URL in browser om direct te triggeren)
+app.get('/api/migrate-columns', async (req, res) => {
+  const results = [];
+  const migrations = [
+    { table: 'news',          column: 'youtube_url', sql: `ALTER TABLE news ADD COLUMN youtube_url VARCHAR(500)` },
+    { table: 'organizations', column: 'show_email',  sql: `ALTER TABLE organizations ADD COLUMN show_email BOOLEAN DEFAULT true` },
+  ];
+  for (const m of migrations) {
+    try {
+      await executeQuery(m.sql);
+      results.push({ ...m, status: 'toegevoegd' });
+      console.log(`[migrate-columns] ${m.table}.${m.column} toegevoegd`);
+    } catch (e) {
+      const alreadyExists = String(e.message).includes('Duplicate column') || String(e.message).includes('1060');
+      results.push({ ...m, status: alreadyExists ? 'bestaat_al' : 'fout', error: alreadyExists ? undefined : e.message });
+    }
+  }
+  res.json({ ok: true, results });
+});
+
 app.post('/api/setup-mysql-database', async (req, res) => {
   try {
     const mysql = require('mysql2/promise');
@@ -6095,17 +6115,16 @@ app.post('/api/setup-mysql-database', async (req, res) => {
       `);
       results.created.push('organizations');
     } else {
-      // Voeg show_email toe aan bestaande tabel als die kolom er nog niet is (MySQL-compatibel)
+      // Voeg show_email toe aan bestaande tabel als die kolom er nog niet is
       try {
-        const colCheck = await executeQuery(
-          `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-           WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'organizations' AND COLUMN_NAME = 'show_email'`
-        );
-        if (!colCheck.rows?.length) {
-          await executeQuery(`ALTER TABLE organizations ADD COLUMN show_email BOOLEAN DEFAULT true`);
-          console.log('[migrate] organizations.show_email kolom toegevoegd');
+        await executeQuery(`ALTER TABLE organizations ADD COLUMN show_email BOOLEAN DEFAULT true`);
+        console.log('[migrate] organizations.show_email kolom toegevoegd');
+      } catch (e) {
+        // Foutcode 1060 = kolom bestaat al → geen probleem
+        if (!String(e.message).includes('Duplicate column') && !String(e.message).includes('1060')) {
+          console.warn('[migrate] show_email migration error:', e.message);
         }
-      } catch (e) { console.warn('[migrate] show_email migration:', e.message); }
+      }
       results.skipped.push('organizations');
     }
 
@@ -6137,17 +6156,16 @@ app.post('/api/setup-mysql-database', async (req, res) => {
       `);
       results.created.push('news');
     } else {
-      // Voeg youtube_url toe aan bestaande tabel als die kolom er nog niet is (MySQL-compatibel)
+      // Voeg youtube_url toe aan bestaande tabel als die kolom er nog niet is
       try {
-        const colCheck = await executeQuery(
-          `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-           WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'news' AND COLUMN_NAME = 'youtube_url'`
-        );
-        if (!colCheck.rows?.length) {
-          await executeQuery(`ALTER TABLE news ADD COLUMN youtube_url VARCHAR(500)`);
-          console.log('[migrate] news.youtube_url kolom toegevoegd');
+        await executeQuery(`ALTER TABLE news ADD COLUMN youtube_url VARCHAR(500)`);
+        console.log('[migrate] news.youtube_url kolom toegevoegd');
+      } catch (e) {
+        // Foutcode 1060 = kolom bestaat al → geen probleem
+        if (!String(e.message).includes('Duplicate column') && !String(e.message).includes('1060')) {
+          console.warn('[migrate] youtube_url migration error:', e.message);
         }
-      } catch (e) { console.warn('[migrate] youtube_url migration:', e.message); }
+      }
       results.skipped.push('news');
     }
 
