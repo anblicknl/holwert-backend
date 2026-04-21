@@ -2853,11 +2853,11 @@ class HolwertAdmin {
                                 <div style="display:flex;gap:10px;flex-wrap:wrap;">
                                     <div style="flex:1;min-width:160px;">
                                         <label for="newsSourceName" style="font-size:0.82rem;color:#555;margin-bottom:3px;display:block;">Naam bron</label>
-                                        <input type="text" id="newsSourceName" value="${escQ(article?.source_name)}" placeholder="bijv. NOS, Omrop Fryslân…">
+                                        <input type="text" id="newsSourceName" value="${article?.source_name || ''}" placeholder="bijv. NOS, Omrop Fryslân…">
                                     </div>
                                     <div style="flex:2;min-width:200px;">
                                         <label for="newsSourceUrl" style="font-size:0.82rem;color:#555;margin-bottom:3px;display:block;">URL (link naar bron)</label>
-                                        <input type="url" id="newsSourceUrl" value="${escQ(article?.source_url)}" placeholder="https://…">
+                                        <input type="url" id="newsSourceUrl" value="${article?.source_url || ''}" placeholder="https://…">
                                     </div>
                                 </div>
                             </div>
