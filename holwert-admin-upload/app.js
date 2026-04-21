@@ -4057,21 +4057,77 @@ class HolwertAdmin {
                             <input type="text" id="practicalIcon" value="${(item?.icon || 'information-circle-outline').replace(/"/g, '&quot;')}" placeholder="Ionicons-naam, of kies hieronder">
                             <p class="text-muted" style="margin: 0.5rem 0 0.25rem 0; font-size: 0.85rem;">Icooncatalogus – klik op een icoon om het veld in te vullen:</p>
                             <div class="practical-icon-grid">
+                                <div class="practical-icon-group-label">Algemeen</div>
                                 <button type="button" class="practical-icon-option" data-icon="information-circle-outline" title="Info"><i class="fas fa-info-circle"></i><span>Info</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="call-outline" title="Telefoon"><i class="fas fa-phone"></i><span>Telefoon</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="open-outline" title="Link"><i class="fas fa-external-link-alt"></i><span>Link</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="map-outline" title="Locatie"><i class="fas fa-map-marker-alt"></i><span>Locatie</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="time-outline" title="Tijd"><i class="fas fa-clock"></i><span>Tijd</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="shield-outline" title="Politie / Wijkagent"><i class="fas fa-shield-alt"></i><span>Politie</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="medkit-outline" title="Huisarts / Zorg"><i class="fas fa-medkit"></i><span>Huisarts</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="people-outline" title="Vereniging / Groep"><i class="fas fa-users"></i><span>Vereniging</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="business-outline" title="Bedrijf"><i class="fas fa-building"></i><span>Bedrijf</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="school-outline" title="School"><i class="fas fa-school"></i><span>School</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="help-circle-outline" title="Vraag / FAQ"><i class="fas fa-question-circle"></i><span>FAQ</span></button>
                                 <button type="button" class="practical-icon-option" data-icon="alert-circle-outline" title="Waarschuwing"><i class="fas fa-exclamation-circle"></i><span>Waarschuwing</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="mail-outline" title="E-mail"><i class="fas fa-envelope"></i><span>E-mail</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="calendar-outline" title="Agenda"><i class="fas fa-calendar-alt"></i><span>Agenda</span></button>
-                                <button type="button" class="practical-icon-option" data-icon="heart-outline" title="Zorg / Welzijn"><i class="fas fa-heart"></i><span>Zorg</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="star-outline" title="Bijzonder"><i class="fas fa-star"></i><span>Uitgelicht</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="bookmark-outline" title="Opslaan / Opmerken"><i class="fas fa-bookmark"></i><span>Notitie</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="megaphone-outline" title="Aankondiging"><i class="fas fa-bullhorn"></i><span>Aankondiging</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="notifications-outline" title="Melding"><i class="fas fa-bell"></i><span>Melding</span></button>
                                 <button type="button" class="practical-icon-option" data-icon="document-text-outline" title="Document"><i class="fas fa-file-alt"></i><span>Document</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="newspaper-outline" title="Nieuws / Krant"><i class="fas fa-newspaper"></i><span>Nieuws</span></button>
+                                <div class="practical-icon-group-label">Contact &amp; Communicatie</div>
+                                <button type="button" class="practical-icon-option" data-icon="call-outline" title="Telefoon"><i class="fas fa-phone"></i><span>Telefoon</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="mail-outline" title="E-mail"><i class="fas fa-envelope"></i><span>E-mail</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="chatbubble-outline" title="Bericht / Chat"><i class="fas fa-comment"></i><span>Bericht</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="globe-outline" title="Website"><i class="fas fa-globe"></i><span>Website</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="open-outline" title="Externe link"><i class="fas fa-external-link-alt"></i><span>Link</span></button>
+                                <div class="practical-icon-group-label">Mensen &amp; Organisaties</div>
+                                <button type="button" class="practical-icon-option" data-icon="person-outline" title="Persoon"><i class="fas fa-user"></i><span>Persoon</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="people-outline" title="Groep / Vereniging"><i class="fas fa-users"></i><span>Groep</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="person-circle-outline" title="Contactpersoon"><i class="fas fa-user-circle"></i><span>Contact</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="shield-outline" title="Politie / Wijkagent / Veiligheid"><i class="fas fa-shield-alt"></i><span>Politie</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="briefcase-outline" title="Werk / Beroep"><i class="fas fa-briefcase"></i><span>Werk</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="business-outline" title="Bedrijf / Gebouw"><i class="fas fa-building"></i><span>Bedrijf</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="school-outline" title="School"><i class="fas fa-school"></i><span>School</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="library-outline" title="Bibliotheek"><i class="fas fa-book"></i><span>Bibliotheek</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="accessibility-outline" title="Toegankelijkheid"><i class="fas fa-wheelchair"></i><span>Toegankelijk</span></button>
+                                <div class="practical-icon-group-label">Locatie &amp; Gebouwen</div>
+                                <button type="button" class="practical-icon-option" data-icon="map-outline" title="Locatie / Adres"><i class="fas fa-map-marker-alt"></i><span>Locatie</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="home-outline" title="Woning / Thuis"><i class="fas fa-home"></i><span>Woning</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="storefront-outline" title="Winkel"><i class="fas fa-store"></i><span>Winkel</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="restaurant-outline" title="Horeca / Eten"><i class="fas fa-utensils"></i><span>Horeca</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="cafe-outline" title="Café / Koffie"><i class="fas fa-coffee"></i><span>Café</span></button>
+                                <div class="practical-icon-group-label">Zorg &amp; Veiligheid</div>
+                                <button type="button" class="practical-icon-option" data-icon="medkit-outline" title="Huisarts / EHBO"><i class="fas fa-medkit"></i><span>EHBO</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="heart-outline" title="Zorg / Welzijn"><i class="fas fa-heart"></i><span>Welzijn</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="fitness-outline" title="Gezondheid"><i class="fas fa-heartbeat"></i><span>Gezondheid</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="flame-outline" title="Brandweer / Brandgevaar"><i class="fas fa-fire"></i><span>Brandweer</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="bandage-outline" title="Verbandmiddelen"><i class="fas fa-band-aid"></i><span>Verbandmiddelen</span></button>
+                                <div class="practical-icon-group-label">Vervoer</div>
+                                <button type="button" class="practical-icon-option" data-icon="car-outline" title="Auto / Parkeren"><i class="fas fa-car"></i><span>Auto</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="bus-outline" title="Bus"><i class="fas fa-bus"></i><span>Bus</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="train-outline" title="Trein"><i class="fas fa-train"></i><span>Trein</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="bicycle-outline" title="Fiets"><i class="fas fa-bicycle"></i><span>Fiets</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="walk-outline" title="Wandelen"><i class="fas fa-walking"></i><span>Wandelen</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="boat-outline" title="Boot / Water"><i class="fas fa-ship"></i><span>Boot</span></button>
+                                <div class="practical-icon-group-label">Natuur &amp; Omgeving</div>
+                                <button type="button" class="practical-icon-option" data-icon="leaf-outline" title="Natuur / Groen"><i class="fas fa-leaf"></i><span>Natuur</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="water-outline" title="Water"><i class="fas fa-tint"></i><span>Water</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="flower-outline" title="Tuin / Plant"><i class="fas fa-seedling"></i><span>Tuin</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="paw-outline" title="Dieren"><i class="fas fa-paw"></i><span>Dieren</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="trash-outline" title="Afval / Containers"><i class="fas fa-trash"></i><span>Afval</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="sunny-outline" title="Weer / Zon"><i class="fas fa-sun"></i><span>Weer</span></button>
+                                <div class="practical-icon-group-label">Activiteiten &amp; Vrije tijd</div>
+                                <button type="button" class="practical-icon-option" data-icon="calendar-outline" title="Agenda / Evenement"><i class="fas fa-calendar-alt"></i><span>Agenda</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="time-outline" title="Openingstijden"><i class="fas fa-clock"></i><span>Tijden</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="musical-notes-outline" title="Muziek"><i class="fas fa-music"></i><span>Muziek</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="football-outline" title="Sport"><i class="fas fa-running"></i><span>Sport</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="camera-outline" title="Fotografie"><i class="fas fa-camera"></i><span>Foto</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="film-outline" title="Film / Theater"><i class="fas fa-film"></i><span>Film</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="book-outline" title="Lezen / Literatuur"><i class="fas fa-book-open"></i><span>Lezen</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="hammer-outline" title="Klussen / Onderhoud"><i class="fas fa-hammer"></i><span>Klussen</span></button>
+                                <button type="button" class="practical-icon-option" data-icon="cash-outline" title="Geld / Kosten"><i class="fas fa-money-bill"></i><span>Kosten</span></button>
+                            </div>
+                            <p class="text-muted" style="margin: 0.75rem 0 0.25rem 0; font-size: 0.85rem;"><i class="fas fa-portrait" style="margin-right: 4px;"></i> Of upload een eigen foto als icoon (bijv. wijkagent, logo van partner):</p>
+                            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 0.5rem; flex-wrap: wrap;">
+                                <label class="btn btn-secondary" style="cursor: pointer; margin: 0; padding: 0.35rem 0.75rem; font-size: 0.85rem;">
+                                    <i class="fas fa-upload" style="margin-right: 4px;"></i> Foto kiezen
+                                    <input type="file" id="practicalIconUpload" accept="image/*" style="display: none;">
+                                </label>
+                                <span id="practicalIconUploadStatus" style="font-size: 0.8rem; color: #666;"></span>
+                                <img id="practicalIconPreview" src="" alt="preview" style="width: 40px; height: 40px; border-radius: 50%; object-fit: cover; display: none; border: 2px solid #ddd;">
                             </div>
                         </div>
                         <div class="form-group">
@@ -4140,13 +4196,61 @@ class HolwertAdmin {
             }
             btn.addEventListener('click', () => {
                 const value = btn.getAttribute('data-icon') || '';
-                if (iconInput) {
-                    iconInput.value = value;
-                }
+                if (iconInput) iconInput.value = value;
                 iconButtons.forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
+                // Verwijder eventuele foto-preview als een catalogus-icoon wordt gekozen
+                const previewEl = overlay.querySelector('#practicalIconPreview');
+                const statusEl = overlay.querySelector('#practicalIconUploadStatus');
+                if (previewEl) previewEl.style.display = 'none';
+                if (statusEl) statusEl.textContent = '';
             });
         });
+
+        // Foto-upload als icoon
+        const iconUploadInput = overlay.querySelector('#practicalIconUpload');
+        const iconUploadStatus = overlay.querySelector('#practicalIconUploadStatus');
+        const iconPreview = overlay.querySelector('#practicalIconPreview');
+
+        // Als er al een foto-URL in het veld staat, toon preview
+        if (currentIcon.startsWith('http') && iconPreview) {
+            iconPreview.src = currentIcon;
+            iconPreview.style.display = 'block';
+            if (iconUploadStatus) iconUploadStatus.textContent = 'Eigen foto actief';
+        }
+
+        if (iconUploadInput) {
+            iconUploadInput.addEventListener('change', async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                if (iconUploadStatus) iconUploadStatus.textContent = 'Bezig met uploaden…';
+                try {
+                    const compressed = await this.compressNewsImage(file);
+                    const uploadRes = await fetch(`${this.apiBaseUrl}/upload/image`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${this.token}`
+                        },
+                        body: JSON.stringify({
+                            imageData: compressed,
+                            filename: `practical-icon-${Date.now()}.jpg`
+                        })
+                    });
+                    if (!uploadRes.ok) throw new Error(`HTTP ${uploadRes.status}`);
+                    const uploadJson = await uploadRes.json();
+                    const imgUrl = uploadJson.imageUrl;
+                    if (imgUrl && iconInput) {
+                        iconInput.value = imgUrl;
+                        if (iconPreview) { iconPreview.src = imgUrl; iconPreview.style.display = 'block'; }
+                        if (iconUploadStatus) iconUploadStatus.textContent = 'Foto geüpload ✓';
+                        iconButtons.forEach(b => b.classList.remove('active'));
+                    }
+                } catch (err) {
+                    if (iconUploadStatus) iconUploadStatus.textContent = 'Upload mislukt: ' + err.message;
+                }
+            });
+        }
     }
 
     async savePractical(existingItem = null) {
