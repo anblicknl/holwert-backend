@@ -6095,12 +6095,17 @@ app.post('/api/setup-mysql-database', async (req, res) => {
       `);
       results.created.push('organizations');
     } else {
-      // Voeg show_email toe aan bestaande tabel als die kolom er nog niet is
+      // Voeg show_email toe aan bestaande tabel als die kolom er nog niet is (MySQL-compatibel)
       try {
-        await executeQuery(
-          `ALTER TABLE organizations ADD COLUMN IF NOT EXISTS show_email BOOLEAN DEFAULT true`
+        const colCheck = await executeQuery(
+          `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+           WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'organizations' AND COLUMN_NAME = 'show_email'`
         );
-      } catch (_) { /* kolom bestaat al, geen actie nodig */ }
+        if (!colCheck.rows?.length) {
+          await executeQuery(`ALTER TABLE organizations ADD COLUMN show_email BOOLEAN DEFAULT true`);
+          console.log('[migrate] organizations.show_email kolom toegevoegd');
+        }
+      } catch (e) { console.warn('[migrate] show_email migration:', e.message); }
       results.skipped.push('organizations');
     }
 
@@ -6132,12 +6137,17 @@ app.post('/api/setup-mysql-database', async (req, res) => {
       `);
       results.created.push('news');
     } else {
-      // Voeg youtube_url toe aan bestaande tabel als die kolom er nog niet is
+      // Voeg youtube_url toe aan bestaande tabel als die kolom er nog niet is (MySQL-compatibel)
       try {
-        await executeQuery(
-          `ALTER TABLE news ADD COLUMN IF NOT EXISTS youtube_url VARCHAR(500)`
+        const colCheck = await executeQuery(
+          `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+           WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'news' AND COLUMN_NAME = 'youtube_url'`
         );
-      } catch (_) { /* kolom bestaat al */ }
+        if (!colCheck.rows?.length) {
+          await executeQuery(`ALTER TABLE news ADD COLUMN youtube_url VARCHAR(500)`);
+          console.log('[migrate] news.youtube_url kolom toegevoegd');
+        }
+      } catch (e) { console.warn('[migrate] youtube_url migration:', e.message); }
       results.skipped.push('news');
     }
 
