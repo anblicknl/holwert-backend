@@ -1294,9 +1294,49 @@ app.get('/api/app/bootstrap', async (req, res) => {
   }
 });
 
+// ── Lazy migratie voor extra news-kolommen ──────────────────────────────────
+// Draait één keer per server-instantie. Vangt foutcode 1060 (kolom bestaat al)
+// af zodat het veilig is om bij elke cold start opnieuw te draaien.
+let _newsColsMigrated = false;
+async function ensureNewsColumns() {
+  if (_newsColsMigrated) return;
+  const cols = [
+    ['youtube_url', 'VARCHAR(500)'],
+    ['source_name', 'VARCHAR(255)'],
+    ['source_url',  'VARCHAR(500)'],
+  ];
+  for (const [col, def] of cols) {
+    try {
+      await executeQuery(`ALTER TABLE news ADD COLUMN ${col} ${def}`);
+      console.log(`[ensureNewsColumns] news.${col} toegevoegd`);
+    } catch (e) {
+      if (!String(e.message).includes('Duplicate column') && !String(e.message).includes('1060')) {
+        console.warn(`[ensureNewsColumns] news.${col}:`, e.message);
+      }
+    }
+  }
+  _newsColsMigrated = true;
+}
+
+let _orgColsMigrated = false;
+async function ensureOrgColumns() {
+  if (_orgColsMigrated) return;
+  try {
+    await executeQuery(`ALTER TABLE organizations ADD COLUMN show_email BOOLEAN DEFAULT true`);
+    console.log('[ensureOrgColumns] organizations.show_email toegevoegd');
+  } catch (e) {
+    if (!String(e.message).includes('Duplicate column') && !String(e.message).includes('1060')) {
+      console.warn('[ensureOrgColumns] show_email:', e.message);
+    }
+  }
+  _orgColsMigrated = true;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Get all published news (public, with optional bookmark status if authenticated)
 app.get('/api/news', async (req, res) => {
   try {
+    await ensureNewsColumns();
     await ensureBookmarksTable();
     const { organization_id, category, search, minimal = false } = req.query;
     const limit = req.query.limit ?? 20;
@@ -3214,6 +3254,7 @@ app.get('/api/admin/pending', authenticateToken, async (req, res) => {
 // Get all news articles (admin)
 app.get('/api/admin/news', authenticateToken, async (req, res) => {
   try {
+    await ensureNewsColumns();
     const { page = 1, limit = 20, status, category, minimal } = req.query;
     const offset = (page - 1) * limit;
     const isMinimal = minimal === '1' || minimal === 'true';
@@ -3287,6 +3328,7 @@ app.get('/api/admin/news', authenticateToken, async (req, res) => {
 // Get single news article (admin) - same as public endpoint but with auth
 app.get('/api/admin/news/:id', authenticateToken, async (req, res) => {
   try {
+    await ensureNewsColumns();
     const { id } = req.params;
 
     const result = await executeQuery(`
@@ -3337,6 +3379,7 @@ app.get('/api/admin/news/:id', authenticateToken, async (req, res) => {
 // Update news article (admin) - allows changing organization
 app.put('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    await ensureNewsColumns();
     const { id } = req.params;
     const { title, content, excerpt, category, custom_category, organization_id, image_url, youtube_url, source_name, source_url, image_data, is_published, published_at } = req.body;
 
@@ -5025,6 +5068,7 @@ app.put('/api/org/me/password', authenticateToken, requireOrgPortal, async (req,
 // Nieuws voor eigen organisatie
 app.get('/api/org/news', authenticateToken, requireOrgPortal, async (req, res) => {
   try {
+    await ensureNewsColumns();
     const { page = 1, limit = 20, status } = req.query;
     const offset = (page - 1) * limit;
     const orgId = req.organizationId;
@@ -5052,6 +5096,7 @@ app.get('/api/org/news', authenticateToken, requireOrgPortal, async (req, res) =
 
 app.get('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req, res) => {
   try {
+    await ensureNewsColumns();
     const orgId = req.organizationId;
     const result = await executeQuery(
       'SELECT id, title, content, excerpt, category, custom_category, image_url, youtube_url, source_name, source_url, is_published, COALESCE(published_at, created_at) as published_at, organization_id, author_id, created_at, updated_at FROM news WHERE id = ? AND organization_id = ?',
@@ -5067,6 +5112,7 @@ app.get('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req, re
 
 app.post('/api/org/news', authenticateToken, requireOrgPortal, async (req, res) => {
   try {
+    await ensureNewsColumns();
     const orgId = req.organizationId;
     const userId = req.user.userId;
     const { title, content, excerpt, category, custom_category, image_url, youtube_url, source_name, source_url, is_published } = req.body || {};
@@ -5086,6 +5132,7 @@ app.post('/api/org/news', authenticateToken, requireOrgPortal, async (req, res) 
 
 app.put('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req, res) => {
   try {
+    await ensureNewsColumns();
     const orgId = req.organizationId;
     const id = parseInt(req.params.id);
     const { title, content, excerpt, category, custom_category, image_url, youtube_url, source_name, source_url, is_published, published_at } = req.body || {};
@@ -5620,6 +5667,7 @@ app.delete('/api/auth/account', authenticateToken, async (req, res) => {
 // ===== PUBLIC ORGANIZATIONS DETAIL ENDPOINT =====
 app.get('/api/organizations/:id', async (req, res) => {
   try {
+    await ensureOrgColumns();
     const { id } = req.params;
     if (!id || isNaN(parseInt(id))) {
       return res.status(400).json({ error: 'Invalid organization ID' });
