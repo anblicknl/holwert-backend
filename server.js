@@ -1241,7 +1241,7 @@ app.get('/api/app/bootstrap', async (req, res) => {
     let newsQuery = `
       SELECT n.id, n.title, '' as content,
         COALESCE(n.excerpt, LEFT(COALESCE(n.content, ''), 2000)) as excerpt,
-        n.image_url, n.created_at, n.updated_at,
+        n.image_url, n.youtube_url, n.created_at, n.updated_at,
         COALESCE(n.published_at, n.created_at) as published_at,
         n.organization_id, o.name as organization_name, o.logo_url as organization_logo,
         o.brand_color as organization_brand_color
@@ -1328,7 +1328,7 @@ app.get('/api/news', async (req, res) => {
         n.title, 
         ${minimalMode ? `'' as content` : `COALESCE(n.content, '') as content`},
         COALESCE(n.excerpt, LEFT(COALESCE(n.content, ''), 2000)) as excerpt,
-        n.image_url,
+        n.image_url, n.youtube_url,
         n.created_at, 
         n.updated_at, 
         COALESCE(n.published_at, n.created_at) as published_at,
@@ -3290,7 +3290,7 @@ app.get('/api/admin/news/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
 
     const result = await executeQuery(`
-      SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt, n.image_url, n.organization_id,
+      SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt, n.image_url, n.youtube_url, n.organization_id,
              n.created_at, n.updated_at, 
              COALESCE(n.published_at, n.created_at) as published_at,
              n.category, n.custom_category, n.is_published,
@@ -3338,7 +3338,7 @@ app.get('/api/admin/news/:id', authenticateToken, async (req, res) => {
 app.put('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, content, excerpt, category, custom_category, organization_id, image_url, image_data, is_published, published_at } = req.body;
+    const { title, content, excerpt, category, custom_category, organization_id, image_url, youtube_url, image_data, is_published, published_at } = req.body;
 
     // Validation
     if (!title || !content) {
@@ -3380,6 +3380,11 @@ app.put('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res)
     if (image_url !== undefined) {
       updateFields.push(`image_url = ?`);
       values.push(image_url || null);
+    }
+
+    if (youtube_url !== undefined) {
+      updateFields.push(`youtube_url = ?`);
+      values.push(youtube_url || null);
     }
 
     if (image_data !== undefined) {
@@ -5039,7 +5044,7 @@ app.get('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req, re
   try {
     const orgId = req.organizationId;
     const result = await executeQuery(
-      'SELECT id, title, content, excerpt, category, custom_category, image_url, is_published, COALESCE(published_at, created_at) as published_at, organization_id, author_id, created_at, updated_at FROM news WHERE id = ? AND organization_id = ?',
+      'SELECT id, title, content, excerpt, category, custom_category, image_url, youtube_url, is_published, COALESCE(published_at, created_at) as published_at, organization_id, author_id, created_at, updated_at FROM news WHERE id = ? AND organization_id = ?',
       [req.params.id, orgId]
     );
     if (!result.rows?.length) return res.status(404).json({ error: 'Artikel niet gevonden' });
@@ -5054,11 +5059,11 @@ app.post('/api/org/news', authenticateToken, requireOrgPortal, async (req, res) 
   try {
     const orgId = req.organizationId;
     const userId = req.user.userId;
-    const { title, content, excerpt, category, custom_category, image_url, is_published } = req.body || {};
+    const { title, content, excerpt, category, custom_category, image_url, youtube_url, is_published } = req.body || {};
     if (!title) return res.status(400).json({ error: 'title is required' });
     const result = await executeInsert(
-      'INSERT INTO news (title, content, excerpt, author_id, organization_id, image_url, category, custom_category, is_published, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())',
-      [title || '', content || '', excerpt || null, userId, orgId, image_url || null, category || null, custom_category || null, is_published === true]
+      'INSERT INTO news (title, content, excerpt, author_id, organization_id, image_url, youtube_url, category, custom_category, is_published, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())',
+      [title || '', content || '', excerpt || null, userId, orgId, image_url || null, youtube_url || null, category || null, custom_category || null, is_published === true]
     );
     const id = result.insertId || (result.rows && result.rows[0] && result.rows[0].id);
     const row = await executeQuery('SELECT id, title, excerpt, is_published, organization_id, created_at FROM news WHERE id = ?', [id]);
@@ -5073,14 +5078,14 @@ app.put('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req, re
   try {
     const orgId = req.organizationId;
     const id = parseInt(req.params.id);
-    const { title, content, excerpt, category, custom_category, image_url, is_published, published_at } = req.body || {};
+    const { title, content, excerpt, category, custom_category, image_url, youtube_url, is_published, published_at } = req.body || {};
     const existing = await executeQuery('SELECT id FROM news WHERE id = ? AND organization_id = ?', [id, orgId]);
     if (!existing.rows?.length) return res.status(404).json({ error: 'Artikel niet gevonden' });
     const publishedAtSql = published_at ? toMysqlDateTime(published_at) : null;
     const publishedAtVal = publishedAtSql || null;
     await executeQuery(
-      'UPDATE news SET title = ?, content = ?, excerpt = ?, category = ?, custom_category = ?, image_url = ?, is_published = ?, published_at = COALESCE(?, published_at), updated_at = NOW() WHERE id = ?',
-      [title ?? '', content ?? '', excerpt ?? null, category ?? null, custom_category ?? null, image_url ?? null, is_published === true, publishedAtVal, id]
+      'UPDATE news SET title = ?, content = ?, excerpt = ?, category = ?, custom_category = ?, image_url = ?, youtube_url = ?, is_published = ?, published_at = COALESCE(?, published_at), updated_at = NOW() WHERE id = ?',
+      [title ?? '', content ?? '', excerpt ?? null, category ?? null, custom_category ?? null, image_url ?? null, youtube_url ?? null, is_published === true, publishedAtVal, id]
     );
     const row = await executeQuery('SELECT id, title, excerpt, is_published, COALESCE(published_at, created_at) as published_at, updated_at FROM news WHERE id = ?', [id]);
     res.json({ article: row.rows[0] });
@@ -6108,6 +6113,7 @@ app.post('/api/setup-mysql-database', async (req, res) => {
           content TEXT NOT NULL,
           excerpt TEXT,
           image_url TEXT,
+          youtube_url VARCHAR(500),
           category VARCHAR(50),
           custom_category VARCHAR(100),
           author_id INT NOT NULL,
@@ -6126,6 +6132,12 @@ app.post('/api/setup-mysql-database', async (req, res) => {
       `);
       results.created.push('news');
     } else {
+      // Voeg youtube_url toe aan bestaande tabel als die kolom er nog niet is
+      try {
+        await executeQuery(
+          `ALTER TABLE news ADD COLUMN IF NOT EXISTS youtube_url VARCHAR(500)`
+        );
+      } catch (_) { /* kolom bestaat al */ }
       results.skipped.push('news');
     }
 

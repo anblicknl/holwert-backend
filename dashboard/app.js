@@ -622,6 +622,16 @@
                             ${imageEditable}
                         </div>
                         <div class="form-group">
+                            <label>YouTube-video (optioneel)</label>
+                            ${!isPreview
+                                ? `<input type="url" id="newsYoutubeUrl" placeholder="https://www.youtube.com/watch?v=... of https://youtu.be/..." value="${escapeHtml(article?.youtube_url || '')}">
+                                   <p class="form-hint">Als je een YouTube-link invult, wordt de video als Hero getoond in de app (vervangt de afbeelding).</p>`
+                                : (article?.youtube_url
+                                    ? `<a href="${escapeHtml(article.youtube_url)}" target="_blank" rel="noopener">${escapeHtml(article.youtube_url)}</a>`
+                                    : '<p class="form-hint">Geen video</p>')
+                            }
+                        </div>
+                        <div class="form-group">
                             <label><input type="checkbox" id="newsPublished" ${article?.is_published ? 'checked' : ''} ${dis}> Gepubliceerd</label>
                         </div>
                     </div>
@@ -658,6 +668,7 @@
                         content: document.getElementById('newsContent').value.trim(),
                         is_published: document.getElementById('newsPublished').checked,
                         image_url: imageUrl || null,
+                        youtube_url: (document.getElementById('newsYoutubeUrl')?.value || '').trim() || null,
                         published_at: publishedAtInput || null,
                     };
                     const url = id ? `${apiBase}/org/news/${id}` : `${apiBase}/org/news`;
