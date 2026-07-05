@@ -472,6 +472,7 @@
             loadNews();
             loadEvents();
             loadProfile();
+            loadOverview();
             if (span) span.textContent = 'Inloggen';
         } catch (err) {
             showError(err.message || 'Inloggen mislukt');
@@ -501,14 +502,59 @@
 
     document.querySelectorAll('.nav-item[data-section]').forEach(el => {
         el.addEventListener('click', () => {
-            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-            document.querySelectorAll('.content-section').forEach(s => s.classList.remove('active'));
-            el.classList.add('active');
-            const id = el.getAttribute('data-section');
-            const section = document.getElementById(id);
-            if (section) section.classList.add('active');
+            navigateToSection(el.getAttribute('data-section'));
         });
     });
+
+    function navigateToSection(sectionId) {
+        if (!sectionId) return;
+        document.querySelectorAll('.nav-item').forEach(n => {
+            n.classList.toggle('active', n.getAttribute('data-section') === sectionId);
+        });
+        document.querySelectorAll('.content-section').forEach(s => s.classList.remove('active'));
+        const section = document.getElementById(sectionId);
+        if (section) section.classList.add('active');
+        if (sectionId === 'followers') loadFollowers();
+        if (sectionId === 'overview') loadOverview();
+    }
+
+    async function loadFollowers() {
+        const container = document.getElementById('followersContent');
+        if (!container) return;
+        container.innerHTML = '<p class="form-hint" style="padding:1rem">Volgers laden…</p>';
+        try {
+            const res = await fetch(`${apiBase}/org/followers?limit=500`, { headers: authHeaders() });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.message || data.error || 'Laden mislukt');
+
+            const list = Array.isArray(data.followers) ? data.followers : [];
+            const count = data.count ?? list.length;
+
+            if (!list.length) {
+                container.innerHTML = `
+                    <p class="form-hint followers-privacy-hint">Nog niemand volgt jullie organisatie in de app. Zodra inwoners op «volgen» tikken, verschijnen ze hier (alleen voornaam).</p>
+                    <p class="empty-message">0 volgers</p>`;
+                return;
+            }
+
+            container.innerHTML = `
+                <p class="form-hint followers-privacy-hint">${count} volger${count === 1 ? '' : 's'} in de app. We tonen alleen voornaam en sinds wanneer iemand volgt — geen e-mailadressen.</p>
+                <ul class="followers-list">
+                    ${list.map((f) => {
+                        const name = (f.first_name && String(f.first_name).trim()) || 'App-gebruiker';
+                        const since = f.followed_at
+                            ? new Date(f.followed_at).toLocaleDateString('nl-NL', { day: 'numeric', month: 'long', year: 'numeric' })
+                            : '—';
+                        return `<li class="followers-list-item">
+                            <span class="followers-list-name"><i class="fas fa-user" aria-hidden="true"></i> ${escapeHtml(name)}</span>
+                            <span class="followers-list-since">Volgt sinds ${escapeHtml(since)}</span>
+                        </li>`;
+                    }).join('')}
+                </ul>`;
+        } catch (err) {
+            container.innerHTML = `<p class="form-hint" style="padding:1rem;color:#c00">Kon volgers niet laden: ${escapeHtml(err.message || 'onbekende fout')}</p>`;
+        }
+    }
 
     async function loadNews() {
         const container = document.getElementById('newsList');
@@ -583,6 +629,7 @@
                 ? `<p style="margin:0 0 8px"><img src="${escapeHtml(article.image_url)}" alt="" style="max-height:120px;border-radius:6px"></p>`
                 : '';
             const titleHtml = isPreview ? 'Artikel bekijken' : (article ? 'Artikel bewerken' : 'Nieuw artikel');
+            const editorToolbar = isPreview ? '' : '<div class="editor-toolbar"><button type="button" class="editor-btn" onclick="adminFormatText(\'newsContent\',\'bold\')" title="Vet"><b>B</b></button><button type="button" class="editor-btn" onclick="adminFormatText(\'newsContent\',\'italic\')" title="Cursief"><i>I</i></button><button type="button" class="editor-btn" onclick="adminFormatText(\'newsContent\',\'link\')" title="Link">&#128279;</button></div><small class="form-hint">Selecteer tekst en klik een knop om op te maken.</small>';
             const publishedAtValue = article?.published_at
                 ? toDatetimeInputValue(article.published_at)
                 : '';
@@ -610,16 +657,8 @@
                         </div>
                         <div class="form-group">
                             <label>Inhoud</label>
+                            ${editorToolbar}
                             <textarea id="newsContent" rows="6" ${ro}>${escapeHtml(article?.content || '')}</textarea>
-                        </div>
-                        <div class="form-group">
-                            <label>Publicatiedatum</label>
-                            <input type="datetime-local" id="newsPublishedAt" value="${publishedAtValue}" ${ro}>
-                            <p class="form-hint">Leeg laten = huidige datum bij opslaan.</p>
-                        </div>
-                        <div class="form-group">
-                            <label>Afbeelding</label>
-                            ${imageEditable}
                         </div>
                         <div class="form-group">
                             <label>Bronvermelding (optioneel)</label>
@@ -638,6 +677,15 @@
                                     ? `<p style="margin:0">Bron: <a href="${escapeHtml(article.source_url || '#')}" target="_blank" rel="noopener">${escapeHtml(article.source_name)}</a></p>`
                                     : '<p class="form-hint">Geen bronvermelding</p>')
                             }
+                        </div>
+                        <div class="form-group">
+                            <label>Publicatiedatum</label>
+                            <input type="datetime-local" id="newsPublishedAt" value="${publishedAtValue}" ${ro}>
+                            <p class="form-hint">Leeg laten = huidige datum bij opslaan.</p>
+                        </div>
+                        <div class="form-group">
+                            <label>Afbeelding</label>
+                            ${imageEditable}
                         </div>
                         <div class="form-group">
                             <label>YouTube-video (optioneel)</label>
@@ -1256,10 +1304,221 @@
                 loadNews();
                 loadEvents();
                 loadProfile();
+                loadOverview();
             })
             .catch(() => {
                 clearStoredToken();
                 token = null;
             });
     }
+
+    async function loadOverview() {
+        const container = document.getElementById('overviewContent');
+        const sidebar   = document.getElementById('sidebarStats');
+        if (!container) return;
+
+        container.innerHTML = '<p class="form-hint" style="padding:1rem">Statistieken laden…</p>';
+
+        try {
+            const orgId = organization?.id;
+            const headers = authHeaders();
+
+            const [newsRes, eventsRes, followersRes] = await Promise.all([
+                fetch(`${apiBase}/org/news?limit=200`, { headers }),
+                fetch(`${apiBase}/org/events?limit=200`, { headers }),
+                orgId ? fetch(`${apiBase}/organizations/${orgId}/followers/count`) : Promise.resolve(null),
+            ]);
+
+            const newsData     = newsRes.ok     ? await newsRes.json()     : {};
+            const eventsData   = eventsRes.ok   ? await eventsRes.json()   : {};
+            const followersData = (followersRes && followersRes.ok) ? await followersRes.json() : { count: 0 };
+
+            const allNews    = newsData.news   || [];
+            const allEvents  = eventsData.events || [];
+            const followers  = followersData.count ?? 0;
+
+            const published  = allNews.filter(n => n.is_published !== false).length;
+            const drafts     = allNews.length - published;
+            const now        = new Date();
+            const upcoming   = allEvents.filter(e => new Date(e.start_date || e.date) >= now).length;
+            const past       = allEvents.length - upcoming;
+
+            // Nieuwe volgers bijhouden via localStorage
+            const storageKey     = `holwert_followers_${orgId}`;
+            const storageDateKey = `holwert_followers_date_${orgId}`;
+            const prevCount      = parseInt(localStorage.getItem(storageKey) ?? '-1', 10);
+            const prevDate       = localStorage.getItem(storageDateKey);
+            const newFollowers   = prevCount >= 0 ? followers - prevCount : 0;
+            // Sla huidig aantal op voor de volgende sessie
+            localStorage.setItem(storageKey, String(followers));
+            localStorage.setItem(storageDateKey, new Date().toISOString());
+
+            // Tekst "sinds je laatste bezoek"
+            let sinceText = '';
+            if (prevDate) {
+                const diff = Math.round((Date.now() - new Date(prevDate).getTime()) / 86400000);
+                sinceText = diff === 0 ? 'vandaag'
+                    : diff === 1 ? 'gisteren'
+                    : `${diff} dagen geleden`;
+            }
+
+            // Meest recente berichten (max 5)
+            const recent = allNews
+                .filter(n => n.is_published !== false)
+                .sort((a, b) => new Date(b.published_at || b.created_at) - new Date(a.published_at || a.created_at))
+                .slice(0, 5);
+
+            // Eerstvolgende evenementen (max 5, vroegste eerst)
+            const nextEvents = allEvents
+                .filter(e => new Date(e.start_date || e.date) >= now)
+                .sort((a, b) => new Date(a.start_date || a.date) - new Date(b.start_date || b.date))
+                .slice(0, 5);
+
+            // Voorbije evenementen (max 5, meest recent eerst)
+            const pastEvents = allEvents
+                .filter(e => new Date(e.start_date || e.date) < now)
+                .sort((a, b) => new Date(b.start_date || b.date) - new Date(a.start_date || a.date))
+                .slice(0, 5);
+
+            const orgName = escapeHtml(organization?.name || 'Jouw organisatie');
+
+            // Badge voor nieuwe volgers
+            const newFollowersBadge = newFollowers > 0
+                ? `<div class="new-followers-banner">
+                       <i class="fas fa-heart"></i>
+                       <strong>+${newFollowers} nieuwe volger${newFollowers === 1 ? '' : 's'}</strong>
+                       ${sinceText ? `<span>sinds ${sinceText}</span>` : ''}
+                   </div>`
+                : '';
+
+            container.innerHTML = `
+                <div class="overview-welcome">
+                    <h3>Welkom terug, ${orgName}!</h3>
+                    <p class="form-hint">Hier zie je een snel overzicht van jouw activiteit in de Holwert Dorpsapp.</p>
+                </div>
+                ${newFollowersBadge}
+                <div class="overview-stats">
+                    <div class="stat-card stat-followers stat-card-clickable" role="button" tabindex="0" title="Bekijk wie jullie volgt" data-goto-followers="1">
+                        <div class="stat-icon"><i class="fas fa-heart"></i></div>
+                        <div class="stat-body">
+                            <div class="stat-value">${followers}</div>
+                            <div class="stat-label">Volger${followers === 1 ? '' : 's'}${sinceText && newFollowers === 0 ? ` <span class="stat-sub">(ongewijzigd)</span>` : ''} <span class="stat-sub stat-link-hint">· wie?</span></div>
+                        </div>
+                    </div>
+                    <div class="stat-card stat-news">
+                        <div class="stat-icon"><i class="fas fa-newspaper"></i></div>
+                        <div class="stat-body">
+                            <div class="stat-value">${published}</div>
+                            <div class="stat-label">Gepubliceerd${drafts > 0 ? ` <span class="stat-sub">(${drafts} concept${drafts === 1 ? '' : 'en'})</span>` : ''}</div>
+                        </div>
+                    </div>
+                    <div class="stat-card stat-events">
+                        <div class="stat-icon"><i class="fas fa-calendar-check"></i></div>
+                        <div class="stat-body">
+                            <div class="stat-value">${upcoming}</div>
+                            <div class="stat-label">Komend${upcoming === 1 ? '' : 'e evenement' + (upcoming === 1 ? '' : 'en')}</div>
+                        </div>
+                    </div>
+                    <div class="stat-card stat-past">
+                        <div class="stat-icon"><i class="fas fa-calendar-alt"></i></div>
+                        <div class="stat-body">
+                            <div class="stat-value">${past}</div>
+                            <div class="stat-label">Evenement${past === 1 ? '' : 'en'} geweest</div>
+                        </div>
+                    </div>
+                </div>
+                ${recent.length > 0 ? `
+                <div class="overview-section">
+                    <h4><i class="fas fa-newspaper"></i> Laatste berichten</h4>
+                    <ul class="overview-list">
+                        ${recent.map(n => `<li>
+                            <span class="overview-list-title">${escapeHtml(n.title || '')}</span>
+                            <span class="overview-list-date">${n.published_at ? new Date(n.published_at).toLocaleDateString('nl-NL', {day:'numeric',month:'short',year:'numeric'}) : ''}</span>
+                        </li>`).join('')}
+                    </ul>
+                </div>` : ''}
+                <div class="overview-events-grid">
+                    ${nextEvents.length > 0 ? `
+                    <div class="overview-section">
+                        <h4><i class="fas fa-calendar-check" style="color:#2f9e44"></i> Komende evenementen</h4>
+                        <ul class="overview-list">
+                            ${nextEvents.map(e => `<li>
+                                <span class="overview-list-title">${escapeHtml(e.title || '')}</span>
+                                <span class="overview-list-date">${e.start_date || e.date ? new Date(e.start_date || e.date).toLocaleDateString('nl-NL', {day:'numeric',month:'short',year:'numeric'}) : ''}</span>
+                            </li>`).join('')}
+                        </ul>
+                    </div>` : '<div class="overview-section"><p class="form-hint">Geen komende evenementen.</p></div>'}
+                    ${pastEvents.length > 0 ? `
+                    <div class="overview-section">
+                        <h4><i class="fas fa-calendar-alt" style="color:#868e96"></i> Evenementen geweest</h4>
+                        <ul class="overview-list overview-list-past">
+                            ${pastEvents.map(e => `<li>
+                                <span class="overview-list-title">${escapeHtml(e.title || '')}</span>
+                                <span class="overview-list-date">${e.start_date || e.date ? new Date(e.start_date || e.date).toLocaleDateString('nl-NL', {day:'numeric',month:'short',year:'numeric'}) : ''}</span>
+                            </li>`).join('')}
+                        </ul>
+                    </div>` : ''}
+                </div>
+            `;
+
+            // Sidebar-stats
+            if (sidebar) {
+                sidebar.innerHTML = `
+                    <button type="button" class="sidebar-stat sidebar-stat-btn" data-goto-followers="1" title="Bekijk volgers">
+                        <i class="fas fa-heart"></i> <span>${followers} volger${followers === 1 ? '' : 's'}</span>
+                    </button>
+                    <div class="sidebar-stat"><i class="fas fa-newspaper"></i> <span>${published} bericht${published === 1 ? '' : 'en'}</span></div>
+                    <div class="sidebar-stat"><i class="fas fa-calendar-check"></i> <span>${upcoming} komend</span></div>
+                    <div class="sidebar-stat"><i class="fas fa-calendar-alt"></i> <span>${past} geweest</span></div>
+                `;
+            }
+
+            container.querySelectorAll('[data-goto-followers]').forEach((el) => {
+                const go = () => navigateToSection('followers');
+                el.addEventListener('click', go);
+                el.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        go();
+                    }
+                });
+            });
+            document.getElementById('sidebarStats')?.querySelectorAll('[data-goto-followers]').forEach((el) => {
+                const go = () => navigateToSection('followers');
+                el.addEventListener('click', go);
+            });
+        } catch (err) {
+            container.innerHTML = '<p class="form-hint" style="padding:1rem;color:#c00">Kon statistieken niet laden.</p>';
+        }
+    }
 })();
+
+/**
+ * Opmaak-toolbar: wraps de geselecteerde tekst in de opgegeven textarea met HTML-tags.
+ * @param {string} textareaId
+ * @param {'bold'|'italic'|'link'} format
+ */
+function adminFormatText(textareaId, format) {
+    const ta = document.getElementById(textareaId);
+    if (!ta) return;
+    const start = ta.selectionStart;
+    const end   = ta.selectionEnd;
+    const selected = ta.value.substring(start, end);
+    let before, after, newCursor;
+    if (format === 'bold')        { before = '<strong>'; after = '</strong>'; }
+    else if (format === 'italic') { before = '<em>';     after = '</em>'; }
+    else if (format === 'link') {
+        const url = prompt('URL van de link:', 'https://');
+        if (!url) return;
+        before = `<a href="${url}">`; after = '</a>';
+    }
+    const replacement = before + (selected || 'tekst') + after;
+    ta.value = ta.value.substring(0, start) + replacement + ta.value.substring(end);
+    if (selected) {
+        ta.setSelectionRange(start, start + replacement.length);
+    } else {
+        newCursor = start + before.length;
+        ta.setSelectionRange(newCursor, newCursor + 5);
+    }
+    ta.focus();
+}

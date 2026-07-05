@@ -5654,6 +5654,36 @@ app.delete('/api/org/events/:id', authenticateToken, requireOrgPortal, async (re
   }
 });
 
+/** Volgers van eigen organisatie (alleen voornaam + volgt sinds — geen e-mail). */
+app.get('/api/org/followers', authenticateToken, requireOrgPortal, async (req, res) => {
+  try {
+    await ensureFollowsTable();
+    const orgId = req.organizationId;
+    const limitRaw = parseInt(req.query.limit, 10);
+    const limit = Number.isNaN(limitRaw) ? 500 : Math.min(Math.max(limitRaw, 1), 500);
+
+    const result = await executeQuery(
+      `SELECT u.first_name, f.created_at AS followed_at
+       FROM follows f
+       INNER JOIN users u ON u.id = f.user_id
+       WHERE f.organization_id = ?
+       ORDER BY f.created_at DESC
+       LIMIT ?`,
+      [orgId, limit],
+    );
+
+    const followers = (result.rows || []).map((row) => ({
+      first_name: row.first_name != null ? String(row.first_name).trim() : '',
+      followed_at: row.followed_at,
+    }));
+
+    res.json({ followers, count: followers.length });
+  } catch (error) {
+    console.error('GET /api/org/followers error:', error);
+    res.status(500).json({ error: 'Kon volgers niet ophalen', message: error.message });
+  }
+});
+
 // Privacy statement per organisatie
 app.get('/api/organizations/:id/privacy', async (req, res) => {
   try {

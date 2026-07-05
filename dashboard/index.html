@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard - Holwert Dorpsapp</title>
-    <link rel="stylesheet" href="styles.css?v=20260412-events-actions">
+    <link rel="stylesheet" href="styles.css?v=20260705-followers">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
 <body>
@@ -212,14 +212,33 @@
 
         <nav class="sidebar">
             <ul class="nav-menu">
-                <li class="nav-item active" data-section="news"><i class="fas fa-newspaper"></i><span>Nieuws</span></li>
+                <li class="nav-item active" data-section="overview"><i class="fas fa-chart-bar"></i><span>Overzicht</span></li>
+                <li class="nav-item" data-section="followers"><i class="fas fa-heart"></i><span>Volgers</span></li>
+                <li class="nav-item" data-section="news"><i class="fas fa-newspaper"></i><span>Nieuws</span></li>
                 <li class="nav-item" data-section="events"><i class="fas fa-calendar"></i><span>Agenda</span></li>
                 <li class="nav-item" data-section="profile"><i class="fas fa-building"></i><span>Organisatie profiel</span></li>
             </ul>
+            <div class="sidebar-stats" id="sidebarStats"></div>
         </nav>
 
         <main class="main-content">
-            <section id="news" class="content-section active">
+            <section id="overview" class="content-section active">
+                <div class="section-header">
+                    <h2><i class="fas fa-chart-bar"></i> Overzicht</h2>
+                </div>
+                <div id="overviewContent"></div>
+            </section>
+
+            <section id="followers" class="content-section">
+                <div class="section-header">
+                    <h2><i class="fas fa-heart"></i> Volgers</h2>
+                </div>
+                <div id="followersContent">
+                    <p class="form-hint">Volgers laden…</p>
+                </div>
+            </section>
+
+            <section id="news" class="content-section">
                 <div class="section-header">
                     <h2><i class="fas fa-newspaper"></i> Nieuws</h2>
                     <button type="button" id="addNewsBtn" class="btn btn-primary"><i class="fas fa-plus"></i> Nieuw artikel</button>
@@ -245,6 +264,6 @@
         </main>
     </div>
 
-    <script src="app.js"></script>
+    <script src="app.js?v=20260705-followers"></script>
 </body>
 </html>
