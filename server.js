@@ -265,6 +265,7 @@ function getMigrationsReady() {
         await ensureProfileNumberColumn();
         await ensureHolwertRelationshipColumn();
         await ensureUsersPhoneColumn();
+        await ensureUsersOrganizationIdColumn();
         await ensurePrivacyStatementColumn();
         await ensurePracticalInfoTable();
         await ensureContentPagesTable();
@@ -3851,6 +3852,146 @@ app.put('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (
 });
 
 // Approve organization (admin) — goedkeuren + optioneel automatisch dashboard-gebruiker (zelfde contact-e-mail)
+async function fetchAdminUserById(userId) {
+  const queries = [
+    'SELECT id, first_name, last_name, email, phone, profile_image_url, profile_number, relationship_with_holwert, role, is_active, organization_id, created_at, updated_at FROM users WHERE id = ?',
+    'SELECT id, first_name, last_name, email, role, is_active, organization_id, created_at, updated_at FROM users WHERE id = ?',
+    'SELECT id, first_name, last_name, email, role, is_active, created_at, updated_at FROM users WHERE id = ?',
+  ];
+  for (const q of queries) {
+    try {
+      const r = await executeQuery(q, [userId]);
+      if (r.rows?.[0]) return r.rows[0];
+    } catch (_) {
+      /* probeer volgende variant */
+    }
+  }
+  return null;
+}
+
+/** Maak of koppel dashboard-login; organisatie-contact-e-mail mag inlog-e-mail zijn. */
+async function ensureOrLinkOrgDashboardUser({ orgId, email, password, orgName }) {
+  await ensureUsersOrganizationIdColumn();
+
+  const orgIdNum = parseInt(orgId, 10);
+  if (Number.isNaN(orgIdNum) || orgIdNum < 1) {
+    return { ok: false, reason: 'invalid_org', error: 'Ongeldige organisatie.' };
+  }
+
+  const emailTrim = email != null ? String(email).trim() : '';
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(emailTrim)) {
+    return { ok: false, reason: 'invalid_email', error: 'Geen geldig e-mailadres.' };
+  }
+
+  const fn =
+    orgName != null && String(orgName).trim()
+      ? String(orgName).trim().slice(0, 80)
+      : 'Organisatie';
+  const ln = '—';
+
+  let existing = null;
+  try {
+    const dup = await executeQuery(
+      'SELECT id, organization_id, relationship_with_holwert FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM(?)) LIMIT 1',
+      [emailTrim],
+    );
+    existing = dup.rows?.[0] ?? null;
+  } catch (_) {
+    const dup = await executeQuery('SELECT id, organization_id FROM users WHERE email = ? LIMIT 1', [emailTrim]);
+    existing = dup.rows?.[0] ?? null;
+  }
+
+  if (existing) {
+    let rel = null;
+    try {
+      const relRow = await executeQuery(
+        'SELECT relationship_with_holwert FROM users WHERE id = ? LIMIT 1',
+        [existing.id],
+      );
+      rel = relRow.rows?.[0]?.relationship_with_holwert;
+    } catch (_) {
+      /* kolom ontbreekt */
+    }
+    if (rel != null && String(rel).trim() !== '') {
+      return {
+        ok: false,
+        reason: 'app_user_email',
+        error: 'Dit e-mailadres hoort bij een app-gebruiker.',
+        message:
+          'Gebruik voor het organisatie-dashboard een ander adres, of een apart contactadres bij de organisatie.',
+      };
+    }
+
+    const oi =
+      existing.organization_id != null && existing.organization_id !== ''
+        ? parseInt(existing.organization_id, 10)
+        : null;
+
+    if (oi != null && !Number.isNaN(oi) && oi === orgIdNum) {
+      if (password && String(password).length >= 6) {
+        const hashed = await bcrypt.hash(password, 10);
+        await executeQuery('UPDATE users SET password_hash = ? WHERE id = ?', [hashed, existing.id]);
+      }
+      return { ok: true, userId: existing.id, created: false, linked: false, email: emailTrim };
+    }
+
+    if (oi != null && !Number.isNaN(oi) && oi > 0 && oi !== orgIdNum) {
+      return {
+        ok: false,
+        reason: 'other_org',
+        error: 'Dit e-mailadres is al gekoppeld aan een andere organisatie.',
+      };
+    }
+
+    const sets = ['organization_id = ?', 'first_name = ?', 'last_name = ?'];
+    const params = [orgIdNum, fn, ln];
+    if (password && String(password).length >= 6) {
+      sets.push('password_hash = ?');
+      params.push(await bcrypt.hash(password, 10));
+    }
+    params.push(existing.id);
+    await executeQuery(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`, params);
+    return { ok: true, userId: existing.id, created: false, linked: true, email: emailTrim };
+  }
+
+  if (!password || String(password).length < 6) {
+    return { ok: false, reason: 'password_required', error: 'Wachtwoord is verplicht (minimaal 6 tekens).' };
+  }
+
+  const hashed = await bcrypt.hash(password, 10);
+  const insertResult = await executeInsert(
+    `INSERT INTO users (first_name, last_name, email, password_hash, role, is_active, organization_id)
+     VALUES (?, ?, ?, ?, 'user', 1, ?)`,
+    [fn, ln, emailTrim, hashed, orgIdNum],
+  );
+
+  let userId = insertResult.insertId || insertResult.rows?.[0]?.id;
+  if (!userId) {
+    const refetch = await executeQuery('SELECT id FROM users WHERE email = ? LIMIT 1', [emailTrim]);
+    userId = refetch.rows?.[0]?.id;
+  }
+  if (!userId) {
+    return {
+      ok: false,
+      reason: 'insert_failed',
+      error: 'Account kon niet worden aangemaakt.',
+      message: String(insertResult?.rowCount ? 'Insert zonder id' : 'Database-insert mislukt'),
+    };
+  }
+
+  try {
+    await executeQuery('UPDATE users SET profile_number = ? WHERE id = ?', [
+      String(userId).padStart(4, '0'),
+      userId,
+    ]);
+  } catch (_) {
+    /* optioneel */
+  }
+
+  return { ok: true, userId, created: true, linked: false, email: emailTrim };
+}
+
 app.post('/api/admin/organizations/:id/approve', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const orgId = parseInt(req.params.id, 10);
@@ -3867,63 +4008,57 @@ app.post('/api/admin/organizations/:id/approve', authenticateToken, requireAdmin
     );
     const org = orgResult.rows[0] || {};
     let user_created = false;
+    let user_linked = false;
     let dashboard_login_email = null;
     let temporary_password = null;
     let user_notice = null;
 
-    const linkedUsers = await executeQuery(
-      'SELECT id FROM users WHERE organization_id = ? LIMIT 1',
-      [orgId],
-    );
-    if (linkedUsers.rows.length > 0) {
+    let alreadyLinked = false;
+    try {
+      const linkedUsers = await executeQuery(
+        'SELECT id FROM users WHERE organization_id = ? LIMIT 1',
+        [orgId],
+      );
+      alreadyLinked = linkedUsers.rows.length > 0;
+    } catch (linkErr) {
+      console.warn('[approve org] organization_id check:', linkErr.message);
+      await ensureUsersOrganizationIdColumn();
+    }
+
+    if (alreadyLinked) {
       user_notice =
         'Er was al minstens één account gekoppeld aan deze organisatie; er is geen nieuw dashboard-account aangemaakt.';
     } else {
       const emailRaw = org.email != null ? String(org.email).trim() : '';
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(emailRaw)) {
+      if (!emailRaw) {
         user_notice =
-          'Geen geldig contact-e-mailadres bij deze organisatie. Voeg bij Organisaties een e-mail toe en maak zo nodig handmatig een gebruiker aan.';
+          'Geen contact-e-mailadres bij deze organisatie. Voeg een e-mail toe onder Organisaties; dat adres kan ook als dashboard-inlog dienen.';
       } else {
-        const dup = await executeQuery(
-          'SELECT id, organization_id FROM users WHERE email = ? LIMIT 1',
-          [emailRaw],
-        );
-        if (dup.rows.length > 0) {
-          const oi = dup.rows[0].organization_id;
-          if (oi != null && Number(oi) === orgId) {
-            user_notice = 'Er bestond al een gebruiker met dit e-mailadres voor deze organisatie.';
-          } else {
-            user_notice =
-              'Dit e-mailadres is al in gebruik door een ander account. Los dit op onder Gebruikers (ander e-mailadres bij de organisatie of bestaand account koppelen).';
-          }
-        } else {
-          const plain = crypto.randomBytes(18).toString('base64url').slice(0, 24);
-          const hashed = await bcrypt.hash(plain, 10);
-          const nameTrim = (org.name && String(org.name).trim()) ? String(org.name).trim().slice(0, 80) : 'Organisatie';
-          const firstName = nameTrim;
-          const lastName = '';
-          try {
-            await executeInsert(
-              `INSERT INTO users (first_name, last_name, email, password_hash, role, is_active, organization_id)
-               VALUES (?, ?, ?, ?, 'user', true, ?)`,
-              [firstName, lastName, emailRaw, hashed, orgId],
-            );
-            user_created = true;
-            dashboard_login_email = emailRaw;
+        const plain = crypto.randomBytes(18).toString('base64url').slice(0, 24);
+        const dashResult = await ensureOrLinkOrgDashboardUser({
+          orgId,
+          email: emailRaw,
+          password: plain,
+          orgName: org.name,
+        });
+        if (dashResult.ok) {
+          dashboard_login_email = dashResult.email || emailRaw;
+          user_created = !!dashResult.created;
+          user_linked = !!dashResult.linked;
+          if (dashResult.created) {
             temporary_password = plain;
             user_notice =
-              'Er is automatisch een dashboard-account aangemaakt voor het web-dashboard. Geef het tijdelijke wachtwoord veilig door aan de organisatie (of wijzig het onder Gebruikers).';
-          } catch (insErr) {
-            if (insErr.code === 'ER_DUP_ENTRY' || insErr.errno === 1062) {
-              user_notice =
-                'Kon geen account aanmaken: dit e-mailadres bestaat al. Pas het contactadres van de organisatie aan of koppel een bestaand account.';
-            } else {
-              console.error('[POST approve organization] user insert:', insErr);
-              user_notice =
-                'Organisatie is goedgekeurd, maar aanmaken van het dashboard-account mislukte. Maak handmatig een gebruiker aan onder Gebruikers.';
-            }
+              'Dashboard-account aangemaakt met het contact-e-mailadres van de organisatie. Geef het tijdelijke wachtwoord veilig door (of wijzig het onder Gebruikers → Organisatie-inlog).';
+          } else if (dashResult.linked) {
+            temporary_password = plain;
+            user_notice =
+              'Bestaand account gekoppeld aan deze organisatie. Nieuw tijdelijk wachtwoord gegenereerd — geef dat veilig door.';
+          } else {
+            user_notice = 'Er bestond al een dashboard-account voor dit contact-e-mailadres.';
           }
+        } else {
+          user_notice = [dashResult.error, dashResult.message].filter(Boolean).join(' ') ||
+            'Organisatie is goedgekeurd, maar het dashboard-account kon niet worden aangemaakt. Probeer handmatig onder Gebruikers → Organisatie-inlog.';
         }
       }
     }
@@ -3937,6 +4072,7 @@ app.post('/api/admin/organizations/:id/approve', authenticateToken, requireAdmin
     res.json({
       message: 'Organisatie goedgekeurd',
       user_created,
+      user_linked,
       ...(dashboard_login_email ? { dashboard_login_email } : {}),
       ...(temporary_password ? { temporary_password } : {}),
       ...(user_notice ? { user_notice } : {}),
@@ -4770,6 +4906,13 @@ app.get('/api/admin/users', authenticateToken, requireAdmin, async (req, res) =>
 });
 
 // Create user (admin)
+function isMysqlDuplicateError(error) {
+  if (!error) return false;
+  if (error.code === '23505' || error.code === 'ER_DUP_ENTRY' || error.errno === 1062) return true;
+  const m = String(error.message || '').toLowerCase();
+  return m.includes('duplicate entry') || m.includes('unique constraint') || m.includes('already exists');
+}
+
 app.post('/api/admin/users', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const {
@@ -4789,6 +4932,8 @@ app.post('/api/admin/users', authenticateToken, requireAdmin, async (req, res) =
         ? parseInt(organization_id, 10)
         : null;
     const orgIdValid = orgId != null && !Number.isNaN(orgId) && orgId > 0;
+    const activeVal =
+      is_active === false || is_active === 0 || is_active === '0' || is_active === 'false' ? 0 : 1;
 
     let fn = first_name != null ? String(first_name).trim() : '';
     let ln = last_name != null ? String(last_name).trim() : '';
@@ -4804,57 +4949,117 @@ app.post('/api/admin/users', authenticateToken, requireAdmin, async (req, res) =
     const relVal = allowedRel.has(relRaw) ? relRaw : null;
 
     if (orgIdValid) {
-      if (!fn) {
-        const orgR = await executeQuery('SELECT name FROM organizations WHERE id = ? LIMIT 1', [orgId]);
-        if (!orgR.rows?.length) {
-          return res.status(404).json({ error: 'Organisatie niet gevonden' });
-        }
-        const orgName = String(orgR.rows[0].name || 'Organisatie').trim() || 'Organisatie';
-        fn = orgName.slice(0, 80);
+      const orgR = await executeQuery('SELECT name, email FROM organizations WHERE id = ? LIMIT 1', [orgId]);
+      if (!orgR.rows?.length) {
+        return res.status(404).json({ error: 'Organisatie niet gevonden' });
       }
-      ln = ln || '';
-    } else if (!fn || !ln) {
-      return res.status(400).json({
-        error: 'Voornaam en achternaam zijn verplicht voor een dorpsbewoner (app) zonder organisatie-dashboard.',
+      const orgRow = orgR.rows[0];
+      const orgName = String(orgRow.name || 'Organisatie').trim() || 'Organisatie';
+
+      const dashResult = await ensureOrLinkOrgDashboardUser({
+        orgId,
+        email: emailTrim,
+        password,
+        orgName,
       });
-    } else if (!relVal) {
-      return res.status(400).json({
-        error: 'Kies een relatie met Holwert (verplicht voor een dorpsbewoner-account).',
+
+      if (!dashResult.ok) {
+        const status =
+          dashResult.reason === 'app_user_email' || dashResult.reason === 'other_org' ? 409 : 400;
+        return res.status(status).json({
+          error: dashResult.error || 'Account kon niet worden aangemaakt.',
+          ...(dashResult.message ? { message: dashResult.message } : {}),
+        });
+      }
+
+      const user = await fetchAdminUserById(dashResult.userId);
+      if (!user) {
+        return res.status(201).json({
+          user: { id: dashResult.userId, email: emailTrim, organization_id: orgId },
+          linked: dashResult.linked,
+          created: dashResult.created,
+        });
+      }
+
+      return res.status(dashResult.created ? 201 : 200).json({
+        user,
+        linked: dashResult.linked,
+        created: dashResult.created,
+        ...(dashResult.linked
+          ? { message: 'Bestaand account gekoppeld aan de organisatie (zelfde e-mail als contactadres mag).' }
+          : {}),
       });
     }
 
-    let insertResult;
-    if (orgIdValid) {
-      insertResult = await executeInsert(
-        `INSERT INTO users (first_name, last_name, email, password_hash, role, is_active, organization_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [fn, ln, emailTrim, hashed, role, is_active, orgId],
-      );
-    } else {
-      insertResult = await executeInsert(
-        `INSERT INTO users (first_name, last_name, email, password_hash, role, is_active, organization_id, relationship_with_holwert, phone)
-         VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
-        [fn, ln, emailTrim, hashed, role, is_active, relVal, phoneTrim],
-      );
+    if (!fn || !ln) {
+      return res.status(400).json({
+        error: 'Voornaam en achternaam zijn verplicht voor een app-gebruiker.',
+      });
+    }
+    if (!relVal) {
+      return res.status(400).json({
+        error: 'Kies een relatie met Holwert (verplicht voor een app-gebruiker).',
+      });
     }
 
-    const userId = insertResult.insertId || insertResult.rows?.[0]?.id;
-    if (!userId) {
-      return res.status(500).json({ error: 'Failed to create user', message: 'No insertId returned' });
+    let existingUser = null;
+    try {
+      const dup = await executeQuery(
+        'SELECT id FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM(?)) LIMIT 1',
+        [emailTrim],
+      );
+      existingUser = dup.rows?.[0] ?? null;
+    } catch (_) {
+      const dup = await executeQuery('SELECT id FROM users WHERE email = ? LIMIT 1', [emailTrim]);
+      existingUser = dup.rows?.[0] ?? null;
     }
 
-    const fetchResult = await executeQuery(
-      'SELECT id, first_name, last_name, email, phone, profile_image_url, profile_number, relationship_with_holwert, role, is_active, organization_id, created_at, updated_at FROM users WHERE id = ?',
-      [userId],
+    if (existingUser) {
+      return res.status(409).json({ error: 'Dit e-mailadres is al geregistreerd.' });
+    }
+
+    const insertResult = await executeInsert(
+      `INSERT INTO users (first_name, last_name, email, password_hash, role, is_active, organization_id, relationship_with_holwert, phone)
+       VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+      [fn, ln, emailTrim, hashed, role, activeVal, relVal, phoneTrim],
     );
 
-    res.status(201).json({ user: fetchResult.rows[0] });
+    let userId = insertResult.insertId || insertResult.rows?.[0]?.id;
+    if (!userId) {
+      const refetch = await executeQuery('SELECT id FROM users WHERE email = ? LIMIT 1', [emailTrim]);
+      userId = refetch.rows?.[0]?.id;
+    }
+    if (!userId) {
+      return res.status(500).json({
+        error: 'Account kon niet worden aangemaakt.',
+        message: 'De database gaf geen gebruikers-id terug.',
+      });
+    }
+
+    try {
+      await executeQuery('UPDATE users SET profile_number = ? WHERE id = ?', [
+        String(userId).padStart(4, '0'),
+        userId,
+      ]);
+    } catch (_) {
+      /* optioneel */
+    }
+
+    const user = await fetchAdminUserById(userId);
+    res.status(201).json({ user: user || { id: userId, email: emailTrim } });
   } catch (error) {
-    if (error.code === '23505' || error.code === 'ER_DUP_ENTRY' || error.errno === 1062) {
-      return res.status(409).json({ error: 'Email already exists' });
+    if (isMysqlDuplicateError(error)) {
+      return res.status(409).json({
+        error: 'Dit e-mailadres is al in gebruik.',
+        message:
+          'Gebruik een ander e-mailadres, of koppel het bestaande account aan de organisatie via Gebruikers → Bewerken.',
+      });
     }
     console.error('Create user error:', error);
-    res.status(500).json({ error: 'Failed to create user', message: error.message });
+    res.status(500).json({
+      error: 'Account kon niet worden aangemaakt.',
+      message: error.message || 'Onbekende serverfout',
+    });
   }
 });
 
@@ -6734,6 +6939,26 @@ async function ensureUsersPhoneColumn() {
   } catch (e) {
     if (e.code === 'ER_DUP_FIELDNAME' || (e.message && e.message.includes('Duplicate'))) return;
     console.error('ensureUsersPhoneColumn error:', e.message);
+  }
+}
+
+async function ensureUsersOrganizationIdColumn() {
+  try {
+    await executeQuery('SELECT organization_id FROM users LIMIT 1');
+    return;
+  } catch (probeErr) {
+    const msg = String(probeErr.message || '').toLowerCase();
+    if (!msg.includes('unknown column') || !msg.includes('organization_id')) {
+      console.warn('ensureUsersOrganizationIdColumn probe:', probeErr.message);
+      return;
+    }
+  }
+  try {
+    await executeQuery('ALTER TABLE users ADD COLUMN organization_id INT NULL');
+    console.log('✅ organization_id kolom toegevoegd aan users');
+  } catch (e) {
+    if (e.code === 'ER_DUP_FIELDNAME' || String(e.message || '').includes('Duplicate')) return;
+    console.error('ensureUsersOrganizationIdColumn alter:', e.message);
   }
 }
 
