@@ -539,6 +539,13 @@ function isMysqlMissingColumnError(err) {
   return typeof m === 'string' && m.includes('Unknown column');
 }
 
+function isMysqlMissingTableError(err) {
+  if (!err) return false;
+  if (err.code === 'ER_NO_SUCH_TABLE' || err.errno === 1146) return true;
+  const m = String(err.message || err.sqlMessage || '').toLowerCase();
+  return m.includes("doesn't exist") && m.includes('table');
+}
+
 function isMysqlDataTooLongError(err) {
   if (!err) return false;
   if (err.code === 'ER_DATA_TOO_LONG' || err.errno === 1406) return true;
@@ -2664,39 +2671,44 @@ function isOrgDashboardPasswordResetEligible(u) {
 }
 
 async function sendOrgPasswordResetEmailResend({ toEmail, resetUrl }) {
-  const key = process.env.RESEND_API_KEY;
-  const from = process.env.RESEND_FROM || 'Holwert <onboarding@resend.dev>';
-  if (!key) {
-    return { ok: false, reason: 'no_key' };
-  }
-  const esc = (s) =>
-    String(s)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-  const res = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${key}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      from,
-      to: [toEmail],
-      subject: 'Holwert – wachtwoord vernieuwen (organisatie-dashboard)',
-      html: `<p>Je hebt een nieuw wachtwoord aangevraagd voor het <strong>Holwert organisatie-dashboard</strong>.</p>
+  try {
+    const key = process.env.RESEND_API_KEY;
+    const from = process.env.RESEND_FROM || 'Holwert <onboarding@resend.dev>';
+    if (!key) {
+      return { ok: false, reason: 'no_key' };
+    }
+    const esc = (s) =>
+      String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from,
+        to: [toEmail],
+        subject: 'Holwert – wachtwoord vernieuwen (organisatie-dashboard)',
+        html: `<p>Je hebt een nieuw wachtwoord aangevraagd voor het <strong>Holwert organisatie-dashboard</strong>.</p>
 <p><a href="${esc(resetUrl)}">Klik hier om een nieuw wachtwoord in te stellen</a></p>
 <p>Of kopieer deze link in je browser:<br><span style="word-break:break-all">${esc(resetUrl)}</span></p>
 <p>Deze link is <strong>1 uur</strong> geldig. Als je dit niet zelf hebt aangevraagd, kun je deze e-mail negeren.</p>`,
-    }),
-  });
-  if (!res.ok) {
-    const t = await res.text();
-    console.error('[Resend org forgot]', res.status, t);
-    return { ok: false, reason: 'api_error' };
+      }),
+    });
+    if (!res.ok) {
+      const t = await res.text();
+      console.error('[Resend org forgot]', res.status, t);
+      return { ok: false, reason: 'api_error' };
+    }
+    return { ok: true };
+  } catch (e) {
+    console.error('[Resend org forgot] exception:', e.message);
+    return { ok: false, reason: 'exception' };
   }
-  return { ok: true };
 }
 
 // Wachtwoord vergeten (alleen accounts met organisatie, geen beheerdersrollen)
@@ -2716,12 +2728,19 @@ async function handleOrgForgotPasswordRequest(req, res) {
     if (!user || !isOrgDashboardPasswordResetEligible(user)) {
       return res.status(200).json(generic);
     }
+    await ensureOrgPasswordResetsTable();
     const rawToken = crypto.randomBytes(32).toString('hex');
     const tokenHash = hashOrgPasswordResetToken(rawToken);
-    await executeQuery('DELETE FROM org_password_resets WHERE user_id = ?', [user.id]);
+    const expiresAt = toMysqlDateTime(new Date(Date.now() + 60 * 60 * 1000));
+    try {
+      await executeQuery('DELETE FROM org_password_resets WHERE user_id = ?', [user.id]);
+    } catch (delErr) {
+      if (!isMysqlMissingTableError(delErr)) throw delErr;
+      await ensureOrgPasswordResetsTable();
+    }
     await executeInsert(
-      'INSERT INTO org_password_resets (user_id, token_hash, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR))',
-      [user.id, tokenHash],
+      'INSERT INTO org_password_resets (user_id, token_hash, expires_at) VALUES (?, ?, ?)',
+      [user.id, tokenHash, expiresAt],
     );
     const resetUrl = `${getOrgDashboardPublicBaseUrl()}?reset=${encodeURIComponent(rawToken)}`;
     const sent = await sendOrgPasswordResetEmailResend({ toEmail: user.email, resetUrl });
@@ -7059,6 +7078,15 @@ async function initializePushNotificationsTables() {
 
 async function ensureOrgPasswordResetsTable() {
   try {
+    await executeQuery('SELECT 1 FROM org_password_resets LIMIT 1');
+    return;
+  } catch (probeErr) {
+    if (!isMysqlMissingTableError(probeErr)) {
+      console.warn('ensureOrgPasswordResetsTable probe:', probeErr.message);
+      return;
+    }
+  }
+  try {
     await executeQuery(`
       CREATE TABLE IF NOT EXISTS org_password_resets (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -7070,9 +7098,10 @@ async function ensureOrgPasswordResetsTable() {
         KEY idx_org_password_resets_token (token_hash)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
-    console.log('✅ org_password_resets tabel gecontroleerd');
+    console.log('✅ org_password_resets tabel aangemaakt');
   } catch (e) {
-    console.error('ensureOrgPasswordResetsTable error:', e.message);
+    console.error('ensureOrgPasswordResetsTable create:', e.message);
+    throw e;
   }
 }
 
