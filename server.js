@@ -2745,11 +2745,19 @@ async function handleOrgForgotPasswordRequest(req, res) {
     const resetUrl = `${getOrgDashboardPublicBaseUrl()}?reset=${encodeURIComponent(rawToken)}`;
     const sent = await sendOrgPasswordResetEmailResend({ toEmail: user.email, resetUrl });
     if (!sent.ok) {
-      await executeQuery('DELETE FROM org_password_resets WHERE user_id = ?', [user.id]);
+      await executeQuery('DELETE FROM org_password_resets WHERE user_id = ?', [user.id]).catch(() => {});
       console.warn('[org-forgot-password] geen e-mail verstuurd:', sent.reason);
     }
     return res.status(200).json(generic);
   } catch (error) {
+    const msg = String(error?.message || '');
+    if (/disallowed table/i.test(msg) && /org_password_resets/i.test(msg)) {
+      console.error('org-forgot-password: org_password_resets niet op proxy-whitelist');
+      return res.status(503).json({
+        error: 'Wachtwoord-reset is tijdelijk niet beschikbaar. De beheerder moet db-proxy.php bijwerken (tabel org_password_resets).',
+        message: msg,
+      });
+    }
     console.error('org-forgot-password error:', error);
     return res.status(500).json({
       error: 'Er ging iets mis. Probeer het later opnieuw.',

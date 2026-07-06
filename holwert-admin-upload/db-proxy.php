@@ -59,8 +59,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['check'])) {
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode([
         'proxy' => 'db-proxy',
-        'version' => '2026-02-26-v2',
-        'tables' => ['bookmarks', 'push_notification_mutes', 'follows', 'push_tokens', 'users', 'organizations', 'news', 'events', 'content_pages', 'practical_info'],
+        'version' => '2026-07-06-v1',
+        'tables' => ['bookmarks', 'push_notification_mutes', 'follows', 'push_tokens', 'users', 'organizations', 'news', 'events', 'content_pages', 'practical_info', 'afvalkalender_config', 'org_password_resets'],
     ]);
     exit;
 }
@@ -100,6 +100,7 @@ $allowedTables = [
     'content_pages',
     'practical_info',
     'afvalkalender_config',
+    'org_password_resets',
 ];
 
 $query = $input['query'];
