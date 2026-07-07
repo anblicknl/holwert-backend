@@ -2634,6 +2634,15 @@ app.post('/api/auth/login', loginRateLimiter, async (req, res) => {
 
 const ORG_DASHBOARD_ELEVATED_ROLES = new Set(['admin', 'superadmin', 'editor']);
 
+function isMysqlUserActive(val) {
+  if (val === true || val === 1) return true;
+  if (typeof val === 'string') {
+    const s = val.trim().toLowerCase();
+    return s === '1' || s === 'true';
+  }
+  return false;
+}
+
 function hashOrgPasswordResetToken(rawToken) {
   return crypto.createHash('sha256').update(String(rawToken), 'utf8').digest('hex');
 }
@@ -2663,9 +2672,11 @@ async function findUserRowForOrgPasswordReset(emailNormalized) {
 }
 
 function isOrgDashboardPasswordResetEligible(u) {
-  if (!u || !u.is_active) return false;
+  if (!u) return false;
+  if (!isMysqlUserActive(u.is_active)) return false;
   const role = String(u.role || '').toLowerCase();
-  if (ORG_DASHBOARD_ELEVATED_ROLES.has(role)) return false;
+  // Platform-beheerders nooit via org-reset; editor/user mét organization_id wel.
+  if (role === 'admin' || role === 'superadmin') return false;
   const oid = u.organization_id != null ? parseInt(u.organization_id, 10) : NaN;
   return !Number.isNaN(oid) && oid > 0;
 }
