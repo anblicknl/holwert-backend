@@ -64,6 +64,152 @@ if ($from === '') {
     $from = 'Holwert <noreply@' . $host . '>';
 }
 
+$smtpHost = getenv('SMTP_HOST') ?: '';
+$smtpPort = (int)(getenv('SMTP_PORT') ?: 0);
+$smtpUser = getenv('SMTP_USER') ?: '';
+$smtpPass = getenv('SMTP_PASS') ?: '';
+$smtpFrom = getenv('SMTP_FROM') ?: '';
+
+// Optioneel: credentials-bestand op de server (NIET in repo committen).
+// Verwacht (voorbeeld zonder secrets):
+//   <?php
+//   define('SMTP_HOST', 'mail.hostingserver.nl');
+//   define('SMTP_PORT', 465);
+//   define('SMTP_USER', 'noreply@appenvloed.com');
+//   define('SMTP_PASS', '...'); // alleen op server
+//   define('SMTP_FROM', 'Holwert <noreply@appenvloed.com>');
+if (is_file(__DIR__ . '/send-mail-credentials.php')) {
+    require __DIR__ . '/send-mail-credentials.php';
+    if (defined('SMTP_HOST') && $smtpHost === '') $smtpHost = SMTP_HOST;
+    if (defined('SMTP_PORT') && $smtpPort === 0) $smtpPort = (int)SMTP_PORT;
+    if (defined('SMTP_USER') && $smtpUser === '') $smtpUser = SMTP_USER;
+    if (defined('SMTP_PASS') && $smtpPass === '') $smtpPass = SMTP_PASS;
+    if (defined('SMTP_FROM') && $smtpFrom === '') $smtpFrom = SMTP_FROM;
+}
+
+function smtpReadLine($fp) {
+    $line = fgets($fp, 8192);
+    return $line === false ? '' : $line;
+}
+function smtpReadResponse($fp) {
+    $all = '';
+    while (true) {
+        $line = smtpReadLine($fp);
+        if ($line === '') break;
+        $all .= $line;
+        // "250-" means more lines; "250 " ends.
+        if (preg_match('/^\d{3} /', $line)) break;
+    }
+    return $all;
+}
+function smtpSend($fp, $cmd) {
+    fwrite($fp, $cmd . "\r\n");
+}
+function smtpExpectCode($resp, $codes) {
+    foreach ($codes as $c) {
+        if (preg_match('/^' . preg_quote((string)$c, '/') . '/', $resp)) return true;
+    }
+    return false;
+}
+
+function sendViaSmtp($smtpHost, $smtpPort, $smtpUser, $smtpPass, $smtpFrom, $to, $fromHeader, $subject, $html) {
+    $host = $smtpHost;
+    $port = $smtpPort > 0 ? $smtpPort : 465;
+    $timeout = 10;
+
+    $fp = @fsockopen('ssl://' . $host, $port, $errno, $errstr, $timeout);
+    if (!$fp) {
+        return ['ok' => false, 'message' => "SMTP connect failed: $errstr ($errno)"];
+    }
+    stream_set_timeout($fp, $timeout);
+
+    $greet = smtpReadResponse($fp);
+    if (!smtpExpectCode($greet, [220])) {
+        fclose($fp);
+        return ['ok' => false, 'message' => 'SMTP greet failed'];
+    }
+
+    $local = isset($_SERVER['HTTP_HOST']) ? preg_replace('/:\d+$/', '', $_SERVER['HTTP_HOST']) : 'localhost';
+    smtpSend($fp, 'EHLO ' . $local);
+    $ehlo = smtpReadResponse($fp);
+    if (!smtpExpectCode($ehlo, [250])) {
+        smtpSend($fp, 'HELO ' . $local);
+        $helo = smtpReadResponse($fp);
+        if (!smtpExpectCode($helo, [250])) {
+            fclose($fp);
+            return ['ok' => false, 'message' => 'SMTP EHLO/HELO failed'];
+        }
+    }
+
+    // AUTH LOGIN
+    if ($smtpUser !== '' && $smtpPass !== '') {
+        smtpSend($fp, 'AUTH LOGIN');
+        $r1 = smtpReadResponse($fp);
+        if (!smtpExpectCode($r1, [334])) {
+            fclose($fp);
+            return ['ok' => false, 'message' => 'SMTP AUTH not accepted'];
+        }
+        smtpSend($fp, base64_encode($smtpUser));
+        $r2 = smtpReadResponse($fp);
+        if (!smtpExpectCode($r2, [334])) {
+            fclose($fp);
+            return ['ok' => false, 'message' => 'SMTP AUTH username rejected'];
+        }
+        smtpSend($fp, base64_encode($smtpPass));
+        $r3 = smtpReadResponse($fp);
+        if (!smtpExpectCode($r3, [235, 250])) {
+            fclose($fp);
+            return ['ok' => false, 'message' => 'SMTP AUTH failed'];
+        }
+    }
+
+    $envelopeFrom = $smtpFrom !== '' ? $smtpFrom : $fromHeader;
+    // Envelope sender: try to extract email between <>
+    $mailFrom = $envelopeFrom;
+    if (preg_match('/<([^>]+)>/', $envelopeFrom, $m)) $mailFrom = $m[1];
+
+    smtpSend($fp, 'MAIL FROM:<' . $mailFrom . '>');
+    $mfrom = smtpReadResponse($fp);
+    if (!smtpExpectCode($mfrom, [250])) {
+        fclose($fp);
+        return ['ok' => false, 'message' => 'SMTP MAIL FROM failed'];
+    }
+    smtpSend($fp, 'RCPT TO:<' . $to . '>');
+    $rcpt = smtpReadResponse($fp);
+    if (!smtpExpectCode($rcpt, [250, 251])) {
+        fclose($fp);
+        return ['ok' => false, 'message' => 'SMTP RCPT TO failed'];
+    }
+    smtpSend($fp, 'DATA');
+    $data = smtpReadResponse($fp);
+    if (!smtpExpectCode($data, [354])) {
+        fclose($fp);
+        return ['ok' => false, 'message' => 'SMTP DATA failed'];
+    }
+
+    $headers = [];
+    $headers[] = 'MIME-Version: 1.0';
+    $headers[] = 'Content-Type: text/html; charset=UTF-8';
+    $headers[] = 'From: ' . $fromHeader;
+    $headers[] = 'Reply-To: ' . $fromHeader;
+    $headers[] = 'Subject: ' . $subject;
+    $headers[] = 'To: <' . $to . '>';
+
+    $msg = implode("\r\n", $headers) . "\r\n\r\n" . $html . "\r\n";
+    // Dot-stuffing
+    $msg = preg_replace("/\r\n\./", "\r\n..", $msg);
+    fwrite($fp, $msg);
+    smtpSend($fp, '.');
+    $done = smtpReadResponse($fp);
+    smtpSend($fp, 'QUIT');
+    fclose($fp);
+
+    if (!smtpExpectCode($done, [250])) {
+        return ['ok' => false, 'message' => 'SMTP send failed'];
+    }
+    return ['ok' => true];
+}
+
 $headers = [];
 $headers[] = 'MIME-Version: 1.0';
 $headers[] = 'Content-Type: text/html; charset=UTF-8';
@@ -71,11 +217,28 @@ $headers[] = 'From: ' . $from;
 $headers[] = 'Reply-To: ' . $from;
 $headers[] = 'X-Mailer: Holwert mail-proxy';
 
-$ok = @mail($to, $subject, $html, implode("\r\n", $headers));
-if (!$ok) {
-    http_response_code(500);
-    echo json_encode(['ok' => false, 'error' => 'Send failed', 'message' => 'mail() gaf false terug']);
-    exit;
+// Prefer SMTP if configured, fallback to mail()
+if ($smtpHost !== '') {
+    $smtpResult = sendViaSmtp($smtpHost, $smtpPort, $smtpUser, $smtpPass, $smtpFrom, $to, $from, $subject, $html);
+    if ($smtpResult['ok'] !== true) {
+        http_response_code(500);
+        echo json_encode(['ok' => false, 'error' => 'SMTP failed', 'message' => $smtpResult['message']]);
+        exit;
+    }
+} else {
+    // Use -f envelope sender if possible (helps deliverability)
+    $envelope = '';
+    if (preg_match('/<([^>]+)>/', $from, $m)) {
+        $envelope = '-f' . $m[1];
+    }
+    $ok = $envelope !== ''
+        ? @mail($to, $subject, $html, implode("\r\n", $headers), $envelope)
+        : @mail($to, $subject, $html, implode("\r\n", $headers));
+    if (!$ok) {
+        http_response_code(500);
+        echo json_encode(['ok' => false, 'error' => 'Send failed', 'message' => 'mail() gaf false terug']);
+        exit;
+    }
 }
 
 echo json_encode(['ok' => true]);
