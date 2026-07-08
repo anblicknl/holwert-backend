@@ -61,7 +61,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['check'])) {
     };
     echo json_encode([
         'proxy' => 'send-mail',
-        'version' => '2026-07-08-v4',
+        'version' => '2026-07-08-v6',
         'has_credentials_file' => $hasCredFile,
         'smtp' => [
             'host' => $smtpHost,
@@ -173,6 +173,126 @@ function smtpExpectCode($resp, $codes) {
     return false;
 }
 
+function smtpOpenPlainSocket($host, $port, $timeout) {
+    $addr = 'tcp://' . $host . ':' . $port;
+    if (!function_exists('stream_socket_client')) {
+        return null;
+    }
+    $errno = 0;
+    $errstr = '';
+    $fp = @stream_socket_client($addr, $errno, $errstr, $timeout, STREAM_CLIENT_CONNECT);
+    return $fp !== false ? $fp : null;
+}
+
+function extractMailAddress($fromHeader) {
+    if (preg_match('/<([^>]+)>/', (string)$fromHeader, $m)) {
+        return trim($m[1]);
+    }
+    $s = trim((string)$fromHeader);
+    return filter_var($s, FILTER_VALIDATE_EMAIL) ? $s : $s;
+}
+
+function smtpEhlo($fp) {
+    $local = isset($_SERVER['HTTP_HOST']) ? preg_replace('/:\d+$/', '', $_SERVER['HTTP_HOST']) : 'localhost';
+    smtpSend($fp, 'EHLO ' . $local);
+    $ehlo = smtpReadResponse($fp);
+    if (smtpExpectCode($ehlo, [250])) {
+        return ['ok' => true];
+    }
+    smtpSend($fp, 'HELO ' . $local);
+    $helo = smtpReadResponse($fp);
+    if (smtpExpectCode($helo, [250])) {
+        return ['ok' => true];
+    }
+    return ['ok' => false, 'message' => 'SMTP EHLO/HELO failed: ' . smtpTrimResp($ehlo)];
+}
+
+function smtpTransmit($fp, $mailFrom, $to, $fromHeader, $subject, $html) {
+    smtpSend($fp, 'MAIL FROM:<' . $mailFrom . '>');
+    $mfrom = smtpReadResponse($fp);
+    if (!smtpExpectCode($mfrom, [250])) {
+        fclose($fp);
+        return ['ok' => false, 'message' => 'SMTP MAIL FROM failed: ' . smtpTrimResp($mfrom)];
+    }
+    smtpSend($fp, 'RCPT TO:<' . $to . '>');
+    $rcpt = smtpReadResponse($fp);
+    if (!smtpExpectCode($rcpt, [250, 251])) {
+        fclose($fp);
+        return ['ok' => false, 'message' => 'SMTP RCPT TO failed: ' . smtpTrimResp($rcpt)];
+    }
+    smtpSend($fp, 'DATA');
+    $data = smtpReadResponse($fp);
+    if (!smtpExpectCode($data, [354])) {
+        fclose($fp);
+        return ['ok' => false, 'message' => 'SMTP DATA failed: ' . smtpTrimResp($data)];
+    }
+
+    $headers = [];
+    $headers[] = 'MIME-Version: 1.0';
+    $headers[] = 'Content-Type: text/html; charset=UTF-8';
+    $headers[] = 'From: ' . $fromHeader;
+    $headers[] = 'Reply-To: ' . $fromHeader;
+    $headers[] = 'Subject: ' . $subject;
+    $headers[] = 'To: <' . $to . '>';
+
+    $msg = implode("\r\n", $headers) . "\r\n\r\n" . $html . "\r\n";
+    $msg = preg_replace("/\r\n\./", "\r\n..", $msg);
+    fwrite($fp, $msg);
+    smtpSend($fp, '.');
+    $done = smtpReadResponse($fp);
+    smtpSend($fp, 'QUIT');
+    fclose($fp);
+
+    if (!smtpExpectCode($done, [250])) {
+        return ['ok' => false, 'message' => 'SMTP send failed: ' . smtpTrimResp($done)];
+    }
+    return ['ok' => true];
+}
+
+function sendViaLocalhostRelay($smtpFrom, $to, $fromHeader, $subject, $html) {
+    $mailFrom = extractMailAddress($smtpFrom !== '' ? $smtpFrom : $fromHeader);
+    foreach (['127.0.0.1', 'localhost'] as $host) {
+        $fp = smtpOpenPlainSocket($host, 25, 8);
+        if (!$fp) {
+            continue;
+        }
+        stream_set_timeout($fp, 8);
+        $greet = smtpReadResponse($fp);
+        if (!smtpExpectCode($greet, [220])) {
+            fclose($fp);
+            continue;
+        }
+        $ehlo = smtpEhlo($fp);
+        if ($ehlo['ok'] !== true) {
+            fclose($fp);
+            continue;
+        }
+        return smtpTransmit($fp, $mailFrom, $to, $fromHeader, $subject, $html);
+    }
+    return ['ok' => false, 'message' => 'localhost:25 relay niet beschikbaar'];
+}
+
+function sendViaMailFunction($to, $from, $subject, $html) {
+    $headers = [];
+    $headers[] = 'MIME-Version: 1.0';
+    $headers[] = 'Content-Type: text/html; charset=UTF-8';
+    $headers[] = 'From: ' . $from;
+    $headers[] = 'Reply-To: ' . $from;
+    $headers[] = 'X-Mailer: Holwert mail-proxy';
+    $envelope = '';
+    $addr = extractMailAddress($from);
+    if ($addr !== '' && filter_var($addr, FILTER_VALIDATE_EMAIL)) {
+        $envelope = '-f' . $addr;
+    }
+    $ok = $envelope !== ''
+        ? @mail($to, $subject, $html, implode("\r\n", $headers), $envelope)
+        : @mail($to, $subject, $html, implode("\r\n", $headers));
+    if (!$ok) {
+        return ['ok' => false, 'message' => 'mail() gaf false terug'];
+    }
+    return ['ok' => true];
+}
+
 function smtpOpenSocket($host, $port, $timeout) {
     $errno = 0;
     $errstr = '';
@@ -252,16 +372,10 @@ function sendViaSmtp($smtpHost, $smtpPort, $smtpUser, $smtpPass, $smtpFrom, $to,
         return ['ok' => false, 'message' => 'SMTP greet failed'];
     }
 
-    $local = isset($_SERVER['HTTP_HOST']) ? preg_replace('/:\d+$/', '', $_SERVER['HTTP_HOST']) : 'localhost';
-    smtpSend($fp, 'EHLO ' . $local);
-    $ehlo = smtpReadResponse($fp);
-    if (!smtpExpectCode($ehlo, [250])) {
-        smtpSend($fp, 'HELO ' . $local);
-        $helo = smtpReadResponse($fp);
-        if (!smtpExpectCode($helo, [250])) {
-            fclose($fp);
-            return ['ok' => false, 'message' => 'SMTP EHLO/HELO failed'];
-        }
+    $ehlo = smtpEhlo($fp);
+    if ($ehlo['ok'] !== true) {
+        fclose($fp);
+        return ['ok' => false, 'message' => $ehlo['message']];
     }
 
     $auth = smtpAuthenticate($fp, $smtpUser, $smtpPass);
@@ -271,79 +385,40 @@ function sendViaSmtp($smtpHost, $smtpPort, $smtpUser, $smtpPass, $smtpFrom, $to,
     }
 
     $envelopeFrom = $smtpFrom !== '' ? $smtpFrom : $fromHeader;
-    // Envelope sender: try to extract email between <>
-    $mailFrom = $envelopeFrom;
-    if (preg_match('/<([^>]+)>/', $envelopeFrom, $m)) $mailFrom = $m[1];
+    $mailFrom = extractMailAddress($envelopeFrom);
 
-    smtpSend($fp, 'MAIL FROM:<' . $mailFrom . '>');
-    $mfrom = smtpReadResponse($fp);
-    if (!smtpExpectCode($mfrom, [250])) {
-        fclose($fp);
-        return ['ok' => false, 'message' => 'SMTP MAIL FROM failed'];
-    }
-    smtpSend($fp, 'RCPT TO:<' . $to . '>');
-    $rcpt = smtpReadResponse($fp);
-    if (!smtpExpectCode($rcpt, [250, 251])) {
-        fclose($fp);
-        return ['ok' => false, 'message' => 'SMTP RCPT TO failed'];
-    }
-    smtpSend($fp, 'DATA');
-    $data = smtpReadResponse($fp);
-    if (!smtpExpectCode($data, [354])) {
-        fclose($fp);
-        return ['ok' => false, 'message' => 'SMTP DATA failed'];
-    }
-
-    $headers = [];
-    $headers[] = 'MIME-Version: 1.0';
-    $headers[] = 'Content-Type: text/html; charset=UTF-8';
-    $headers[] = 'From: ' . $fromHeader;
-    $headers[] = 'Reply-To: ' . $fromHeader;
-    $headers[] = 'Subject: ' . $subject;
-    $headers[] = 'To: <' . $to . '>';
-
-    $msg = implode("\r\n", $headers) . "\r\n\r\n" . $html . "\r\n";
-    // Dot-stuffing
-    $msg = preg_replace("/\r\n\./", "\r\n..", $msg);
-    fwrite($fp, $msg);
-    smtpSend($fp, '.');
-    $done = smtpReadResponse($fp);
-    smtpSend($fp, 'QUIT');
-    fclose($fp);
-
-    if (!smtpExpectCode($done, [250])) {
-        return ['ok' => false, 'message' => 'SMTP send failed'];
-    }
-    return ['ok' => true];
+    return smtpTransmit($fp, $mailFrom, $to, $fromHeader, $subject, $html);
 }
 
-$headers = [];
-$headers[] = 'MIME-Version: 1.0';
-$headers[] = 'Content-Type: text/html; charset=UTF-8';
-$headers[] = 'From: ' . $from;
-$headers[] = 'Reply-To: ' . $from;
-$headers[] = 'X-Mailer: Holwert mail-proxy';
-
-// Prefer SMTP if configured, fallback to mail()
+// Prefer authenticated SMTP; fallback localhost:25 (Plesk) en daarna mail()
 if ($smtpHost !== '') {
     $smtpResult = sendViaSmtp($smtpHost, $smtpPort, $smtpUser, $smtpPass, $smtpFrom, $to, $from, $subject, $html);
     if ($smtpResult['ok'] !== true) {
+        $relay = sendViaLocalhostRelay($smtpFrom, $to, $from, $subject, $html);
+        if ($relay['ok'] === true) {
+            echo json_encode(['ok' => true, 'via' => 'localhost-relay']);
+            exit;
+        }
+        $mailFn = sendViaMailFunction($to, $from, $subject, $html);
+        if ($mailFn['ok'] === true) {
+            echo json_encode(['ok' => true, 'via' => 'mail']);
+            exit;
+        }
         http_response_code(500);
-        echo json_encode(['ok' => false, 'error' => 'SMTP failed', 'message' => $smtpResult['message']]);
+        echo json_encode([
+            'ok' => false,
+            'error' => 'Send failed',
+            'message' => $smtpResult['message'],
+            'relay' => $relay['message'] ?? '',
+            'mail' => $mailFn['message'] ?? '',
+        ]);
         exit;
     }
 } else {
-    // Use -f envelope sender if possible (helps deliverability)
-    $envelope = '';
-    if (preg_match('/<([^>]+)>/', $from, $m)) {
-        $envelope = '-f' . $m[1];
-    }
-    $ok = $envelope !== ''
-        ? @mail($to, $subject, $html, implode("\r\n", $headers), $envelope)
-        : @mail($to, $subject, $html, implode("\r\n", $headers));
-    if (!$ok) {
+    $mailFn = sendViaMailFunction($to, $from, $subject, $html);
+    if ($mailFn['ok'] !== true) {
         http_response_code(500);
-        echo json_encode(['ok' => false, 'error' => 'Send failed', 'message' => 'mail() gaf false terug']);
+        echo json_encode(['ok' => false, 'error' => 'Send failed', 'message' => $mailFn['message']]);
         exit;
     }
 }
