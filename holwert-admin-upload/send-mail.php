@@ -61,7 +61,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['check'])) {
     };
     echo json_encode([
         'proxy' => 'send-mail',
-        'version' => '2026-07-08-v3',
+        'version' => '2026-07-08-v4',
         'has_credentials_file' => $hasCredFile,
         'smtp' => [
             'host' => $smtpHost,
@@ -115,12 +115,6 @@ if (!filter_var($to, FILTER_VALIDATE_EMAIL)) {
     exit;
 }
 
-// Default From: use current host (to reduce SPF/DMARC issues on shared hosting)
-if ($from === '') {
-    $host = isset($_SERVER['HTTP_HOST']) ? preg_replace('/:\d+$/', '', $_SERVER['HTTP_HOST']) : 'holwert.appenvloed.com';
-    $from = 'Holwert <noreply@' . $host . '>';
-}
-
 $smtpHost = getenv('SMTP_HOST') ?: '';
 $smtpPort = (int)(getenv('SMTP_PORT') ?: 0);
 $smtpUser = getenv('SMTP_USER') ?: '';
@@ -142,6 +136,16 @@ if (is_file(__DIR__ . '/send-mail-credentials.php')) {
     if (defined('SMTP_USER') && $smtpUser === '') $smtpUser = SMTP_USER;
     if (defined('SMTP_PASS') && $smtpPass === '') $smtpPass = SMTP_PASS;
     if (defined('SMTP_FROM') && $smtpFrom === '') $smtpFrom = SMTP_FROM;
+}
+
+// Default From: SMTP_FROM of host-domein
+if ($from === '') {
+    if ($smtpFrom !== '') {
+        $from = $smtpFrom;
+    } else {
+        $host = isset($_SERVER['HTTP_HOST']) ? preg_replace('/:\d+$/', '', $_SERVER['HTTP_HOST']) : 'holwert.appenvloed.com';
+        $from = 'Holwert <noreply@' . $host . '>';
+    }
 }
 
 function smtpReadLine($fp) {
@@ -169,14 +173,39 @@ function smtpExpectCode($resp, $codes) {
     return false;
 }
 
+function smtpOpenSocket($host, $port, $timeout) {
+    $errno = 0;
+    $errstr = '';
+    $addr = 'ssl://' . $host . ':' . $port;
+    $context = stream_context_create([
+        'ssl' => [
+            'verify_peer' => false,
+            'verify_peer_name' => false,
+        ],
+    ]);
+    if (function_exists('stream_socket_client')) {
+        $fp = @stream_socket_client($addr, $errno, $errstr, $timeout, STREAM_CLIENT_CONNECT, $context);
+        if ($fp !== false) {
+            return $fp;
+        }
+    }
+    if (function_exists('fsockopen')) {
+        $fp = @fsockopen('ssl://' . $host, $port, $errno, $errstr, $timeout);
+        if ($fp !== false) {
+            return $fp;
+        }
+    }
+    return null;
+}
+
 function sendViaSmtp($smtpHost, $smtpPort, $smtpUser, $smtpPass, $smtpFrom, $to, $fromHeader, $subject, $html) {
     $host = $smtpHost;
     $port = $smtpPort > 0 ? $smtpPort : 465;
-    $timeout = 10;
+    $timeout = 15;
 
-    $fp = @fsockopen('ssl://' . $host, $port, $errno, $errstr, $timeout);
+    $fp = smtpOpenSocket($host, $port, $timeout);
     if (!$fp) {
-        return ['ok' => false, 'message' => "SMTP connect failed: $errstr ($errno)"];
+        return ['ok' => false, 'message' => 'SMTP connect failed (stream_socket_client/fsockopen niet beschikbaar of geblokkeerd)'];
     }
     stream_set_timeout($fp, $timeout);
 
