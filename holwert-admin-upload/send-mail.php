@@ -198,6 +198,43 @@ function smtpOpenSocket($host, $port, $timeout) {
     return null;
 }
 
+function smtpTrimResp($resp) {
+    $s = trim(preg_replace('/\s+/', ' ', (string)$resp));
+    return strlen($s) > 200 ? substr($s, 0, 200) . '…' : $s;
+}
+
+function smtpAuthenticate($fp, $smtpUser, $smtpPass) {
+    if ($smtpUser === '' || $smtpPass === '') {
+        return ['ok' => true];
+    }
+
+    // Veel hosters (o.a. Plesk op 465) prefereren AUTH PLAIN
+    $plain = base64_encode("\0" . $smtpUser . "\0" . $smtpPass);
+    smtpSend($fp, 'AUTH PLAIN ' . $plain);
+    $rPlain = smtpReadResponse($fp);
+    if (smtpExpectCode($rPlain, [235, 250])) {
+        return ['ok' => true];
+    }
+
+    // Fallback: AUTH LOGIN
+    smtpSend($fp, 'AUTH LOGIN');
+    $r1 = smtpReadResponse($fp);
+    if (!smtpExpectCode($r1, [334])) {
+        return ['ok' => false, 'message' => 'SMTP AUTH mislukt: ' . smtpTrimResp($rPlain) . ' | ' . smtpTrimResp($r1)];
+    }
+    smtpSend($fp, base64_encode($smtpUser));
+    $r2 = smtpReadResponse($fp);
+    if (!smtpExpectCode($r2, [334])) {
+        return ['ok' => false, 'message' => 'SMTP AUTH gebruikersnaam geweigerd: ' . smtpTrimResp($r2)];
+    }
+    smtpSend($fp, base64_encode($smtpPass));
+    $r3 = smtpReadResponse($fp);
+    if (!smtpExpectCode($r3, [235, 250])) {
+        return ['ok' => false, 'message' => 'SMTP AUTH mislukt (controleer wachtwoord in send-mail-credentials.php): ' . smtpTrimResp($r3)];
+    }
+    return ['ok' => true];
+}
+
 function sendViaSmtp($smtpHost, $smtpPort, $smtpUser, $smtpPass, $smtpFrom, $to, $fromHeader, $subject, $html) {
     $host = $smtpHost;
     $port = $smtpPort > 0 ? $smtpPort : 465;
@@ -227,26 +264,10 @@ function sendViaSmtp($smtpHost, $smtpPort, $smtpUser, $smtpPass, $smtpFrom, $to,
         }
     }
 
-    // AUTH LOGIN
-    if ($smtpUser !== '' && $smtpPass !== '') {
-        smtpSend($fp, 'AUTH LOGIN');
-        $r1 = smtpReadResponse($fp);
-        if (!smtpExpectCode($r1, [334])) {
-            fclose($fp);
-            return ['ok' => false, 'message' => 'SMTP AUTH not accepted'];
-        }
-        smtpSend($fp, base64_encode($smtpUser));
-        $r2 = smtpReadResponse($fp);
-        if (!smtpExpectCode($r2, [334])) {
-            fclose($fp);
-            return ['ok' => false, 'message' => 'SMTP AUTH username rejected'];
-        }
-        smtpSend($fp, base64_encode($smtpPass));
-        $r3 = smtpReadResponse($fp);
-        if (!smtpExpectCode($r3, [235, 250])) {
-            fclose($fp);
-            return ['ok' => false, 'message' => 'SMTP AUTH failed'];
-        }
+    $auth = smtpAuthenticate($fp, $smtpUser, $smtpPass);
+    if ($auth['ok'] !== true) {
+        fclose($fp);
+        return ['ok' => false, 'message' => $auth['message']];
     }
 
     $envelopeFrom = $smtpFrom !== '' ? $smtpFrom : $fromHeader;
