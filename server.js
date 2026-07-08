@@ -76,6 +76,7 @@ const EXPO_PUSH_ACCESS_TOKEN = (process.env.EXPO_PUSH_ACCESS_TOKEN || '').trim()
 // PHP Proxy URL (fallback als direct MySQL niet werkt)
 const PHP_PROXY_URL = process.env.PHP_PROXY_URL || 'https://holwert.appenvloed.com/admin/db-proxy.php';
 const PHP_PROXY_API_KEY = process.env.PHP_PROXY_API_KEY || 'holwert-db-proxy-2026-secure-key-change-in-production';
+const MAIL_PROXY_URL = process.env.MAIL_PROXY_URL || 'https://holwert.appenvloed.com/admin/send-mail.php';
 
 // ===== SIMPLE RATE LIMITING (no external deps) =====
 const loginAttempts = new Map();
@@ -2681,44 +2682,50 @@ function isOrgDashboardPasswordResetEligible(u) {
   return !Number.isNaN(oid) && oid > 0;
 }
 
-async function sendOrgPasswordResetEmailResend({ toEmail, resetUrl }) {
-  try {
-    const key = process.env.RESEND_API_KEY;
-    const from = process.env.RESEND_FROM || 'Holwert <onboarding@resend.dev>';
-    if (!key) {
-      return { ok: false, reason: 'no_key' };
-    }
-    const esc = (s) =>
-      String(s)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-    const res = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${key}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        from,
-        to: [toEmail],
-        subject: 'Holwert – wachtwoord vernieuwen (organisatie-dashboard)',
-        html: `<p>Je hebt een nieuw wachtwoord aangevraagd voor het <strong>Holwert organisatie-dashboard</strong>.</p>
+async function sendOrgPasswordResetEmailViaHosting({ toEmail, resetUrl }) {
+  const from = (process.env.MAIL_FROM || '').trim();
+  const esc = (s) =>
+    String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+
+  const subject = 'Holwert – wachtwoord vernieuwen (organisatie-dashboard)';
+  const html = `<p>Je hebt een nieuw wachtwoord aangevraagd voor het <strong>Holwert organisatie-dashboard</strong>.</p>
 <p><a href="${esc(resetUrl)}">Klik hier om een nieuw wachtwoord in te stellen</a></p>
 <p>Of kopieer deze link in je browser:<br><span style="word-break:break-all">${esc(resetUrl)}</span></p>
-<p>Deze link is <strong>1 uur</strong> geldig. Als je dit niet zelf hebt aangevraagd, kun je deze e-mail negeren.</p>`,
-      }),
-    });
-    if (!res.ok) {
-      const t = await res.text();
-      console.error('[Resend org forgot]', res.status, t);
-      return { ok: false, reason: 'api_error' };
-    }
-    return { ok: true };
+<p>Deze link is <strong>1 uur</strong> geldig. Als je dit niet zelf hebt aangevraagd, kun je deze e-mail negeren.</p>`;
+
+  try {
+    const response = await axios.post(
+      MAIL_PROXY_URL,
+      {
+        to: toEmail,
+        subject,
+        html,
+        ...(from ? { from } : {}),
+      },
+      {
+        headers: {
+          'X-API-Key': PHP_PROXY_API_KEY,
+          'Content-Type': 'application/json',
+        },
+        timeout: 10000,
+      },
+    );
+    if (response?.data?.ok === true) return { ok: true };
+    const msg = response?.data?.message || response?.data?.error || 'Mail versturen mislukt';
+    return { ok: false, reason: msg };
   } catch (e) {
-    console.error('[Resend org forgot] exception:', e.message);
-    return { ok: false, reason: 'exception' };
+    const status = e?.response?.status;
+    const data = e?.response?.data;
+    const msg =
+      (typeof data === 'object' && data ? (data.message || data.error) : null) ||
+      e?.message ||
+      'Mail versturen mislukt';
+    console.error('[mail-proxy] error:', status || '-', msg);
+    return { ok: false, reason: msg };
   }
 }
 
@@ -2737,6 +2744,7 @@ async function handleOrgForgotPasswordRequest(req, res) {
     }
     const user = await findUserRowForOrgPasswordReset(emailRaw);
     if (!user || !isOrgDashboardPasswordResetEligible(user)) {
+      console.log('[org-forgot-password] geen reset-mail (onbekend of niet-org-dashboard):', emailRaw);
       return res.status(200).json(generic);
     }
     await ensureOrgPasswordResetsTable();
@@ -2754,10 +2762,12 @@ async function handleOrgForgotPasswordRequest(req, res) {
       [user.id, tokenHash, expiresAt],
     );
     const resetUrl = `${getOrgDashboardPublicBaseUrl()}?reset=${encodeURIComponent(rawToken)}`;
-    const sent = await sendOrgPasswordResetEmailResend({ toEmail: user.email, resetUrl });
+    const sent = await sendOrgPasswordResetEmailViaHosting({ toEmail: user.email, resetUrl });
     if (!sent.ok) {
       await executeQuery('DELETE FROM org_password_resets WHERE user_id = ?', [user.id]).catch(() => {});
-      console.warn('[org-forgot-password] geen e-mail verstuurd:', sent.reason);
+      console.warn('[org-forgot-password] geen e-mail verstuurd:', sent.reason, 'naar', user.email);
+    } else {
+      console.log('[org-forgot-password] reset-mail verstuurd naar', user.email);
     }
     return res.status(200).json(generic);
   } catch (error) {

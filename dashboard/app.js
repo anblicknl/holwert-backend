@@ -199,7 +199,7 @@
             if (forgotPasswordMsg) {
                 forgotPasswordMsg.textContent =
                     data.message ||
-                    'Als dit adres bekend is, ontvang je een e-mail. Controleer ook je spam-map.';
+                    'Als dit adres bekend is, ontvang je een e-mail. Het kan enkele minuten duren — controleer ook je spam-map.';
                 forgotPasswordMsg.style.color = '';
                 forgotPasswordMsg.classList.remove('login-feedback--error');
                 forgotPasswordMsg.classList.add('login-feedback--success', 'show');
@@ -506,6 +506,50 @@
         });
     });
 
+    function followersSeenStorageKey(orgId) {
+        return `holwert_followers_seen_${orgId}`;
+    }
+
+    function getSeenFollowersCount(orgId) {
+        if (!orgId) return null;
+        const stored = localStorage.getItem(followersSeenStorageKey(orgId));
+        if (stored != null) return parseInt(stored, 10) || 0;
+        const legacy = localStorage.getItem(`holwert_followers_${orgId}`);
+        if (legacy != null) return parseInt(legacy, 10) || 0;
+        return null;
+    }
+
+    function setSeenFollowersCount(orgId, count) {
+        if (!orgId) return;
+        localStorage.setItem(followersSeenStorageKey(orgId), String(count));
+    }
+
+    function updateFollowersNavDot(currentCount) {
+        const orgId = organization?.id;
+        const dot = document.getElementById('followersNavDot');
+        const navItem = document.querySelector('.nav-item[data-section="followers"]');
+        if (!orgId || !dot) return;
+
+        let seen = getSeenFollowersCount(orgId);
+        if (seen === null) {
+            setSeenFollowersCount(orgId, currentCount);
+            seen = currentCount;
+        }
+
+        const hasNew = currentCount > seen;
+        dot.hidden = !hasNew;
+        if (navItem) {
+            navItem.setAttribute('title', hasNew ? 'Nieuwe volgers' : '');
+        }
+    }
+
+    function markFollowersAsSeen(currentCount) {
+        const orgId = organization?.id;
+        if (!orgId) return;
+        setSeenFollowersCount(orgId, currentCount);
+        updateFollowersNavDot(currentCount);
+    }
+
     function navigateToSection(sectionId) {
         if (!sectionId) return;
         document.querySelectorAll('.nav-item').forEach(n => {
@@ -529,6 +573,8 @@
 
             const list = Array.isArray(data.followers) ? data.followers : [];
             const count = data.count ?? list.length;
+
+            markFollowersAsSeen(count);
 
             if (!list.length) {
                 container.innerHTML = `
@@ -1343,24 +1389,7 @@
             const upcoming   = allEvents.filter(e => new Date(e.start_date || e.date) >= now).length;
             const past       = allEvents.length - upcoming;
 
-            // Nieuwe volgers bijhouden via localStorage
-            const storageKey     = `holwert_followers_${orgId}`;
-            const storageDateKey = `holwert_followers_date_${orgId}`;
-            const prevCount      = parseInt(localStorage.getItem(storageKey) ?? '-1', 10);
-            const prevDate       = localStorage.getItem(storageDateKey);
-            const newFollowers   = prevCount >= 0 ? followers - prevCount : 0;
-            // Sla huidig aantal op voor de volgende sessie
-            localStorage.setItem(storageKey, String(followers));
-            localStorage.setItem(storageDateKey, new Date().toISOString());
-
-            // Tekst "sinds je laatste bezoek"
-            let sinceText = '';
-            if (prevDate) {
-                const diff = Math.round((Date.now() - new Date(prevDate).getTime()) / 86400000);
-                sinceText = diff === 0 ? 'vandaag'
-                    : diff === 1 ? 'gisteren'
-                    : `${diff} dagen geleden`;
-            }
+            updateFollowersNavDot(followers);
 
             // Meest recente berichten (max 5)
             const recent = allNews
@@ -1382,27 +1411,17 @@
 
             const orgName = escapeHtml(organization?.name || 'Jouw organisatie');
 
-            // Badge voor nieuwe volgers
-            const newFollowersBadge = newFollowers > 0
-                ? `<div class="new-followers-banner">
-                       <i class="fas fa-heart"></i>
-                       <strong>+${newFollowers} nieuwe volger${newFollowers === 1 ? '' : 's'}</strong>
-                       ${sinceText ? `<span>sinds ${sinceText}</span>` : ''}
-                   </div>`
-                : '';
-
             container.innerHTML = `
                 <div class="overview-welcome">
                     <h3>Welkom terug, ${orgName}!</h3>
                     <p class="form-hint">Hier zie je een snel overzicht van jouw activiteit in de Holwert Dorpsapp.</p>
                 </div>
-                ${newFollowersBadge}
                 <div class="overview-stats">
                     <div class="stat-card stat-followers stat-card-clickable" role="button" tabindex="0" title="Bekijk wie jullie volgt" data-goto-followers="1">
                         <div class="stat-icon"><i class="fas fa-heart"></i></div>
                         <div class="stat-body">
                             <div class="stat-value">${followers}</div>
-                            <div class="stat-label">Volger${followers === 1 ? '' : 's'}${sinceText && newFollowers === 0 ? ` <span class="stat-sub">(ongewijzigd)</span>` : ''} <span class="stat-sub stat-link-hint">· wie?</span></div>
+                            <div class="stat-label">Volger${followers === 1 ? '' : 's'}</div>
                         </div>
                     </div>
                     <div class="stat-card stat-news">
