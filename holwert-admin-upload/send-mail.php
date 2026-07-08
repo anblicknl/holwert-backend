@@ -61,7 +61,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['check'])) {
     };
     echo json_encode([
         'proxy' => 'send-mail',
-        'version' => '2026-07-08-v2',
+        'version' => '2026-07-08-v3',
         'has_credentials_file' => $hasCredFile,
         'smtp' => [
             'host' => $smtpHost,
