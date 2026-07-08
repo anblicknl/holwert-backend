@@ -17,6 +17,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(204);
     exit;
 }
+// GET ?check=1: debug (geen secrets tonen)
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['check'])) {
+    $smtpHost = getenv('SMTP_HOST') ?: '';
+    $smtpPort = (int)(getenv('SMTP_PORT') ?: 0);
+    $smtpUser = getenv('SMTP_USER') ?: '';
+    $smtpFrom = getenv('SMTP_FROM') ?: '';
+    $hasCredFile = is_file(__DIR__ . '/send-mail-credentials.php');
+    if ($hasCredFile) {
+        require __DIR__ . '/send-mail-credentials.php';
+        if (defined('SMTP_HOST') && $smtpHost === '') $smtpHost = SMTP_HOST;
+        if (defined('SMTP_PORT') && $smtpPort === 0) $smtpPort = (int)SMTP_PORT;
+        if (defined('SMTP_USER') && $smtpUser === '') $smtpUser = SMTP_USER;
+        if (defined('SMTP_FROM') && $smtpFrom === '') $smtpFrom = SMTP_FROM;
+    }
+    $mask = function ($s) {
+        $s = (string)($s ?? '');
+        if ($s === '') return '';
+        if (strlen($s) <= 6) return '***';
+        return substr($s, 0, 3) . '***' . substr($s, -2);
+    };
+    echo json_encode([
+        'proxy' => 'send-mail',
+        'version' => '2026-07-08-v2',
+        'has_credentials_file' => $hasCredFile,
+        'smtp' => [
+            'host' => $smtpHost,
+            'port' => $smtpPort,
+            'user' => $mask($smtpUser),
+            'from' => $smtpFrom,
+            'enabled' => $smtpHost !== '',
+        ],
+        'note' => 'Als enabled=false, wordt mail() fallback gebruikt (minder betrouwbaar).',
+    ]);
+    exit;
+}
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
     echo json_encode(['ok' => false, 'error' => 'Method not allowed', 'message' => 'Alleen POST toegestaan']);
