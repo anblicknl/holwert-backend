@@ -8,6 +8,28 @@
  * Auth header:
  *  X-API-Key: same value as Vercel env PHP_PROXY_API_KEY
  */
+// Vang PHP-fatale fouten op en geef ze terug als JSON i.p.v. lege 500
+ob_start();
+error_reporting(E_ALL);
+ini_set('display_errors', '0');
+register_shutdown_function(function () {
+    $err = error_get_last();
+    if ($err && in_array($err['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+        ob_end_clean();
+        if (!headers_sent()) {
+            http_response_code(500);
+            header('Content-Type: application/json; charset=utf-8');
+        }
+        echo json_encode([
+            'ok' => false,
+            'error' => 'PHP fatal error',
+            'message' => $err['message'] . ' in ' . $err['file'] . ':' . $err['line'],
+        ]);
+    } else {
+        ob_end_flush();
+    }
+});
+
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST, OPTIONS');
