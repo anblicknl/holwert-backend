@@ -1811,7 +1811,7 @@ class HolwertAdmin {
                 </td>
                 <td>${org.name || '-'}</td>
                 <td>${org.category || 'Geen categorie'}${org.is_ondernemer ? ' <span class="status-badge status-published" title="Ondernemer">Ondernemer</span>' : ''}</td>
-                <td>${org.user_count || 0}</td>
+                <td>${org.followers_count ?? 0}</td>
                 <td>
                     <span class="status-badge ${org.is_approved ? 'status-published' : 'status-draft'}">
                         ${org.is_approved ? 'Goedgekeurd' : 'In afwachting'}
@@ -5923,7 +5923,7 @@ class HolwertAdmin {
 
             if (response.ok) {
                 const data = await response.json();
-                this.displayOrgFollowers(data.followers || [], tabPane);
+                this.displayOrgFollowers(data.followers || [], data.count, tabPane);
             } else {
                 tabPane.innerHTML = '<p>Fout bij laden volgers.</p>';
             }
@@ -6006,13 +6006,15 @@ class HolwertAdmin {
         });
     }
 
-    displayOrgFollowers(followers, tabPane) {
-        if (followers.length === 0) {
+    displayOrgFollowers(followers, count, tabPane) {
+        const total = typeof count === 'number' ? count : followers.length;
+        if (total === 0) {
             tabPane.innerHTML = '<p>Deze organisatie heeft nog geen volgers.</p>';
             return;
         }
 
         tabPane.innerHTML = `
+            <p style="margin-bottom:1rem;font-size:0.95rem;"><strong>${total} volger${total === 1 ? '' : 's'}</strong></p>
             <div class="followers-list">
                 ${followers.map(follower => `
                     <div class="follower-item">

@@ -1719,6 +1719,41 @@ async function ensureFollowsTable() {
   }
 }
 
+/** Alleen volgers met een bestaand gebruikersaccount (geen wees-records in follows). */
+async function getOrganizationFollowersCount(orgId) {
+  await ensureFollowsTable();
+  const result = await executeQueryViaProxy(
+    `SELECT COUNT(DISTINCT f.user_id) AS count
+     FROM follows f
+     INNER JOIN users u ON u.id = f.user_id
+     WHERE f.organization_id = ?`,
+    [orgId],
+    'execute'
+  );
+  const raw = result.rows?.[0]?.count;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) ? n : 0;
+}
+
+let _orphanFollowsPruned = false;
+async function pruneOrphanFollows() {
+  if (_orphanFollowsPruned) return;
+  try {
+    await ensureFollowsTable();
+    await executeQueryViaProxy(
+      `DELETE f FROM follows f
+       LEFT JOIN users u ON u.id = f.user_id
+       WHERE u.id IS NULL`,
+      [],
+      'execute'
+    );
+    console.log('[pruneOrphanFollows] Wees-volgers opgeruimd');
+  } catch (e) {
+    console.warn('[pruneOrphanFollows]', e.message);
+  }
+  _orphanFollowsPruned = true;
+}
+
 // List following orgs
 app.get('/api/app/following', authenticateToken, async (req, res) => {
   try {
@@ -1832,14 +1867,9 @@ app.delete('/api/app/follow/:organization_id', authenticateToken, async (req, re
 // Followers count for a given organization (public) – telt unieke gebruikers (geen dubbele rijen)
 app.get('/api/organizations/:id/followers/count', async (req, res) => {
   try {
-    await ensureFollowsTable();
+    await pruneOrphanFollows();
     const orgId = parseInt(req.params.id);
-    const result = await executeQueryViaProxy(
-      `SELECT COUNT(DISTINCT user_id) AS count FROM follows WHERE organization_id = ?`,
-      [orgId],
-      'execute'
-    );
-    const count = (result.rows?.[0]?.count) || 0;
+    const count = await getOrganizationFollowersCount(orgId);
     res.json({ count });
   } catch (error) {
     console.error('Get followers count error:', error);
@@ -3649,6 +3679,45 @@ app.delete('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, r
   }
 });
 
+// Get organization followers (admin) — vóór /:id zodat "followers" geen id wordt
+app.get('/api/admin/organizations/:id/followers', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    await pruneOrphanFollows();
+    const { id } = req.params;
+    if (!id || isNaN(parseInt(id))) {
+      return res.status(400).json({ error: 'Invalid organization ID' });
+    }
+    const orgId = parseInt(id, 10);
+    const limitRaw = parseInt(req.query.limit, 10);
+    const limit = Number.isNaN(limitRaw) ? 500 : Math.min(Math.max(limitRaw, 1), 500);
+
+    const result = await executeQuery(
+      `SELECT u.id, u.first_name, u.last_name, u.email, u.profile_image_url, f.created_at AS followed_at
+       FROM follows f
+       INNER JOIN users u ON u.id = f.user_id
+       WHERE f.organization_id = ?
+       ORDER BY f.created_at DESC
+       LIMIT ?`,
+      [orgId, limit],
+    );
+
+    const followers = (result.rows || []).map((row) => ({
+      id: row.id,
+      first_name: row.first_name != null ? String(row.first_name).trim() : '',
+      last_name: row.last_name != null ? String(row.last_name).trim() : '',
+      email: row.email != null ? String(row.email).trim() : '',
+      profile_image_url: row.profile_image_url || null,
+      followed_at: row.followed_at,
+    }));
+    const count = await getOrganizationFollowersCount(orgId);
+
+    res.json({ followers, count });
+  } catch (error) {
+    console.error('[GET /api/admin/organizations/:id/followers] Error:', error);
+    res.status(500).json({ error: 'Failed to get followers', message: error.message });
+  }
+});
+
 // Get single organization (admin) - MUST BE BEFORE /api/admin/organizations (without :id)
 app.get('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
@@ -3685,6 +3754,7 @@ app.get('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (
 app.get('/api/admin/organizations', authenticateToken, requireAdmin, async (req, res) => {
   try {
     await ensureOrgColumns();
+    await pruneOrphanFollows();
     const { page = 1, limit = 20, status } = req.query;
     const offset = (page - 1) * limit;
     
@@ -3708,7 +3778,13 @@ app.get('/api/admin/organizations', authenticateToken, requireAdmin, async (req,
         o.is_ondernemer,
         o.is_approved, 
         o.created_at,
-        o.logo_url
+        o.logo_url,
+        (
+          SELECT COUNT(DISTINCT f.user_id)
+          FROM follows f
+          INNER JOIN users u ON u.id = f.user_id
+          WHERE f.organization_id = o.id
+        ) AS followers_count
       FROM organizations o
       WHERE 1=1
     `;
@@ -5721,7 +5797,7 @@ app.delete('/api/org/events/:id', authenticateToken, requireOrgPortal, async (re
 /** Volgers van eigen organisatie (alleen voornaam + volgt sinds — geen e-mail). */
 app.get('/api/org/followers', authenticateToken, requireOrgPortal, async (req, res) => {
   try {
-    await ensureFollowsTable();
+    await pruneOrphanFollows();
     const orgId = req.organizationId;
     const limitRaw = parseInt(req.query.limit, 10);
     const limit = Number.isNaN(limitRaw) ? 500 : Math.min(Math.max(limitRaw, 1), 500);
@@ -5741,7 +5817,8 @@ app.get('/api/org/followers', authenticateToken, requireOrgPortal, async (req, r
       followed_at: row.followed_at,
     }));
 
-    res.json({ followers, count: followers.length });
+    const count = await getOrganizationFollowersCount(orgId);
+    res.json({ followers, count });
   } catch (error) {
     console.error('GET /api/org/followers error:', error);
     res.status(500).json({ error: 'Kon volgers niet ophalen', message: error.message });

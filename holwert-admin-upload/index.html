@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Holwert Dorpsapp - Admin Panel</title>
-    <link rel="stylesheet" href="styles.css?v=1744494000">
+    <link rel="stylesheet" href="styles.css?v=20260705-org-column">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
 <body>
@@ -155,15 +155,15 @@
                     <h2><i class="fas fa-users"></i> Gebruikers</h2>
                     <div class="users-header-actions">
                         <div class="users-tabs">
-                            <button type="button" class="users-tab active" data-users-tab="dorpsbewoners">
-                                <i class="fas fa-user"></i> Dorpsbewoners
+                            <button type="button" class="users-tab active" data-users-tab="app-gebruikers">
+                                <i class="fas fa-mobile-alt"></i> App-gebruikers
                             </button>
-                            <button type="button" class="users-tab" data-users-tab="organisaties">
-                                <i class="fas fa-building"></i> Organisaties
+                            <button type="button" class="users-tab" data-users-tab="organisatie-inlog">
+                                <i class="fas fa-id-card"></i> Organisatie-inlog
                             </button>
                         </div>
-                        <button id="addUserBtn" class="btn btn-primary" style="margin-left: auto;" title="Account voor de dorpsapp (niet voor organisatie-dashboard)">
-                            <i class="fas fa-plus"></i> Nieuwe dorpsbewoner (app)
+                        <button id="addUserBtn" class="btn btn-primary" style="margin-left: auto;" title="Account voor registratie in de Holwert-app">
+                            <i class="fas fa-plus"></i> Nieuwe app-gebruiker
                         </button>
                     </div>
                 </div>
@@ -205,7 +205,7 @@
                                 <th>Logo</th>
                                 <th>Naam</th>
                                 <th>Categorie</th>
-                                <th>Gebruikers</th>
+                                <th>Volgers</th>
                                 <th>Status</th>
                                 <th>Acties</th>
                             </tr>
@@ -402,6 +402,6 @@
         console.log('🔧 VERSION: ADMIN-ORG-EVENTS-20260225-1');
     </script>
     <!-- Cache-busting query parameter zodat nieuwe app.js altijd wordt opgehaald -->
-    <script src="app.js?v=20260421-iconpicker"></script>
+    <script src="app.js?v=20260705-org-login"></script>
 </body>
 </html>
