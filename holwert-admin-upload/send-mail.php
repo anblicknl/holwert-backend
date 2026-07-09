@@ -43,6 +43,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['check'])) {
     $smtpHost = getenv('SMTP_HOST') ?: '';
     $smtpPort = (int)(getenv('SMTP_PORT') ?: 0);
+    $smtpEnc = getenv('SMTP_ENCRYPTION') ?: '';
     $smtpUser = getenv('SMTP_USER') ?: '';
     $smtpFrom = getenv('SMTP_FROM') ?: '';
     $hasCredFile = is_file(__DIR__ . '/send-mail-credentials.php');
@@ -50,6 +51,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['check'])) {
         require __DIR__ . '/send-mail-credentials.php';
         if (defined('SMTP_HOST') && $smtpHost === '') $smtpHost = SMTP_HOST;
         if (defined('SMTP_PORT') && $smtpPort === 0) $smtpPort = (int)SMTP_PORT;
+        if (defined('SMTP_ENCRYPTION') && $smtpEnc === '') $smtpEnc = SMTP_ENCRYPTION;
         if (defined('SMTP_USER') && $smtpUser === '') $smtpUser = SMTP_USER;
         if (defined('SMTP_FROM') && $smtpFrom === '') $smtpFrom = SMTP_FROM;
     }
@@ -61,11 +63,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['check'])) {
     };
     echo json_encode([
         'proxy' => 'send-mail',
-        'version' => '2026-07-08-v6',
+        'version' => '2026-07-09-v7',
         'has_credentials_file' => $hasCredFile,
         'smtp' => [
             'host' => $smtpHost,
             'port' => $smtpPort,
+            'encryption' => $smtpEnc,
             'user' => $mask($smtpUser),
             'from' => $smtpFrom,
             'enabled' => $smtpHost !== '',
@@ -117,6 +120,7 @@ if (!filter_var($to, FILTER_VALIDATE_EMAIL)) {
 
 $smtpHost = getenv('SMTP_HOST') ?: '';
 $smtpPort = (int)(getenv('SMTP_PORT') ?: 0);
+$smtpEnc = getenv('SMTP_ENCRYPTION') ?: '';
 $smtpUser = getenv('SMTP_USER') ?: '';
 $smtpPass = getenv('SMTP_PASS') ?: '';
 $smtpFrom = getenv('SMTP_FROM') ?: '';
@@ -126,6 +130,7 @@ $smtpFrom = getenv('SMTP_FROM') ?: '';
 //   <?php
 //   define('SMTP_HOST', 'mail.hostingserver.nl');
 //   define('SMTP_PORT', 465);
+//   define('SMTP_ENCRYPTION', 'ssl'); // ssl|starttls|none
 //   define('SMTP_USER', 'noreply@appenvloed.com');
 //   define('SMTP_PASS', '...'); // alleen op server
 //   define('SMTP_FROM', 'Holwert <noreply@appenvloed.com>');
@@ -133,6 +138,7 @@ if (is_file(__DIR__ . '/send-mail-credentials.php')) {
     require __DIR__ . '/send-mail-credentials.php';
     if (defined('SMTP_HOST') && $smtpHost === '') $smtpHost = SMTP_HOST;
     if (defined('SMTP_PORT') && $smtpPort === 0) $smtpPort = (int)SMTP_PORT;
+    if (defined('SMTP_ENCRYPTION') && $smtpEnc === '') $smtpEnc = SMTP_ENCRYPTION;
     if (defined('SMTP_USER') && $smtpUser === '') $smtpUser = SMTP_USER;
     if (defined('SMTP_PASS') && $smtpPass === '') $smtpPass = SMTP_PASS;
     if (defined('SMTP_FROM') && $smtpFrom === '') $smtpFrom = SMTP_FROM;
@@ -296,26 +302,12 @@ function sendViaMailFunction($to, $from, $subject, $html) {
 function smtpOpenSocket($host, $port, $timeout) {
     $errno = 0;
     $errstr = '';
-    $addr = 'ssl://' . $host . ':' . $port;
-    $context = stream_context_create([
-        'ssl' => [
-            'verify_peer' => false,
-            'verify_peer_name' => false,
-        ],
-    ]);
-    if (function_exists('stream_socket_client')) {
-        $fp = @stream_socket_client($addr, $errno, $errstr, $timeout, STREAM_CLIENT_CONNECT, $context);
-        if ($fp !== false) {
-            return $fp;
-        }
+    if (!function_exists('stream_socket_client')) {
+        return null;
     }
-    if (function_exists('fsockopen')) {
-        $fp = @fsockopen('ssl://' . $host, $port, $errno, $errstr, $timeout);
-        if ($fp !== false) {
-            return $fp;
-        }
-    }
-    return null;
+    $addr = 'tcp://' . $host . ':' . $port;
+    $fp = @stream_socket_client($addr, $errno, $errstr, $timeout, STREAM_CLIENT_CONNECT);
+    return $fp !== false ? $fp : null;
 }
 
 function smtpTrimResp($resp) {
@@ -355,7 +347,7 @@ function smtpAuthenticate($fp, $smtpUser, $smtpPass) {
     return ['ok' => true];
 }
 
-function sendViaSmtp($smtpHost, $smtpPort, $smtpUser, $smtpPass, $smtpFrom, $to, $fromHeader, $subject, $html) {
+function sendViaSmtp($smtpHost, $smtpPort, $smtpEnc, $smtpUser, $smtpPass, $smtpFrom, $to, $fromHeader, $subject, $html) {
     $host = $smtpHost;
     $port = $smtpPort > 0 ? $smtpPort : 465;
     $timeout = 15;
@@ -378,6 +370,45 @@ function sendViaSmtp($smtpHost, $smtpPort, $smtpUser, $smtpPass, $smtpFrom, $to,
         return ['ok' => false, 'message' => $ehlo['message']];
     }
 
+    $enc = strtolower(trim((string)$smtpEnc));
+    if ($enc === '') $enc = ($port === 465 ? 'ssl' : 'starttls');
+    if ($enc === 'ssl') {
+        // Upgrade to TLS immediately (implicit SSL / explicit upgrade both supported here)
+        if (function_exists('stream_socket_enable_crypto')) {
+            $ok = @stream_socket_enable_crypto($fp, true, STREAM_CRYPTO_METHOD_TLS_CLIENT);
+            if ($ok !== true) {
+                fclose($fp);
+                return ['ok' => false, 'message' => 'TLS handshake failed (ssl)'];
+            }
+            $ehlo2 = smtpEhlo($fp);
+            if ($ehlo2['ok'] !== true) {
+                fclose($fp);
+                return ['ok' => false, 'message' => $ehlo2['message']];
+            }
+        }
+    } elseif ($enc === 'starttls') {
+        smtpSend($fp, 'STARTTLS');
+        $r = smtpReadResponse($fp);
+        if (!smtpExpectCode($r, [220])) {
+            fclose($fp);
+            return ['ok' => false, 'message' => 'STARTTLS geweigerd: ' . smtpTrimResp($r)];
+        }
+        if (!function_exists('stream_socket_enable_crypto')) {
+            fclose($fp);
+            return ['ok' => false, 'message' => 'STARTTLS niet mogelijk (stream_socket_enable_crypto ontbreekt)'];
+        }
+        $ok = @stream_socket_enable_crypto($fp, true, STREAM_CRYPTO_METHOD_TLS_CLIENT);
+        if ($ok !== true) {
+            fclose($fp);
+            return ['ok' => false, 'message' => 'TLS handshake failed (starttls)'];
+        }
+        $ehlo2 = smtpEhlo($fp);
+        if ($ehlo2['ok'] !== true) {
+            fclose($fp);
+            return ['ok' => false, 'message' => $ehlo2['message']];
+        }
+    } // 'none' = geen TLS
+
     $auth = smtpAuthenticate($fp, $smtpUser, $smtpPass);
     if ($auth['ok'] !== true) {
         fclose($fp);
@@ -392,7 +423,7 @@ function sendViaSmtp($smtpHost, $smtpPort, $smtpUser, $smtpPass, $smtpFrom, $to,
 
 // Prefer authenticated SMTP; fallback localhost:25 (Plesk) en daarna mail()
 if ($smtpHost !== '') {
-    $smtpResult = sendViaSmtp($smtpHost, $smtpPort, $smtpUser, $smtpPass, $smtpFrom, $to, $from, $subject, $html);
+    $smtpResult = sendViaSmtp($smtpHost, $smtpPort, $smtpEnc, $smtpUser, $smtpPass, $smtpFrom, $to, $from, $subject, $html);
     if ($smtpResult['ok'] !== true) {
         $relay = sendViaLocalhostRelay($smtpFrom, $to, $from, $subject, $html);
         if ($relay['ok'] === true) {
