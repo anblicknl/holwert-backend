@@ -1990,6 +1990,43 @@ class HolwertAdmin {
         return uploadJson.imageUrl || null;
     }
 
+    /** PDF naar CDN via backend-upload. */
+    async uploadPdfFile(file, organizationId) {
+        if (!file) return null;
+        if (file.type && file.type !== 'application/pdf') {
+            throw new Error('Alleen PDF-bestanden zijn toegestaan.');
+        }
+        if (file.size > 15 * 1024 * 1024) {
+            throw new Error('PDF is te groot (max 15 MB).');
+        }
+        const base64 = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
+        const uploadRes = await fetch(`${this.apiBaseUrl}/upload/file`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${this.token}`
+            },
+            body: JSON.stringify({
+                fileData: base64,
+                filename: file.name || `document-${Date.now()}.pdf`,
+                mimeType: 'application/pdf',
+                organizationId: organizationId != null ? organizationId : undefined
+            })
+        });
+        if (!uploadRes.ok) {
+            let msg = `HTTP ${uploadRes.status}`;
+            try { const j = await uploadRes.json(); msg = j.message || j.error || msg; } catch {}
+            throw new Error(msg);
+        }
+        const uploadJson = await uploadRes.json();
+        return uploadJson.fileUrl || null;
+    }
+
     /**
      * @param {(createdOrganization: object) => void} [onCreatedOrg] — optioneel, na succesvol aanmaken (bijv. dashboard-accountmodal bijwerken).
      */
@@ -3001,6 +3038,21 @@ class HolwertAdmin {
                                     placeholder="https://www.youtube.com/watch?v=... of https://youtu.be/...">
                                 <small class="form-hint">Als je een YouTube-link invult, wordt de video getoond als Hero-afbeelding in de app. De afbeelding hierboven wordt dan niet gebruikt.</small>
                             </div>
+
+                            <div class="form-group">
+                                <label for="newsPdfFile">PDF-bijlage (optioneel)</label>
+                                <input type="file" id="newsPdfFile" accept="application/pdf,.pdf" class="file-input">
+                                <small class="form-hint">Wordt in de app als downloadlink onder het artikel getoond (max 15 MB).</small>
+                                ${article?.pdf_url ? `
+                                    <div class="current-image" style="margin-top:8px;">
+                                        <small>Huidige PDF: <a href="${article.pdf_url}" target="_blank" rel="noopener noreferrer">bekijken</a></small>
+                                        <label class="checkbox-label" style="margin-top:6px;display:block;">
+                                            <input type="checkbox" id="newsPdfRemove">
+                                            PDF verwijderen bij opslaan
+                                        </label>
+                                    </div>
+                                ` : ''}
+                            </div>
                             
                             <div class="form-group">
                                 <label for="newsArticleContent">Inhoud *</label>
@@ -3260,6 +3312,22 @@ class HolwertAdmin {
             // Bronvermelding
             body.source_name = (document.getElementById('newsSourceName')?.value || '').trim() || null;
             body.source_url  = (document.getElementById('newsSourceUrl')?.value  || '').trim() || null;
+
+            const pdfFile = document.getElementById('newsPdfFile')?.files?.[0];
+            const removePdf = document.getElementById('newsPdfRemove')?.checked === true;
+            if (pdfFile) {
+                try {
+                    body.pdf_url = await this.uploadPdfFile(pdfFile, organization_id);
+                } catch (error) {
+                    console.error('PDF upload error:', error);
+                    this.showNotification(error.message || 'PDF upload mislukt', 'error');
+                    return;
+                }
+            } else if (removePdf) {
+                body.pdf_url = null;
+            } else if (actualNewsId) {
+                body.pdf_url = undefined;
+            }
 
             const url = actualNewsId ? `${this.apiBaseUrl}/admin/news/${actualNewsId}` : `${this.apiBaseUrl}/news`;
             const method = actualNewsId ? 'PUT' : 'POST';
@@ -3707,6 +3775,11 @@ class HolwertAdmin {
                             <label for="eventImageUrl">Afbeelding URL</label>
                             <input type="url" id="eventImageUrl" name="image_url" placeholder="https://...">
                         </div>
+                        <div class="form-group">
+                            <label for="eventPdfFile">PDF-bijlage (optioneel)</label>
+                            <input type="file" id="eventPdfFile" accept="application/pdf,.pdf" class="file-input">
+                            <small class="form-hint">Downloadlink onder het evenement in de app (max 15 MB).</small>
+                        </div>
                     </form>
                 </div>
                 <div class="modal-footer">
@@ -3790,6 +3863,20 @@ class HolwertAdmin {
                             <label for="editEventImageUrl">Afbeelding URL</label>
                             <input type="url" id="editEventImageUrl" name="image_url" value="${event.image_url || ''}" placeholder="https://...">
                         </div>
+                        <div class="form-group">
+                            <label for="editEventPdfFile">PDF-bijlage (optioneel)</label>
+                            <input type="file" id="editEventPdfFile" accept="application/pdf,.pdf" class="file-input">
+                            <small class="form-hint">Downloadlink onder het evenement in de app (max 15 MB).</small>
+                            ${event.pdf_url ? `
+                                <div style="margin-top:8px;">
+                                    <small>Huidige PDF: <a href="${event.pdf_url}" target="_blank" rel="noopener noreferrer">bekijken</a></small>
+                                    <label class="checkbox-label" style="margin-top:6px;display:block;">
+                                        <input type="checkbox" id="editEventPdfRemove">
+                                        PDF verwijderen bij opslaan
+                                    </label>
+                                </div>
+                            ` : ''}
+                        </div>
                     </form>
                 </div>
                 <div class="modal-footer">
@@ -3817,6 +3904,17 @@ class HolwertAdmin {
             image_url: formData.get('image_url'),
             is_published: true // Automatisch goedgekeurd
         };
+
+        const pdfFile = document.getElementById('eventPdfFile')?.files?.[0];
+        if (pdfFile) {
+            try {
+                eventData.pdf_url = await this.uploadPdfFile(pdfFile, eventData.organization_id ? parseInt(eventData.organization_id, 10) : null);
+            } catch (error) {
+                console.error('PDF upload error:', error);
+                this.showNotification(error.message || 'PDF upload mislukt', 'error');
+                return;
+            }
+        }
 
         try {
             const response = await fetch(`${this.apiBaseUrl}/admin/events`, {
@@ -3858,6 +3956,20 @@ class HolwertAdmin {
             image_url: formData.get('image_url'),
             is_published: true // Automatisch goedgekeurd
         };
+
+        const pdfFile = document.getElementById('editEventPdfFile')?.files?.[0];
+        const removePdf = document.getElementById('editEventPdfRemove')?.checked === true;
+        if (pdfFile) {
+            try {
+                eventData.pdf_url = await this.uploadPdfFile(pdfFile, eventData.organization_id ? parseInt(eventData.organization_id, 10) : null);
+            } catch (error) {
+                console.error('PDF upload error:', error);
+                this.showNotification(error.message || 'PDF upload mislukt', 'error');
+                return;
+            }
+        } else if (removePdf) {
+            eventData.pdf_url = null;
+        }
 
         try {
             const response = await fetch(`${this.apiBaseUrl}/admin/events/${id}`, {
@@ -6164,7 +6276,8 @@ class HolwertAdmin {
                         location: ev.location || '',
                         organization_id: ev.organization_id || '',
                         organization_name: ev.organization_name || '',
-                        image_url: ev.image_url || ''
+                        image_url: ev.image_url || '',
+                        pdf_url: ev.pdf_url || ''
                     };
                     console.log('Initial data set:', initial);
                     
@@ -6295,6 +6408,20 @@ class HolwertAdmin {
                                         <div style="margin-top: 10px;" data-existing-image="${initial.image_url}">
                                             <p>Huidige afbeelding:</p>
                                             <img src="${initial.image_url}" style="max-width: 200px; max-height: 200px; border-radius: 8px;">
+                                        </div>
+                                    ` : ''}
+                                </div>
+                                <div class="form-group">
+                                    <label>PDF-bijlage (optioneel)</label>
+                                    <input type="file" id="evPdf" accept="application/pdf,.pdf">
+                                    <small class="form-hint">Downloadlink onder het evenement in de app (max 15 MB).</small>
+                                    ${initial.pdf_url ? `
+                                        <div style="margin-top:8px;">
+                                            <small>Huidige PDF: <a href="${initial.pdf_url}" target="_blank" rel="noopener noreferrer">bekijken</a></small>
+                                            <label class="checkbox-label" style="margin-top:6px;display:block;">
+                                                <input type="checkbox" id="evPdfRemove">
+                                                PDF verwijderen bij opslaan
+                                            </label>
                                         </div>
                                     ` : ''}
                                 </div>
@@ -6466,6 +6593,20 @@ class HolwertAdmin {
             // Voeg image_url alleen toe als het gedefinieerd is
             if (imageUrl !== undefined) {
                 body.image_url = imageUrl;
+            }
+
+            const pdfFile = document.getElementById('evPdf')?.files?.[0];
+            const removePdf = document.getElementById('evPdfRemove')?.checked === true;
+            if (pdfFile) {
+                try {
+                    body.pdf_url = await this.uploadPdfFile(pdfFile, organization_id);
+                } catch (error) {
+                    console.error('PDF upload error:', error);
+                    this.showNotification(error.message || 'PDF upload mislukt', 'error');
+                    return;
+                }
+            } else if (removePdf) {
+                body.pdf_url = null;
             }
 
             // Bepaal URL en method op basis van actualEventId (al gedeclareerd aan het begin)

@@ -1041,8 +1041,8 @@ function folderSegmentForOrgUpload(orgIdNum) {
   return String(Math.floor(orgIdNum)).padStart(2, '0');
 }
 
-/** Upload afbeelding naar holwert.appenvloed.com/upload (org-submap: twee cijfers, bv. 07 of 00). */
-async function uploadImageBufferToSharedHosting(buffer, originalname, mimetype, orgFolderTwoDigits) {
+/** Upload bestand naar holwert.appenvloed.com/upload (org-submap: twee cijfers, bv. 07 of 00). */
+async function uploadFileBufferToSharedHosting(buffer, originalname, mimetype, orgFolderTwoDigits) {
   const form = new FormData();
   form.append('file', buffer, {
     filename: originalname || 'image.jpg',
@@ -1088,6 +1088,10 @@ async function uploadImageBufferToSharedHosting(buffer, originalname, mimetype, 
     throw new Error('Geen URL van upload-server');
   }
   return rawUrl.replace('http://', 'https://');
+}
+
+async function uploadImageBufferToSharedHosting(buffer, originalname, mimetype, orgFolderTwoDigits) {
+  return uploadFileBufferToSharedHosting(buffer, originalname, mimetype, orgFolderTwoDigits);
 }
 
 // Publieke logo-upload voor organisatie-aanmelding (geen account); bestanden in map 00 tot org bestaat.
@@ -1251,6 +1255,46 @@ app.post('/api/upload/image', authenticateToken, async (req, res) => {
   }
 });
 
+// PDF / document upload (base64) — zelfde CDN-map als afbeeldingen
+app.post('/api/upload/file', authenticateToken, async (req, res) => {
+  try {
+    const { fileData, filename, mimeType, organizationId } = req.body;
+    if (!fileData || typeof fileData !== 'string') {
+      return res.status(400).json({ error: 'No file data provided', message: 'Provide fileData (base64)' });
+    }
+    const mime = (mimeType || '').toLowerCase().trim();
+    if (mime !== 'application/pdf') {
+      return res.status(400).json({ error: 'Ongeldig bestandstype', message: 'Alleen PDF is toegestaan.' });
+    }
+    const base64Data = fileData.replace(/^data:application\/pdf;base64,/, '');
+    if (base64Data.length > 20 * 1024 * 1024) {
+      return res.status(400).json({ error: 'PDF te groot', message: 'Maximaal ongeveer 15 MB.' });
+    }
+    let buffer;
+    try {
+      buffer = Buffer.from(base64Data, 'base64');
+    } catch (e) {
+      return res.status(400).json({ error: 'Ongeldige bestandsdata' });
+    }
+    if (!buffer.length || buffer.length > 15 * 1024 * 1024) {
+      return res.status(400).json({ error: 'PDF te groot of leeg' });
+    }
+    const safeName = (filename && String(filename).trim()) || `document-${Date.now()}.pdf`;
+    const pdfName = safeName.toLowerCase().endsWith('.pdf') ? safeName : `${safeName}.pdf`;
+    const resolvedOrg = resolveUploadOrganizationIdForRequest(req, organizationId);
+    const orgFolder = folderSegmentForOrgUpload(resolvedOrg);
+    const fileUrl = await uploadFileBufferToSharedHosting(buffer, pdfName, 'application/pdf', orgFolder);
+    res.json({
+      message: 'PDF uploaded successfully',
+      fileUrl,
+      filename: pdfName,
+    });
+  } catch (error) {
+    console.error('PDF upload error:', error);
+    res.status(500).json({ error: 'Failed to upload PDF', message: error.message });
+  }
+});
+
 // Bootstrap: news (eerste pagina) + organizations in één request voor snelle app-opstart
 app.get('/api/app/bootstrap', async (req, res) => {
   try {
@@ -1268,7 +1312,7 @@ app.get('/api/app/bootstrap', async (req, res) => {
     let newsQuery = `
       SELECT n.id, n.title, '' as content,
         COALESCE(n.excerpt, LEFT(COALESCE(n.content, ''), 2000)) as excerpt,
-        n.image_url, n.youtube_url, n.source_name, n.source_url, n.created_at, n.updated_at,
+        n.image_url, n.youtube_url, n.source_name, n.source_url, n.pdf_url, n.created_at, n.updated_at,
         COALESCE(n.published_at, n.created_at) as published_at,
         n.organization_id, o.name as organization_name, o.logo_url as organization_logo,
         o.brand_color as organization_brand_color
@@ -1331,6 +1375,7 @@ async function ensureNewsColumns() {
     ['youtube_url', 'VARCHAR(500)'],
     ['source_name', 'VARCHAR(255)'],
     ['source_url',  'VARCHAR(500)'],
+    ['pdf_url',     'VARCHAR(500)'],
   ];
   for (const [col, def] of cols) {
     try {
@@ -1363,6 +1408,20 @@ async function ensureOrgColumns() {
     }
   }
   _orgColsMigrated = true;
+}
+
+let _eventColsMigrated = false;
+async function ensureEventColumns() {
+  if (_eventColsMigrated) return;
+  try {
+    await executeQuery(`ALTER TABLE events ADD COLUMN pdf_url VARCHAR(500)`);
+    console.log('[ensureEventColumns] events.pdf_url toegevoegd');
+  } catch (e) {
+    if (!String(e.message).includes('Duplicate column') && !String(e.message).includes('1060')) {
+      console.warn('[ensureEventColumns] pdf_url:', e.message);
+    }
+  }
+  _eventColsMigrated = true;
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1401,7 +1460,7 @@ app.get('/api/news', async (req, res) => {
         n.title, 
         ${minimalMode ? `'' as content` : `COALESCE(n.content, '') as content`},
         COALESCE(n.excerpt, LEFT(COALESCE(n.content, ''), 2000)) as excerpt,
-        n.image_url, n.youtube_url, n.source_name, n.source_url,
+        n.image_url, n.youtube_url, n.source_name, n.source_url, n.pdf_url,
         n.created_at, 
         n.updated_at, 
         COALESCE(n.published_at, n.created_at) as published_at,
@@ -2178,7 +2237,7 @@ app.get('/api/news/:id', async (req, res) => {
     
     const result = await executeQuery(`
       SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt,
-             n.image_url, n.youtube_url, n.source_name, n.source_url,
+             n.image_url, n.youtube_url, n.source_name, n.source_url, n.pdf_url,
              n.created_at, n.updated_at, 
              COALESCE(n.published_at, n.created_at) as published_at,
              n.category, n.custom_category, n.is_published,
@@ -2315,6 +2374,7 @@ app.get('/news/:id', async (req, res) => {
 // Create news article with workflow logic
 app.post('/api/news', authenticateToken, async (req, res) => {
   try {
+    await ensureNewsColumns();
     const { title, content, excerpt, category, custom_category, organization_id, image_url, published_at } = req.body;
     let authorId = req.user?.userId || null;
 
@@ -2417,8 +2477,25 @@ app.post('/api/news', authenticateToken, async (req, res) => {
       throw new Error('Failed to insert news (no insertId returned)');
     }
 
+    const extraSets = [];
+    const extraVals = [];
+    const pushExtra = (col, val) => {
+      if (val !== undefined) {
+        extraSets.push(`${col} = ?`);
+        extraVals.push(val || null);
+      }
+    };
+    pushExtra('youtube_url', req.body.youtube_url);
+    pushExtra('source_name', req.body.source_name);
+    pushExtra('source_url', req.body.source_url);
+    pushExtra('pdf_url', req.body.pdf_url);
+    if (extraSets.length) {
+      extraVals.push(insertResult.insertId);
+      await executeQuery(`UPDATE news SET ${extraSets.join(', ')} WHERE id = ?`, extraVals);
+    }
+
     const fetchResult = await executeQuery(
-      'SELECT id, title, COALESCE(content, \'\') AS content, excerpt, category, custom_category, image_url, is_published, COALESCE(published_at, created_at) as published_at, author_id, organization_id, created_at, updated_at FROM news WHERE id = ? LIMIT 1',
+      'SELECT id, title, COALESCE(content, \'\') AS content, excerpt, category, custom_category, image_url, youtube_url, source_name, source_url, pdf_url, is_published, COALESCE(published_at, created_at) as published_at, author_id, organization_id, created_at, updated_at FROM news WHERE id = ? LIMIT 1',
       [insertResult.insertId]
     );
 
@@ -3436,7 +3513,7 @@ app.get('/api/admin/news/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
 
     const result = await executeQuery(`
-      SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt, n.image_url, n.youtube_url, n.source_name, n.source_url, n.organization_id,
+      SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt, n.image_url, n.youtube_url, n.source_name, n.source_url, n.pdf_url, n.organization_id,
              n.created_at, n.updated_at, 
              COALESCE(n.published_at, n.created_at) as published_at,
              n.category, n.custom_category, n.is_published,
@@ -3485,7 +3562,7 @@ app.put('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res)
   try {
     await ensureNewsColumns();
     const { id } = req.params;
-    const { title, content, excerpt, category, custom_category, organization_id, image_url, youtube_url, source_name, source_url, image_data, is_published, published_at } = req.body;
+    const { title, content, excerpt, category, custom_category, organization_id, image_url, youtube_url, source_name, source_url, pdf_url, image_data, is_published, published_at } = req.body;
 
     // Validation
     if (!title || !content) {
@@ -3542,6 +3619,11 @@ app.put('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res)
     if (source_url !== undefined) {
       updateFields.push(`source_url = ?`);
       values.push(source_url || null);
+    }
+
+    if (pdf_url !== undefined) {
+      updateFields.push(`pdf_url = ?`);
+      values.push(pdf_url || null);
     }
 
     if (image_data !== undefined) {
@@ -4487,6 +4569,7 @@ app.get('/api/events/count', async (req, res) => {
 // terwijl deze route alleen via de PHP-proxy las → events wel in dashboard, niet in app.
 app.get('/api/events', async (req, res) => {
   try {
+    await ensureEventColumns();
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
     const rawLimit = parseInt(req.query.limit, 10);
     const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 500) : 20;
@@ -4592,6 +4675,7 @@ app.get('/api/events', async (req, res) => {
 // Alias route for single event
 app.get('/api/events/:id', async (req, res) => {
   try {
+    await ensureEventColumns();
     const { id } = req.params;
     const result = await executeQuery(`
       SELECT e.*, o.name as organization_name, o.brand_color as organization_brand_color, o.logo_url as organization_logo
@@ -4668,7 +4752,8 @@ app.get('/api/admin/events', authenticateToken, async (req, res) => {
 // Create event
 app.post('/api/admin/events', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const { title, description, event_date, end_date, event_end_date, location, organization_id, status = 'scheduled', price, image_url } = req.body;
+    await ensureEventColumns();
+    const { title, description, event_date, end_date, event_end_date, location, organization_id, status = 'scheduled', price, image_url, pdf_url } = req.body;
     if (!title || !event_date) return res.status(400).json({ error: 'title and event_date are required' });
     const eventDateSql = toMysqlDateTime(event_date);
     if (!eventDateSql) return res.status(400).json({ error: 'Invalid event_date', message: 'Use a valid date/time (YYYY-MM-DD or datetime-local).' });
@@ -4689,9 +4774,9 @@ app.post('/api/admin/events', authenticateToken, requireAdmin, async (req, res) 
     }
 
     const insertResult = await executeInsert(
-      `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-      [title, description || null, eventDateSql, endSql, location || null, organization_id || null, status, organizerId, priceVal, image_url || null]
+      `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, pdf_url, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [title, description || null, eventDateSql, endSql, location || null, organization_id || null, status, organizerId, priceVal, image_url || null, pdf_url || null]
     );
 
     if (!insertResult.insertId) {
@@ -4755,8 +4840,9 @@ app.post('/api/admin/events', authenticateToken, requireAdmin, async (req, res) 
 // Update event
 app.put('/api/admin/events/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    await ensureEventColumns();
     const { id } = req.params;
-    const { title, description, event_date, end_date, event_end_date, location, organization_id, status, price, image_url } = req.body;
+    const { title, description, event_date, end_date, event_end_date, location, organization_id, status, price, image_url, pdf_url } = req.body;
     const sets = [];
     const params = [];
     const push = (v) => { params.push(v); return `?`; };
@@ -4769,6 +4855,7 @@ app.put('/api/admin/events/:id', authenticateToken, requireAdmin, async (req, re
     if (status !== undefined) sets.push(`status = ${push(status)}`);
     if (price !== undefined) sets.push(`price = ${push(price)}`);
     if (image_url !== undefined) sets.push(`image_url = ${push(image_url)}`);
+    if (pdf_url !== undefined) sets.push(`pdf_url = ${push(pdf_url)}`);
     if (!sets.length) return res.status(400).json({ error: 'No fields to update' });
     params.push(id);
     await executeQuery(
@@ -5463,7 +5550,7 @@ app.get('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req, re
     await ensureNewsColumns();
     const orgId = req.organizationId;
     const result = await executeQuery(
-      'SELECT id, title, content, excerpt, category, custom_category, image_url, youtube_url, source_name, source_url, is_published, COALESCE(published_at, created_at) as published_at, organization_id, author_id, created_at, updated_at FROM news WHERE id = ? AND organization_id = ?',
+      'SELECT id, title, content, excerpt, category, custom_category, image_url, youtube_url, source_name, source_url, pdf_url, is_published, COALESCE(published_at, created_at) as published_at, organization_id, author_id, created_at, updated_at FROM news WHERE id = ? AND organization_id = ?',
       [req.params.id, orgId]
     );
     if (!result.rows?.length) return res.status(404).json({ error: 'Artikel niet gevonden' });
@@ -5479,11 +5566,11 @@ app.post('/api/org/news', authenticateToken, requireOrgPortal, async (req, res) 
     await ensureNewsColumns();
     const orgId = req.organizationId;
     const userId = req.user.userId;
-    const { title, content, excerpt, category, custom_category, image_url, youtube_url, source_name, source_url, is_published } = req.body || {};
+    const { title, content, excerpt, category, custom_category, image_url, youtube_url, source_name, source_url, pdf_url, is_published } = req.body || {};
     if (!title) return res.status(400).json({ error: 'title is required' });
     const result = await executeInsert(
-      'INSERT INTO news (title, content, excerpt, author_id, organization_id, image_url, youtube_url, source_name, source_url, category, custom_category, is_published, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())',
-      [title || '', content || '', excerpt || null, userId, orgId, image_url || null, youtube_url || null, source_name || null, source_url || null, category || null, custom_category || null, is_published === true]
+      'INSERT INTO news (title, content, excerpt, author_id, organization_id, image_url, youtube_url, source_name, source_url, pdf_url, category, custom_category, is_published, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())',
+      [title || '', content || '', excerpt || null, userId, orgId, image_url || null, youtube_url || null, source_name || null, source_url || null, pdf_url || null, category || null, custom_category || null, is_published === true]
     );
     const id = result.insertId || (result.rows && result.rows[0] && result.rows[0].id);
     const row = await executeQuery('SELECT id, title, excerpt, is_published, organization_id, created_at FROM news WHERE id = ?', [id]);
@@ -5499,14 +5586,14 @@ app.put('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req, re
     await ensureNewsColumns();
     const orgId = req.organizationId;
     const id = parseInt(req.params.id);
-    const { title, content, excerpt, category, custom_category, image_url, youtube_url, source_name, source_url, is_published, published_at } = req.body || {};
+    const { title, content, excerpt, category, custom_category, image_url, youtube_url, source_name, source_url, pdf_url, is_published, published_at } = req.body || {};
     const existing = await executeQuery('SELECT id FROM news WHERE id = ? AND organization_id = ?', [id, orgId]);
     if (!existing.rows?.length) return res.status(404).json({ error: 'Artikel niet gevonden' });
     const publishedAtSql = published_at ? toMysqlDateTime(published_at) : null;
     const publishedAtVal = publishedAtSql || null;
     await executeQuery(
-      'UPDATE news SET title = ?, content = ?, excerpt = ?, category = ?, custom_category = ?, image_url = ?, youtube_url = ?, source_name = ?, source_url = ?, is_published = ?, published_at = COALESCE(?, published_at), updated_at = NOW() WHERE id = ?',
-      [title ?? '', content ?? '', excerpt ?? null, category ?? null, custom_category ?? null, image_url ?? null, youtube_url ?? null, source_name ?? null, source_url ?? null, is_published === true, publishedAtVal, id]
+      'UPDATE news SET title = ?, content = ?, excerpt = ?, category = ?, custom_category = ?, image_url = ?, youtube_url = ?, source_name = ?, source_url = ?, pdf_url = ?, is_published = ?, published_at = COALESCE(?, published_at), updated_at = NOW() WHERE id = ?',
+      [title ?? '', content ?? '', excerpt ?? null, category ?? null, custom_category ?? null, image_url ?? null, youtube_url ?? null, source_name ?? null, source_url ?? null, pdf_url ?? null, is_published === true, publishedAtVal, id]
     );
     const row = await executeQuery('SELECT id, title, excerpt, is_published, COALESCE(published_at, created_at) as published_at, updated_at FROM news WHERE id = ?', [id]);
     res.json({ article: row.rows[0] });
@@ -6456,6 +6543,8 @@ app.get('/api/migrate-columns', async (req, res) => {
     { table: 'news',          column: 'source_name',  sql: `ALTER TABLE news ADD COLUMN source_name VARCHAR(255)` },
     { table: 'news',          column: 'source_url',   sql: `ALTER TABLE news ADD COLUMN source_url VARCHAR(500)` },
     { table: 'organizations', column: 'show_email',   sql: `ALTER TABLE organizations ADD COLUMN show_email BOOLEAN DEFAULT true` },
+    { table: 'news',          column: 'pdf_url',      sql: `ALTER TABLE news ADD COLUMN pdf_url VARCHAR(500)` },
+    { table: 'events',        column: 'pdf_url',      sql: `ALTER TABLE events ADD COLUMN pdf_url VARCHAR(500)` },
     { table: 'organizations', column: 'is_ondernemer', sql: `ALTER TABLE organizations ADD COLUMN is_ondernemer BOOLEAN DEFAULT false` },
   ];
   for (const m of migrations) {
