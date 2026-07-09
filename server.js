@@ -205,13 +205,17 @@ async function getUserById(id) {
 }
 
 
-// Verwijder oude profielfoto van externe server
-async function deleteOldProfileImage(imageUrl) {
-  if (!imageUrl || typeof imageUrl !== 'string') return;
+// Verwijder bestand op shared hosting (afbeelding of PDF onder uploads/…)
+function parseHostedUploadPath(fileUrl) {
+  if (!fileUrl || typeof fileUrl !== 'string') return null;
+  const match = fileUrl.match(/holwert\.appenvloed\.com\/(uploads\/\d{4}\/\d{2}\/\d{2}\/[^?#]+)/i);
+  return match ? match[1] : null;
+}
+
+async function deleteHostedUploadFile(fileUrl) {
+  const filePath = parseHostedUploadPath(fileUrl);
+  if (!filePath) return;
   try {
-    const match = imageUrl.match(/holwert\.appenvloed\.com\/(uploads\/\d{4}\/\d{2}\/\d{2}\/[^?#]+)/);
-    if (!match) return;
-    const filePath = match[1];
     const form = new FormData();
     form.append('path', filePath);
     form.append('secret', process.env.DELETE_SECRET || '');
@@ -220,10 +224,47 @@ async function deleteOldProfileImage(imageUrl) {
       timeout: 10000,
       httpsAgent: new (require('https').Agent)({ rejectUnauthorized: false })
     });
-    console.log('🗑️ Oude profielfoto verwijderd:', filePath);
+    console.log('🗑️ Hosting-bestand verwijderd:', filePath);
   } catch (e) {
-    console.warn('⚠️ Kon oude profielfoto niet verwijderen:', e.message);
+    console.warn('⚠️ Kon hosting-bestand niet verwijderen:', filePath, e.message);
   }
+}
+
+/** Tel hoeveel nieuws/events nog naar dezelfde pdf_url verwijzen. */
+async function countHostedPdfUrlReferences(fileUrl, { excludeNewsId, excludeEventId } = {}) {
+  if (!fileUrl) return 0;
+  let total = 0;
+  const newsSql = excludeNewsId != null
+    ? 'SELECT COUNT(*) AS c FROM news WHERE pdf_url = ? AND id != ?'
+    : 'SELECT COUNT(*) AS c FROM news WHERE pdf_url = ?';
+  const newsParams = excludeNewsId != null ? [fileUrl, excludeNewsId] : [fileUrl];
+  const newsRes = await executeQuery(newsSql, newsParams);
+  total += parseInt(newsRes.rows?.[0]?.c ?? 0, 10) || 0;
+
+  const evSql = excludeEventId != null
+    ? 'SELECT COUNT(*) AS c FROM events WHERE pdf_url = ? AND id != ?'
+    : 'SELECT COUNT(*) AS c FROM events WHERE pdf_url = ?';
+  const evParams = excludeEventId != null ? [fileUrl, excludeEventId] : [fileUrl];
+  const evRes = await executeQuery(evSql, evParams);
+  total += parseInt(evRes.rows?.[0]?.c ?? 0, 10) || 0;
+  return total;
+}
+
+/** Verwijder PDF op hosting als geen enkel record er meer naar verwijst. */
+async function cleanupHostedPdfIfUnreferenced(fileUrl, opts = {}) {
+  if (!parseHostedUploadPath(fileUrl)) return;
+  try {
+    const refs = await countHostedPdfUrlReferences(fileUrl, opts);
+    if (refs > 0) return;
+    await deleteHostedUploadFile(fileUrl);
+  } catch (e) {
+    console.warn('⚠️ PDF-opruiming mislukt:', fileUrl, e.message);
+  }
+}
+
+// Verwijder oude profielfoto van externe server
+async function deleteOldProfileImage(imageUrl) {
+  await deleteHostedUploadFile(imageUrl);
 }
 
 // Cleanup loginAttempts periodiek
@@ -3564,6 +3605,9 @@ app.put('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res)
     const { id } = req.params;
     const { title, content, excerpt, category, custom_category, organization_id, image_url, youtube_url, source_name, source_url, pdf_url, image_data, is_published, published_at } = req.body;
 
+    const prevNews = await executeQuery('SELECT pdf_url FROM news WHERE id = ? LIMIT 1', [id]);
+    const oldPdfUrl = prevNews.rows?.[0]?.pdf_url || null;
+
     // Validation
     if (!title || !content) {
       return res.status(400).json({
@@ -3685,6 +3729,13 @@ app.put('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res)
     invalidateCache('/api/admin/news');
     invalidateCache('/api/admin/dashboard');
 
+    if (pdf_url !== undefined) {
+      const newPdfUrl = pdf_url || null;
+      if (oldPdfUrl && oldPdfUrl !== newPdfUrl) {
+        cleanupHostedPdfIfUnreferenced(oldPdfUrl).catch(() => {});
+      }
+    }
+
     res.json({
       message: 'Article updated successfully',
       article: result.rows[0]
@@ -3740,9 +3791,14 @@ app.post('/api/admin/news/:id/publish', authenticateToken, requireAdmin, async (
 app.delete('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
+    const prev = await executeQuery('SELECT pdf_url FROM news WHERE id = ? LIMIT 1', [id]);
+    const oldPdfUrl = prev.rows?.[0]?.pdf_url || null;
     const result = await executeQuery('DELETE FROM news WHERE id = ?', [id]);
     if (!result.rowCount) {
       return res.status(404).json({ error: 'Article not found' });
+    }
+    if (oldPdfUrl) {
+      cleanupHostedPdfIfUnreferenced(oldPdfUrl).catch(() => {});
     }
     
     // Invalidate cache for news endpoints
@@ -4843,6 +4899,8 @@ app.put('/api/admin/events/:id', authenticateToken, requireAdmin, async (req, re
     await ensureEventColumns();
     const { id } = req.params;
     const { title, description, event_date, end_date, event_end_date, location, organization_id, status, price, image_url, pdf_url } = req.body;
+    const prevEv = await executeQuery('SELECT pdf_url FROM events WHERE id = ? LIMIT 1', [id]);
+    const oldPdfUrl = prevEv.rows?.[0]?.pdf_url || null;
     const sets = [];
     const params = [];
     const push = (v) => { params.push(v); return `?`; };
@@ -4869,6 +4927,12 @@ app.put('/api/admin/events/:id', authenticateToken, requireAdmin, async (req, re
       [id]
     );
     if (!fetchResult.rows.length) return res.status(404).json({ error: 'Event not found' });
+    if (pdf_url !== undefined) {
+      const newPdfUrl = pdf_url || null;
+      if (oldPdfUrl && oldPdfUrl !== newPdfUrl) {
+        cleanupHostedPdfIfUnreferenced(oldPdfUrl).catch(() => {});
+      }
+    }
     res.json({ event: fetchResult.rows[0] });
   } catch (error) {
     console.error('Update event error:', error);
@@ -4901,8 +4965,13 @@ app.post('/api/admin/events/:id/publish', authenticateToken, requireAdmin, async
 app.delete('/api/admin/events/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
+    const prev = await executeQuery('SELECT pdf_url FROM events WHERE id = ? LIMIT 1', [id]);
+    const oldPdfUrl = prev.rows?.[0]?.pdf_url || null;
     const result = await executeQuery('DELETE FROM events WHERE id = ?', [id]);
     if (!result.rowCount) return res.status(404).json({ error: 'Event not found' });
+    if (oldPdfUrl) {
+      cleanupHostedPdfIfUnreferenced(oldPdfUrl).catch(() => {});
+    }
     invalidateCache('/api/admin/moderation/count');
     invalidateCache('/api/admin/pending');
     invalidateCache('/api/admin/dashboard');
@@ -5587,14 +5656,19 @@ app.put('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req, re
     const orgId = req.organizationId;
     const id = parseInt(req.params.id);
     const { title, content, excerpt, category, custom_category, image_url, youtube_url, source_name, source_url, pdf_url, is_published, published_at } = req.body || {};
-    const existing = await executeQuery('SELECT id FROM news WHERE id = ? AND organization_id = ?', [id, orgId]);
+    const existing = await executeQuery('SELECT id, pdf_url FROM news WHERE id = ? AND organization_id = ?', [id, orgId]);
     if (!existing.rows?.length) return res.status(404).json({ error: 'Artikel niet gevonden' });
+    const oldPdfUrl = existing.rows[0].pdf_url || null;
     const publishedAtSql = published_at ? toMysqlDateTime(published_at) : null;
     const publishedAtVal = publishedAtSql || null;
     await executeQuery(
       'UPDATE news SET title = ?, content = ?, excerpt = ?, category = ?, custom_category = ?, image_url = ?, youtube_url = ?, source_name = ?, source_url = ?, pdf_url = ?, is_published = ?, published_at = COALESCE(?, published_at), updated_at = NOW() WHERE id = ?',
       [title ?? '', content ?? '', excerpt ?? null, category ?? null, custom_category ?? null, image_url ?? null, youtube_url ?? null, source_name ?? null, source_url ?? null, pdf_url ?? null, is_published === true, publishedAtVal, id]
     );
+    const newPdfUrl = pdf_url ?? null;
+    if (oldPdfUrl && oldPdfUrl !== newPdfUrl) {
+      cleanupHostedPdfIfUnreferenced(oldPdfUrl).catch(() => {});
+    }
     const row = await executeQuery('SELECT id, title, excerpt, is_published, COALESCE(published_at, created_at) as published_at, updated_at FROM news WHERE id = ?', [id]);
     res.json({ article: row.rows[0] });
   } catch (error) {
@@ -5608,9 +5682,14 @@ app.delete('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req,
     const orgId = req.organizationId;
     const id = parseInt(req.params.id, 10);
     if (Number.isNaN(id)) return res.status(400).json({ error: 'Ongeldig id' });
+    const prev = await executeQuery('SELECT pdf_url FROM news WHERE id = ? AND organization_id = ? LIMIT 1', [id, orgId]);
+    const oldPdfUrl = prev.rows?.[0]?.pdf_url || null;
     const del = await executeQuery('DELETE FROM news WHERE id = ? AND organization_id = ?', [id, orgId]);
     const n = del.rowCount ?? del.rows?.length ?? 0;
     if (!n) return res.status(404).json({ error: 'Artikel niet gevonden' });
+    if (oldPdfUrl) {
+      cleanupHostedPdfIfUnreferenced(oldPdfUrl).catch(() => {});
+    }
     res.json({ success: true });
   } catch (error) {
     console.error('DELETE /api/org/news/:id error:', error);
@@ -5624,7 +5703,7 @@ app.get('/api/org/events', authenticateToken, requireOrgPortal, async (req, res)
     const { page = 1, limit = 20, status } = req.query;
     const offset = (page - 1) * limit;
     const orgId = req.organizationId;
-    let query = `SELECT e.id, e.title, e.description, e.event_date, e.event_end_date, e.location, e.status, e.price, e.image_url, e.organization_id, e.created_at, e.updated_at
+    let query = `SELECT e.id, e.title, e.description, e.event_date, e.event_end_date, e.location, e.status, e.price, e.image_url, e.pdf_url, e.organization_id, e.created_at, e.updated_at
       FROM events e WHERE e.organization_id = ?`;
     const params = [orgId];
     if (status === 'scheduled') { query += ` AND (e.status = 'scheduled' OR e.status IS NULL)`; }
@@ -5650,7 +5729,7 @@ app.get('/api/org/events/:id', authenticateToken, requireOrgPortal, async (req, 
   try {
     const orgId = req.organizationId;
     const result = await executeQuery(
-      'SELECT id, title, description, event_date, event_end_date, location, status, price, image_url, organization_id, created_at, updated_at FROM events WHERE id = ? AND organization_id = ?',
+      'SELECT id, title, description, event_date, event_end_date, location, status, price, image_url, pdf_url, organization_id, created_at, updated_at FROM events WHERE id = ? AND organization_id = ?',
       [req.params.id, orgId]
     );
     if (!result.rows?.length) return res.status(404).json({ error: 'Evenement niet gevonden' });
@@ -5668,7 +5747,7 @@ app.post('/api/org/events', authenticateToken, requireOrgPortal, async (req, res
     if (!organizerId || Number.isNaN(organizerId)) {
       return res.status(400).json({ error: 'Gebruiker ontbreekt in token', message: 'Log opnieuw in.' });
     }
-    const { title, description, event_date, end_date, event_end_date, location, status, price, image_url } = req.body || {};
+    const { title, description, event_date, end_date, event_end_date, location, status, price, image_url, pdf_url } = req.body || {};
     if (!title) return res.status(400).json({ error: 'title is required' });
     if (!event_date) return res.status(400).json({ error: 'event_date is required' });
     const eventDateSql = toMysqlDateTime(event_date);
@@ -5687,6 +5766,7 @@ app.post('/api/org/events', authenticateToken, requireOrgPortal, async (req, res
     const endDt = endRaw != null ? toMysqlDateTime(endRaw) : null;
     const priceVal = normalizeEventPrice(price);
     const imageUrlSafe = sanitizeEventImageUrlForDb(image_url);
+    const pdfUrlSafe = pdf_url != null && String(pdf_url).trim() !== '' ? String(pdf_url).trim() : null;
     const orgCheck = await executeQuery('SELECT is_approved FROM organizations WHERE id = ?', [orgId]);
     const approved =
       orgCheck.rows?.[0] &&
@@ -5705,12 +5785,13 @@ app.post('/api/org/events', authenticateToken, requireOrgPortal, async (req, res
       organizerId,
       priceVal,
       imageUrlSafe,
+      pdfUrlSafe,
     ];
     let result;
     try {
       result = await executeInsert(
-        `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, is_published, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, pdf_url, is_published, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
         [...insertParams, publishFlag]
       );
     } catch (insErr) {
@@ -5718,15 +5799,15 @@ app.post('/api/org/events', authenticateToken, requireOrgPortal, async (req, res
         result = await executeInsert(
           `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-          insertParams
+          insertParams.slice(0, -1)
         );
       } else if (isMysqlDataTooLongError(insErr)) {
         const insertNoImg = [...insertParams];
         insertNoImg[9] = null;
         try {
           result = await executeInsert(
-            `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, is_published, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+            `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, pdf_url, is_published, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
             [...insertNoImg, publishFlag]
           );
         } catch (e2) {
@@ -5734,7 +5815,7 @@ app.post('/api/org/events', authenticateToken, requireOrgPortal, async (req, res
             result = await executeInsert(
               `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-              insertNoImg
+              insertNoImg.slice(0, -1)
             );
           } else {
             throw e2;
@@ -5757,13 +5838,14 @@ app.put('/api/org/events/:id', authenticateToken, requireOrgPortal, async (req, 
   try {
     const orgId = req.organizationId;
     const id = parseInt(req.params.id);
-    const { title, description, event_date, end_date, event_end_date, location, status, price, image_url } = req.body || {};
+    const { title, description, event_date, end_date, event_end_date, location, status, price, image_url, pdf_url } = req.body || {};
     const prev = await executeQuery(
-      'SELECT id, event_date, event_end_date FROM events WHERE id = ? AND organization_id = ?',
+      'SELECT id, event_date, event_end_date, pdf_url FROM events WHERE id = ? AND organization_id = ?',
       [id, orgId]
     );
     if (!prev.rows?.length) return res.status(404).json({ error: 'Evenement niet gevonden' });
     const p = prev.rows[0];
+    const oldPdfUrl = p.pdf_url || null;
 
     let eventDateSql;
     if (event_date !== undefined) {
@@ -5793,6 +5875,7 @@ app.put('/api/org/events/:id', authenticateToken, requireOrgPortal, async (req, 
 
     const priceVal = normalizeEventPrice(price);
     const imageUrlSafe = sanitizeEventImageUrlForDb(image_url ?? null);
+    const pdfUrlSafe = pdf_url != null && String(pdf_url).trim() !== '' ? String(pdf_url).trim() : null;
     const orgAppr = await executeQuery('SELECT is_approved FROM organizations WHERE id = ?', [orgId]);
     const orgApproved =
       orgAppr.rows?.[0] &&
@@ -5807,11 +5890,12 @@ app.put('/api/org/events/:id', authenticateToken, requireOrgPortal, async (req, 
       status ?? 'scheduled',
       priceVal,
       imageUrlSafe,
+      pdfUrlSafe,
       publishVal,
       id,
       orgId,
     ];
-    const updateParamsNoPub = [
+    const updateParamsLegacy = [
       title ?? '',
       description ?? null,
       eventDateSql,
@@ -5825,30 +5909,30 @@ app.put('/api/org/events/:id', authenticateToken, requireOrgPortal, async (req, 
     ];
     try {
       await executeQuery(
-        'UPDATE events SET title = ?, description = ?, event_date = ?, event_end_date = ?, location = ?, status = ?, price = ?, image_url = ?, is_published = ?, updated_at = NOW() WHERE id = ? AND organization_id = ?',
+        'UPDATE events SET title = ?, description = ?, event_date = ?, event_end_date = ?, location = ?, status = ?, price = ?, image_url = ?, pdf_url = ?, is_published = ?, updated_at = NOW() WHERE id = ? AND organization_id = ?',
         updateParamsWithPub
       );
     } catch (updErr) {
       if (isMysqlMissingColumnError(updErr)) {
         await executeQuery(
           'UPDATE events SET title = ?, description = ?, event_date = ?, event_end_date = ?, location = ?, status = ?, price = ?, image_url = ?, updated_at = NOW() WHERE id = ? AND organization_id = ?',
-          updateParamsNoPub
+          updateParamsLegacy
         );
       } else if (isMysqlDataTooLongError(updErr)) {
         const noImgPub = [...updateParamsWithPub];
         noImgPub[7] = null;
-        const noImg = [...updateParamsNoPub];
-        noImg[7] = null;
+        const noImgLegacy = [...updateParamsLegacy];
+        noImgLegacy[7] = null;
         try {
           await executeQuery(
-            'UPDATE events SET title = ?, description = ?, event_date = ?, event_end_date = ?, location = ?, status = ?, price = ?, image_url = ?, is_published = ?, updated_at = NOW() WHERE id = ? AND organization_id = ?',
+            'UPDATE events SET title = ?, description = ?, event_date = ?, event_end_date = ?, location = ?, status = ?, price = ?, image_url = ?, pdf_url = ?, is_published = ?, updated_at = NOW() WHERE id = ? AND organization_id = ?',
             noImgPub
           );
         } catch (e2) {
           if (isMysqlMissingColumnError(e2)) {
             await executeQuery(
               'UPDATE events SET title = ?, description = ?, event_date = ?, event_end_date = ?, location = ?, status = ?, price = ?, image_url = ?, updated_at = NOW() WHERE id = ? AND organization_id = ?',
-              noImg
+              noImgLegacy
             );
           } else {
             throw e2;
@@ -5857,6 +5941,9 @@ app.put('/api/org/events/:id', authenticateToken, requireOrgPortal, async (req, 
       } else {
         throw updErr;
       }
+    }
+    if (oldPdfUrl && oldPdfUrl !== pdfUrlSafe) {
+      cleanupHostedPdfIfUnreferenced(oldPdfUrl).catch(() => {});
     }
     const row = await executeQuery('SELECT id, title, event_date, status, updated_at FROM events WHERE id = ?', [id]);
     res.json({ event: row.rows[0] });
@@ -5871,9 +5958,14 @@ app.delete('/api/org/events/:id', authenticateToken, requireOrgPortal, async (re
     const orgId = req.organizationId;
     const id = parseInt(req.params.id, 10);
     if (Number.isNaN(id)) return res.status(400).json({ error: 'Ongeldig id' });
+    const prev = await executeQuery('SELECT pdf_url FROM events WHERE id = ? AND organization_id = ? LIMIT 1', [id, orgId]);
+    const oldPdfUrl = prev.rows?.[0]?.pdf_url || null;
     const del = await executeQuery('DELETE FROM events WHERE id = ? AND organization_id = ?', [id, orgId]);
     const n = del.rowCount ?? del.rows?.length ?? 0;
     if (!n) return res.status(404).json({ error: 'Evenement niet gevonden' });
+    if (oldPdfUrl) {
+      cleanupHostedPdfIfUnreferenced(oldPdfUrl).catch(() => {});
+    }
     res.json({ success: true });
   } catch (error) {
     console.error('DELETE /api/org/events/:id error:', error);

@@ -415,6 +415,38 @@
         return url;
     }
 
+    /** PDF via backend (organisatiemap uit JWT). */
+    async function uploadPdfFile(file) {
+        if (!file) return null;
+        if (file.type && file.type !== 'application/pdf') {
+            throw new Error('Alleen PDF-bestanden zijn toegestaan.');
+        }
+        if (file.size > 15 * 1024 * 1024) {
+            throw new Error('PDF is te groot (max 15 MB).');
+        }
+        const base64 = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
+        const r = await fetch(`${apiBase}/upload/file`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({
+                fileData: base64,
+                filename: file.name || `document-${Date.now()}.pdf`,
+                mimeType: 'application/pdf',
+            }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) {
+            throw new Error(j.message || j.error || 'PDF upload mislukt');
+        }
+        if (!j.fileUrl) throw new Error('Geen PDF-URL van server');
+        return j.fileUrl;
+    }
+
     async function login(email, password) {
         const res = await fetch(`${apiBase}/auth/login`, {
             method: 'POST',
@@ -744,6 +776,20 @@
                             }
                         </div>
                         <div class="form-group">
+                            <label>PDF-bijlage (optioneel)</label>
+                            ${!isPreview
+                                ? `<input type="file" id="newsPdfFile" accept="application/pdf,.pdf">
+                                   <p class="form-hint">Wordt in de app als downloadlink onder het artikel getoond (max 15 MB).</p>
+                                   ${article?.pdf_url
+                                       ? `<p style="margin:8px 0 0"><small>Huidige PDF: <a href="${escapeHtml(article.pdf_url)}" target="_blank" rel="noopener">bekijken</a></small></p>
+                                          <label class="checkbox-label" style="margin-top:6px;display:block"><input type="checkbox" id="newsPdfRemove"> PDF verwijderen bij opslaan</label>`
+                                       : ''}`
+                                : (article?.pdf_url
+                                    ? `<a href="${escapeHtml(article.pdf_url)}" target="_blank" rel="noopener">PDF openen</a>`
+                                    : '<p class="form-hint">Geen PDF</p>')
+                            }
+                        </div>
+                        <div class="form-group">
                             <label><input type="checkbox" id="newsPublished" ${article?.is_published ? 'checked' : ''} ${dis}> Gepubliceerd</label>
                         </div>
                     </div>
@@ -759,11 +805,16 @@
                     const btn = overlay.querySelector('#newsSaveBtn');
                     const file = document.getElementById('newsImageFile')?.files?.[0];
                     let imageUrl = (document.getElementById('newsImageUrlInput')?.value || '').trim();
-                    if (file) {
+                    if (!imageUrl && article?.image_url) imageUrl = article.image_url;
+                    let pdfUrl = article?.pdf_url || null;
+                    const pdfFile = document.getElementById('newsPdfFile')?.files?.[0];
+                    const removePdf = document.getElementById('newsPdfRemove')?.checked === true;
+                    if (file || pdfFile) {
                         btn.disabled = true;
                         btn.textContent = 'Uploaden…';
                         try {
-                            imageUrl = await uploadImageFile(file);
+                            if (file) imageUrl = await uploadImageFile(file);
+                            if (pdfFile) pdfUrl = await uploadPdfFile(pdfFile);
                         } catch (err) {
                             alert(err.message || 'Upload mislukt');
                             btn.disabled = false;
@@ -772,6 +823,8 @@
                         }
                         btn.disabled = false;
                         btn.textContent = 'Opslaan';
+                    } else if (removePdf) {
+                        pdfUrl = null;
                     }
                     const publishedAtInput = (document.getElementById('newsPublishedAt')?.value || '').trim();
                     const payload = {
@@ -783,6 +836,7 @@
                         youtube_url:  (document.getElementById('newsYoutubeUrl')?.value  || '').trim() || null,
                         source_name: (document.getElementById('newsSourceName')?.value || '').trim() || null,
                         source_url:  (document.getElementById('newsSourceUrl')?.value  || '').trim() || null,
+                        pdf_url: pdfUrl,
                         published_at: publishedAtInput || null,
                     };
                     const url = id ? `${apiBase}/org/news/${id}` : `${apiBase}/org/news`;
@@ -986,6 +1040,20 @@
                             <label>Afbeelding</label>
                             ${imageEditable}
                         </div>
+                        <div class="form-group">
+                            <label>PDF-bijlage (optioneel)</label>
+                            ${!isView
+                                ? `<input type="file" id="eventPdfFile" accept="application/pdf,.pdf">
+                                   <p class="form-hint">Downloadlink onder het evenement in de app (max 15 MB).</p>
+                                   ${event?.pdf_url
+                                       ? `<p style="margin:8px 0 0"><small>Huidige PDF: <a href="${escapeHtml(event.pdf_url)}" target="_blank" rel="noopener">bekijken</a></small></p>
+                                          <label class="checkbox-label" style="margin-top:6px;display:block"><input type="checkbox" id="eventPdfRemove"> PDF verwijderen bij opslaan</label>`
+                                       : ''}`
+                                : (event?.pdf_url
+                                    ? `<a href="${escapeHtml(event.pdf_url)}" target="_blank" rel="noopener">PDF openen</a>`
+                                    : '<p class="form-hint">Geen PDF</p>')
+                            }
+                        </div>
                     </div>
                     <div class="modal-footer">
                         ${isView
@@ -1022,11 +1090,16 @@
                     const btn = overlay.querySelector('#eventSaveBtn');
                     const file = document.getElementById('eventImageFile')?.files?.[0];
                     let imageUrl = (document.getElementById('eventImageUrlInput')?.value || '').trim();
-                    if (file) {
+                    if (!imageUrl && event?.image_url) imageUrl = event.image_url;
+                    let pdfUrl = event?.pdf_url || null;
+                    const pdfFile = document.getElementById('eventPdfFile')?.files?.[0];
+                    const removePdf = document.getElementById('eventPdfRemove')?.checked === true;
+                    if (file || pdfFile) {
                         btn.disabled = true;
                         btn.textContent = 'Uploaden…';
                         try {
-                            imageUrl = await uploadImageFile(file);
+                            if (file) imageUrl = await uploadImageFile(file);
+                            if (pdfFile) pdfUrl = await uploadPdfFile(pdfFile);
                         } catch (err) {
                             alert(err.message || 'Upload mislukt');
                             btn.disabled = false;
@@ -1035,6 +1108,8 @@
                         }
                         btn.disabled = false;
                         btn.textContent = 'Opslaan';
+                    } else if (removePdf) {
+                        pdfUrl = null;
                     }
                     const rawEndDate = document.getElementById('eventEndDate')?.value || '';
                     const rawPrice = document.getElementById('eventPrice')?.value || '';
@@ -1045,7 +1120,8 @@
                         event_end_date: rawEndDate || null,
                         location: document.getElementById('eventLocation').value.trim() || null,
                         price: rawPrice !== '' ? parseFloat(rawPrice) : null,
-                        image_url: imageUrl || null
+                        image_url: imageUrl || null,
+                        pdf_url: pdfUrl,
                     };
                     const url = id ? `${apiBase}/org/events/${id}` : `${apiBase}/org/events`;
                     const method = id ? 'PUT' : 'POST';
