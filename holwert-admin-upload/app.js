@@ -11,8 +11,8 @@ class HolwertAdmin {
         this.token = localStorage.getItem('authToken');
         this.currentUser = null;
 
-        // Gebruikers-tab state (Dorpsbewoners / Organisaties)
-        this.currentUsersTab = 'dorpsbewoners';
+        // Gebruikers-tab state (App-gebruikers / Organisatie-inlog)
+        this.currentUsersTab = 'app-gebruikers';
         this.allUsersCache = [];
 
         // Events-tab state (Actief / Archief)
@@ -119,11 +119,15 @@ class HolwertAdmin {
             });
         }
 
-        // Add User button
+        // Add User / dashboard-account button (afhankelijk van actieve gebruikers-tab)
         const addUserBtn = document.getElementById('addUserBtn');
         if (addUserBtn) {
             addUserBtn.addEventListener('click', () => {
-                void this.showCreateUserModal();
+                if (this.currentUsersTab === 'organisatie-inlog') {
+                    void this.showCreateOrgDashboardUserModal();
+                } else {
+                    void this.showCreateUserModal();
+                }
             });
         }
 
@@ -155,12 +159,12 @@ class HolwertAdmin {
             });
         }
 
-        // Users tabs (Dorpsbewoners / Organisaties)
+        // Users tabs (App-gebruikers / Organisatie-inlog)
         const userTabs = document.querySelectorAll('.users-tab');
         if (userTabs && userTabs.length) {
             userTabs.forEach(tab => {
                 tab.addEventListener('click', () => {
-                    const tabKey = tab.getAttribute('data-users-tab') || 'dorpsbewoners';
+                    const tabKey = tab.getAttribute('data-users-tab') || 'app-gebruikers';
                     console.log('[Admin] Users tab klik:', tabKey);
                     this.currentUsersTab = tabKey;
 
@@ -168,10 +172,11 @@ class HolwertAdmin {
                     userTabs.forEach(t => t.classList.remove('active'));
                     tab.classList.add('active');
 
-                    // Herteken gebruikerslijst op basis van geselecteerde tab
+                    this.updateUsersTabActions();
                     this.updateUsersView();
                 });
             });
+            this.updateUsersTabActions();
         }
 
         // Gebruikers: oog / bewerken / verwijderen (geen inline onclick — werkt niet bij CSP op sommige hosts)
@@ -1214,6 +1219,7 @@ class HolwertAdmin {
                 const data = await response.json();
                 console.log('Users loaded:', data);
                 this.allUsersCache = Array.isArray(data.users) ? data.users : [];
+                await this.ensureOrganizationsListForUsers();
                 this.updateUsersView();
             } else {
                 console.error('Failed to load users:', response.status);
@@ -1238,6 +1244,124 @@ class HolwertAdmin {
         }
     }
 
+    /** Knop rechtsboven in Gebruikers-sectie: label/actie per tab. */
+    updateUsersTabActions() {
+        const addUserBtn = document.getElementById('addUserBtn');
+        if (!addUserBtn) return;
+        if (this.currentUsersTab === 'organisatie-inlog') {
+            addUserBtn.innerHTML = '<i class="fas fa-id-card"></i> Dashboard-account';
+            addUserBtn.title = 'Inlogaccount voor het organisatie-webdashboard (/dashboard)';
+        } else {
+            addUserBtn.innerHTML = '<i class="fas fa-plus"></i> Nieuwe app-gebruiker';
+            addUserBtn.title = 'Account voor registratie in de Holwert-app';
+        }
+    }
+
+    /** Fouttekst uit API-response (error + message, geen dubbele Engelse generieke teksten). */
+    formatApiErrorMessage(data, status) {
+        const err = data?.error != null ? String(data.error).trim() : '';
+        const detail = data?.message != null ? String(data.message).trim() : '';
+        if (err && detail && err !== detail) return `${err} ${detail}`;
+        if (err) return err;
+        if (detail) return detail;
+        return status ? `HTTP ${status}` : 'Onbekende fout';
+    }
+
+    /** Zoek organisatie bij account zonder organization_id (e-mail of alleen organisatienaam als voornaam). */
+    inferOrgLinkForUser(user) {
+        const orgs = this.organizationsList || [];
+        if (!orgs.length || !user) return null;
+
+        const email = String(user.email || '').trim().toLowerCase();
+        if (email) {
+            const byEmail = orgs.find(
+                (o) => String(o.email || '').trim().toLowerCase() === email,
+            );
+            if (byEmail) return byEmail;
+        }
+
+        const fn = String(user.first_name || '').trim().toLowerCase();
+        const ln = String(user.last_name || '').trim();
+        if (fn && !ln) {
+            const byName = orgs.find(
+                (o) => String(o.name || '').trim().toLowerCase() === fn,
+            );
+            if (byName) return byName;
+        }
+        return null;
+    }
+
+    /** Gekoppelde organisatie (organization_id of afgeleid uit e-mail/naam). */
+    getLinkedOrganizationForUser(user) {
+        const orgs = this.organizationsList || [];
+        const oid = user?.organization_id;
+        if (oid != null && oid !== '') {
+            const n = Number(oid);
+            if (!Number.isNaN(n) && n > 0) {
+                const direct = orgs.find((o) => Number(o.id) === n);
+                if (direct) return direct;
+            }
+        }
+        return this.inferOrgLinkForUser(user);
+    }
+
+    formatUserOrganizationCell(user) {
+        const esc = (s) =>
+            String(s ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/"/g, '&quot;');
+        const org = this.getLinkedOrganizationForUser(user);
+        if (org) {
+            const hasDbLink =
+                user.organization_id != null &&
+                user.organization_id !== '' &&
+                Number(user.organization_id) > 0;
+            const title = hasDbLink
+                ? esc(org.name || `Organisatie ${org.id}`)
+                : `${esc(org.name || `Organisatie ${org.id}`)} — koppeling nog niet opgeslagen in database; bewerk account om vast te leggen`;
+            return `<span class="user-org-link" title="${title}"><i class="fas fa-building" aria-hidden="true"></i> ${esc(org.name || `Organisatie ${org.id}`)}</span>`;
+        }
+        const role = String(user?.role || '').toLowerCase();
+        if (['admin', 'superadmin', 'editor'].includes(role)) {
+            return '<span class="text-muted">—</span>';
+        }
+        return '<span class="text-muted">Niet gekoppeld</span>';
+    }
+
+    /** App-gebruiker (dorpsbewoner): aangemaakt via de app-registratie met relatie tot Holwert. */
+    isAppDorpsbewoner(user) {
+        const role = String(user?.role || '').toLowerCase();
+        if (role !== 'user') return false;
+        const rel = user?.relationship_with_holwert;
+        return rel != null && String(rel).trim() !== '';
+    }
+
+    /** Dashboard-account gekoppeld aan een vereniging/organisatie. */
+    isOrgDashboardUser(user) {
+        if (this.isAppDorpsbewoner(user)) return false;
+
+        const oid = user?.organization_id;
+        if (oid != null && oid !== '') {
+            const n = Number(oid);
+            if (!Number.isNaN(n) && n > 0) return true;
+        }
+
+        return this.inferOrgLinkForUser(user) != null;
+    }
+
+    /** Label voor rol-kolom: onderscheid org-dashboard vs app-inwoner vs beheerder. */
+    userRoleLabel(user) {
+        if (this.isOrgDashboardUser(user)) return 'organisatie';
+        if (this.isAppDorpsbewoner(user)) return 'app-gebruiker';
+        return String(user?.role || 'user');
+    }
+
+    /** @deprecated gebruik isAppDorpsbewoner */
+    isDorpsbewonerUser(user) {
+        return this.isAppDorpsbewoner(user);
+    }
+
     updateUsersView() {
         const users = Array.isArray(this.allUsersCache) ? [...this.allUsersCache] : [];
         if (!users.length) {
@@ -1246,17 +1370,12 @@ class HolwertAdmin {
         }
 
         let filtered;
-        if (this.currentUsersTab === 'organisaties') {
-            // Toon hier beheerders / organisatie-accounts (alles wat geen gewone dorpsbewoner is)
-            filtered = users.filter(u => (u.role || '').toLowerCase() !== 'user');
+        if (this.currentUsersTab === 'organisatie-inlog') {
+            // Dashboard-accounts + beheerders (niet app-gebruikers)
+            filtered = users.filter((u) => !this.isAppDorpsbewoner(u));
         } else {
-            // Dorpsbewoners: alleen echte app-gebruikers
-            filtered = users.filter(u => (u.role || '').toLowerCase() === 'user');
-        }
-
-        // Zorg dat super-admins niet in Dorpsbewoners verschijnen
-        if (this.currentUsersTab === 'dorpsbewoners') {
-            filtered = filtered.filter(u => (u.role || '').toLowerCase() !== 'superadmin');
+            // Alleen accounts via app-registratie (relationship_with_holwert)
+            filtered = users.filter((u) => this.isAppDorpsbewoner(u));
         }
 
         // Sorteer alfabetisch op volledige naam
@@ -1277,8 +1396,8 @@ class HolwertAdmin {
 
         if (users.length === 0) {
             const cache = Array.isArray(this.allUsersCache) ? this.allUsersCache : [];
-            const tabLabel = this.currentUsersTab === 'organisaties' ? 'Organisaties' : 'Dorpsbewoners';
-            const otherTab = this.currentUsersTab === 'organisaties' ? 'Dorpsbewoners' : 'Organisaties';
+            const tabLabel = this.currentUsersTab === 'organisatie-inlog' ? 'Organisatie-inlog' : 'App-gebruikers';
+            const otherTab = this.currentUsersTab === 'organisatie-inlog' ? 'App-gebruikers' : 'Organisatie-inlog';
             let extra = '';
             if (cache.length > 0) {
                 extra = `<p class="text-muted" style="margin-top:8px;">Er zijn wél accounts geladen (${cache.length}). Probeer het tabblad <strong>${otherTab}</strong>: daar staan accounts die niet onder «${tabLabel}» vallen (filter op rol).</p>`;
@@ -1286,6 +1405,11 @@ class HolwertAdmin {
             container.innerHTML = `<p class="text-muted">Geen gebruikers in dit overzicht.</p>${extra}`;
             return;
         }
+
+        const showOrgColumn = this.currentUsersTab === 'organisatie-inlog';
+        const orgHeader = showOrgColumn ? '<th>Organisatie</th>' : '';
+        const orgCell = (user) =>
+            showOrgColumn ? `<td>${this.formatUserOrganizationCell(user)}</td>` : '';
 
         container.innerHTML = `
             <!-- Desktop Table View -->
@@ -1295,6 +1419,7 @@ class HolwertAdmin {
                         <tr>
                             <th>Profielfoto</th>
                             <th>Naam</th>
+                            ${orgHeader}
                             <th>Rol</th>
                             <th>Status</th>
                             <th>Acties</th>
@@ -1318,9 +1443,10 @@ class HolwertAdmin {
                                         <strong>${user.first_name} ${user.last_name}</strong>
                                     </div>
                                 </td>
+                                ${orgCell(user)}
                                 <td>
-                                    <span class="role-badge role-${user.role}" data-user-action="role" data-user-id="${user.id}" style="cursor: pointer;" title="Klik om rol te wijzigen">
-                                        ${user.role}
+                                    <span class="role-badge role-${this.userRoleLabel(user)}" data-user-action="role" data-user-id="${user.id}" style="cursor: pointer;" title="Klik om rol te wijzigen">
+                                        ${this.userRoleLabel(user)}
                                     </span>
                                 </td>
                                 <td>
@@ -1364,9 +1490,10 @@ class HolwertAdmin {
                                 <div class="user-name">
                                     <strong>${user.first_name} ${user.last_name}</strong>
                                 </div>
+                                ${showOrgColumn ? `<div class="user-org-mobile">${this.formatUserOrganizationCell(user)}</div>` : ''}
                                 <div class="user-badges">
-                                    <span class="role-badge role-${user.role}" data-user-action="role" data-user-id="${user.id}" style="cursor: pointer;" title="Klik om rol te wijzigen">
-                                        ${user.role}
+                                    <span class="role-badge role-${this.userRoleLabel(user)}" data-user-action="role" data-user-id="${user.id}" style="cursor: pointer;" title="Klik om rol te wijzigen">
+                                        ${this.userRoleLabel(user)}
                                     </span>
                                     <span class="status-badge status-${user.is_active ? 'active' : 'inactive'}" data-user-action="status" data-user-id="${user.id}" data-user-active="${user.is_active ? 1 : 0}" style="cursor: pointer;" title="Klik om status te wijzigen">
                                         ${user.is_active ? 'Actief' : 'Inactief'}
@@ -1399,7 +1526,7 @@ class HolwertAdmin {
         modal.innerHTML = `
             <div class="modal-content">
                 <div class="modal-header">
-                    <h3>Nieuwe dorpsbewoner (app)</h3>
+                    <h3>Nieuwe app-gebruiker</h3>
                     <button type="button" class="modal-close">
                         <i class="fas fa-times"></i>
                     </button>
@@ -1407,7 +1534,7 @@ class HolwertAdmin {
                 <div class="modal-body">
                     <form id="createUserForm" class="edit-form">
                         <p class="text-muted" style="font-size:0.9rem;margin-bottom:1rem;line-height:1.45;">
-                            Account voor de dorpsapp. Voor een organisatie-webdashboard: ga naar <strong>Organisaties</strong> en kies <strong>Dashboard-account</strong>.
+                            Account voor de Holwert-app (inwoners, bezoekers, geïnteresseerden). Voor organisatie-dashboard: tab <strong>Organisatie-inlog</strong> of menu <strong>Organisaties → Dashboard-account</strong>.
                         </p>
                         <div class="form-group">
                             <label for="createEmail">E-mail *</label>
@@ -1506,11 +1633,11 @@ class HolwertAdmin {
             });
             const data = await res.json().catch(() => ({}));
             if (res.ok) {
-                this.showNotification('Dorpsbewoner succesvol aangemaakt', 'success');
+                this.showNotification('App-gebruiker succesvol aangemaakt', 'success');
                 document.getElementById('createFirstName')?.closest('.modal-overlay')?.remove();
                 this.loadUsers();
             } else {
-                const msg = data.error || data.message || `HTTP ${res.status}`;
+                const msg = this.formatApiErrorMessage(data, res.status);
                 this.showNotification(msg, 'error');
             }
         } catch (e) {
@@ -1542,7 +1669,7 @@ class HolwertAdmin {
                 <div class="modal-body">
                     <form id="createOrgDashUserForm" class="edit-form">
                         <p class="text-muted" style="font-size:0.9rem;margin-bottom:1rem;line-height:1.45;">
-                            Alleen voor inlog op het organisatie-webdashboard. De weergavenaam wordt de organisatienaam. Voor dorpsapp-bewoners: gebruik <strong>Gebruikers → Nieuwe dorpsbewoner</strong>.
+                            Inlog voor <strong>/dashboard</strong>. Je mag hetzelfde e-mailadres gebruiken als het contactadres van de organisatie — dat is de bedoeling.
                         </p>
                         ${
                             !hasOrgs
@@ -1638,12 +1765,17 @@ class HolwertAdmin {
             });
             const data = await res.json().catch(() => ({}));
             if (res.ok) {
-                this.showNotification('Dashboard-account aangemaakt', 'success');
+                const linked = data.linked === true;
+                const msg = data.message ||
+                    (linked
+                        ? 'Bestaand account gekoppeld aan de organisatie (zelfde e-mail als contactadres).'
+                        : 'Dashboard-account aangemaakt');
+                this.showNotification(msg, 'success');
                 document.getElementById('createOrgDashEmail')?.closest('.modal-overlay')?.remove();
                 this.loadUsers();
                 if (typeof this.loadOrganizations === 'function') this.loadOrganizations();
             } else {
-                const msg = data.error || data.message || `HTTP ${res.status}`;
+                const msg = this.formatApiErrorMessage(data, res.status);
                 this.showNotification(msg, 'error');
             }
         } catch (e) {
@@ -1678,7 +1810,7 @@ class HolwertAdmin {
                     </div>
                 </td>
                 <td>${org.name || '-'}</td>
-                <td>${org.category || 'Geen categorie'}</td>
+                <td>${org.category || 'Geen categorie'}${org.is_ondernemer ? ' <span class="status-badge status-published" title="Ondernemer">Ondernemer</span>' : ''}</td>
                 <td>${org.user_count || 0}</td>
                 <td>
                     <span class="status-badge ${org.is_approved ? 'status-published' : 'status-draft'}">
@@ -1887,6 +2019,12 @@ class HolwertAdmin {
                             <input type="text" id="createOrgCategory" placeholder="bijv. Vereniging, Gemeente, Sport">
                         </div>
                         <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="createOrgOndernemer">
+                                Dit is een ondernemer (zichtbaar bij Ondernemers in de app)
+                            </label>
+                        </div>
+                        <div class="form-group">
                             <label for="createOrgDescription">Beschrijving</label>
                             <textarea id="createOrgDescription" rows="3" placeholder="Korte beschrijving"></textarea>
                         </div>
@@ -2003,7 +2141,8 @@ class HolwertAdmin {
                 linkedin: document.getElementById('createOrgLinkedin')?.value?.trim() || undefined,
                 brand_color,
                 logo_url: !logoFile && logoUrlField ? logoUrlField : undefined,
-                is_approved: document.getElementById('createOrgApproved')?.checked !== false
+                is_approved: document.getElementById('createOrgApproved')?.checked !== false,
+                is_ondernemer: document.getElementById('createOrgOndernemer')?.checked === true
             };
             try {
                 const res = await fetch(`${self.apiBaseUrl}/admin/organizations`, {
@@ -2101,6 +2240,12 @@ class HolwertAdmin {
                             <div class="form-group">
                                 <label for="editOrgCategory">Categorie</label>
                                 <input type="text" id="editOrgCategory" value="${escQ(org.category)}" placeholder="bijv. Vereniging">
+                            </div>
+                            <div class="form-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="editOrgOndernemer" ${org.is_ondernemer ? 'checked' : ''}>
+                                    Dit is een ondernemer (zichtbaar bij Ondernemers in de app)
+                                </label>
                             </div>
                             <div class="form-group">
                                 <label for="editOrgDescription">Beschrijving</label>
@@ -2244,7 +2389,8 @@ class HolwertAdmin {
                     brand_color,
                     logo_url,
                     privacy_statement: document.getElementById('editOrgPrivacy').value.trim() || undefined,
-                    is_approved: document.getElementById('editOrgApproved').checked
+                    is_approved: document.getElementById('editOrgApproved').checked,
+                    is_ondernemer: document.getElementById('editOrgOndernemer')?.checked === true
                 };
                 const res = await fetch(`${this.apiBaseUrl}/admin/organizations/${id}`, {
                     method: 'PUT',
@@ -2849,6 +2995,26 @@ class HolwertAdmin {
                             </div>
                             
                             <div class="form-group">
+                                <label for="newsYoutubeUrl">YouTube-video (optioneel)</label>
+                                <input type="url" id="newsYoutubeUrl" name="youtube_url"
+                                    value="${article?.youtube_url || ''}"
+                                    placeholder="https://www.youtube.com/watch?v=... of https://youtu.be/...">
+                                <small class="form-hint">Als je een YouTube-link invult, wordt de video getoond als Hero-afbeelding in de app. De afbeelding hierboven wordt dan niet gebruikt.</small>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="newsArticleContent">Inhoud *</label>
+                                <div class="editor-toolbar">
+                                    <button type="button" class="editor-btn" onclick="adminFormatText('newsArticleContent','bold')" title="Vet (Ctrl+B)"><b>B</b></button>
+                                    <button type="button" class="editor-btn" onclick="adminFormatText('newsArticleContent','italic')" title="Cursief (Ctrl+I)"><i>I</i></button>
+                                    <button type="button" class="editor-btn" onclick="adminFormatText('newsArticleContent','link')" title="Link invoegen">&#128279;</button>
+                                </div>
+                                <textarea id="newsArticleContent" name="content" rows="10" 
+                                    placeholder="De volledige inhoud van het artikel..." required>${article?.content || ''}</textarea>
+                                <small class="form-hint">Selecteer tekst en klik een knop om op te maken. HTML-tags worden opgeslagen en getoond in de app.</small>
+                            </div>
+
+                            <div class="form-group">
                                 <label>Bronvermelding (optioneel)</label>
                                 <div style="display:flex;gap:10px;flex-wrap:wrap;">
                                     <div style="flex:1;min-width:160px;">
@@ -2860,20 +3026,6 @@ class HolwertAdmin {
                                         <input type="url" id="newsSourceUrl" value="${article?.source_url || ''}" placeholder="https://…">
                                     </div>
                                 </div>
-                            </div>
-
-                            <div class="form-group">
-                                <label for="newsYoutubeUrl">YouTube-video (optioneel)</label>
-                                <input type="url" id="newsYoutubeUrl" name="youtube_url"
-                                    value="${article?.youtube_url || ''}"
-                                    placeholder="https://www.youtube.com/watch?v=... of https://youtu.be/...">
-                                <small class="form-hint">Als je een YouTube-link invult, wordt de video getoond als Hero-afbeelding in de app. De afbeelding hierboven wordt dan niet gebruikt.</small>
-                            </div>
-                            
-                            <div class="form-group">
-                                <label for="newsArticleContent">Inhoud *</label>
-                                <textarea id="newsArticleContent" name="content" rows="10" 
-                                    placeholder="De volledige inhoud van het artikel..." required>${article?.content || ''}</textarea>
                             </div>
                             
                             <div class="form-group">
@@ -5227,6 +5379,11 @@ class HolwertAdmin {
         const modal = document.createElement('div');
         modal.className = 'modal-overlay';
         const userId = user.id;
+        const inferredOrg = this.inferOrgLinkForUser(user);
+        const orgSelectId = user.organization_id ?? inferredOrg?.id ?? null;
+        const orgLinkHint = !user.organization_id && inferredOrg
+            ? `<p class="text-muted" style="font-size:0.9rem;margin-bottom:0.75rem;color:#b45309;">Dit account hoort waarschijnlijk bij «${String(inferredOrg.name || '').replace(/</g, '&lt;')}». Kies die organisatie hieronder en sla op om de koppeling vast te leggen.</p>`
+            : '';
         modal.innerHTML = `
             <div class="modal-content modal-large" id="editUserModalRoot">
                 <div class="modal-header">
@@ -5274,10 +5431,11 @@ class HolwertAdmin {
                                 </select>
                             </div>
                         </div>
+                        ${orgLinkHint}
                         <div class="form-group">
                             <label for="editOrganizationId">Organisatie (dashboard)</label>
                             <select id="editOrganizationId" name="organization_id">
-                                ${this.buildOrganizationSelectHtml(user.organization_id)}
+                                ${this.buildOrganizationSelectHtml(orgSelectId)}
                             </select>
                             <small style="display:block;margin-top:0.35rem;color:#666;">Voor dashboard-inlog: juiste organisatie kiezen en rol «Gebruiker» laten staan.</small>
                         </div>
@@ -6471,3 +6629,41 @@ const notificationStyles = `
 const styleSheet = document.createElement('style');
 styleSheet.textContent = notificationStyles;
 document.head.appendChild(styleSheet);
+
+/**
+ * Opmaak-toolbar: wraps de geselecteerde tekst in de opgegeven textarea met HTML-tags.
+ * @param {string} textareaId - id van de textarea
+ * @param {'bold'|'italic'|'link'} format
+ */
+function adminFormatText(textareaId, format) {
+    const ta = document.getElementById(textareaId);
+    if (!ta) return;
+
+    const start = ta.selectionStart;
+    const end   = ta.selectionEnd;
+    const selected = ta.value.substring(start, end);
+
+    let before, after, newCursor;
+
+    if (format === 'bold') {
+        before = '<strong>'; after = '</strong>';
+    } else if (format === 'italic') {
+        before = '<em>'; after = '</em>';
+    } else if (format === 'link') {
+        const url = prompt('URL van de link:', 'https://');
+        if (!url) return;
+        before = `<a href="${url}">`; after = '</a>';
+    }
+
+    const replacement = before + (selected || 'tekst') + after;
+    ta.value = ta.value.substring(0, start) + replacement + ta.value.substring(end);
+
+    // Cursor na de ingevoegde tag zetten (of selectie herstellen)
+    if (selected) {
+        ta.setSelectionRange(start, start + replacement.length);
+    } else {
+        newCursor = start + before.length;
+        ta.setSelectionRange(newCursor, newCursor + (format === 'link' ? 5 : 5));
+    }
+    ta.focus();
+}

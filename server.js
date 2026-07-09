@@ -1280,7 +1280,7 @@ app.get('/api/app/bootstrap', async (req, res) => {
       ORDER BY COALESCE(n.published_at, n.created_at) DESC LIMIT 10 OFFSET 0`;
     if (userId) newsParams.push(userId);
 
-    const orgFields = `id, name, description, logo_url, brand_color, category,
+    const orgFields = `id, name, description, logo_url, brand_color, category, is_ondernemer,
       CASE WHEN logo_url IS NOT NULL AND logo_url <> '' THEN true ELSE false END as has_logo`;
     const orgQuery = `SELECT ${orgFields} FROM organizations WHERE is_approved = true ORDER BY name ASC LIMIT 100`;
     const countNewsQuery = 'SELECT COUNT(*) as total FROM news n WHERE n.is_published = true';
@@ -1348,12 +1348,18 @@ async function ensureNewsColumns() {
 let _orgColsMigrated = false;
 async function ensureOrgColumns() {
   if (_orgColsMigrated) return;
-  try {
-    await executeQuery(`ALTER TABLE organizations ADD COLUMN show_email BOOLEAN DEFAULT true`);
-    console.log('[ensureOrgColumns] organizations.show_email toegevoegd');
-  } catch (e) {
-    if (!String(e.message).includes('Duplicate column') && !String(e.message).includes('1060')) {
-      console.warn('[ensureOrgColumns] show_email:', e.message);
+  const cols = [
+    { name: 'show_email', sql: `ALTER TABLE organizations ADD COLUMN show_email BOOLEAN DEFAULT true` },
+    { name: 'is_ondernemer', sql: `ALTER TABLE organizations ADD COLUMN is_ondernemer BOOLEAN DEFAULT false` },
+  ];
+  for (const col of cols) {
+    try {
+      await executeQuery(col.sql);
+      console.log(`[ensureOrgColumns] organizations.${col.name} toegevoegd`);
+    } catch (e) {
+      if (!String(e.message).includes('Duplicate column') && !String(e.message).includes('1060')) {
+        console.warn(`[ensureOrgColumns] ${col.name}:`, e.message);
+      }
     }
   }
   _orgColsMigrated = true;
@@ -3646,6 +3652,7 @@ app.delete('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, r
 // Get single organization (admin) - MUST BE BEFORE /api/admin/organizations (without :id)
 app.get('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    await ensureOrgColumns();
     const { id } = req.params;
     console.log(`[GET /api/admin/organizations/:id] Request for organization ID: ${id}, user:`, req.user);
     
@@ -3654,7 +3661,7 @@ app.get('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (
     }
     
     const result = await executeQuery(
-      `SELECT id, name, category, description, bio, is_approved, website, email, show_email, phone, whatsapp, address, 
+      `SELECT id, name, category, description, bio, is_approved, is_ondernemer, website, email, show_email, phone, whatsapp, address, 
               facebook, instagram, twitter, linkedin, brand_color, logo_url, privacy_statement, created_at, updated_at
        FROM organizations 
        WHERE id = $1`,
@@ -3677,6 +3684,7 @@ app.get('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (
 // Get all organizations (admin) - OPTIMIZED: Caching + combined queries
 app.get('/api/admin/organizations', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    await ensureOrgColumns();
     const { page = 1, limit = 20, status } = req.query;
     const offset = (page - 1) * limit;
     
@@ -3695,7 +3703,9 @@ app.get('/api/admin/organizations', authenticateToken, requireAdmin, async (req,
       SELECT 
         o.id, 
         o.name, 
-        o.description, 
+        o.description,
+        o.category,
+        o.is_ondernemer,
         o.is_approved, 
         o.created_at,
         o.logo_url
@@ -3757,8 +3767,9 @@ app.get('/api/admin/organizations', authenticateToken, requireAdmin, async (req,
 // Create organization (admin)
 app.post('/api/admin/organizations', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    await ensureOrgColumns();
     const {
-      name, category, description, bio, is_approved = true,
+      name, category, description, bio, is_approved = true, is_ondernemer = false,
       website, email, phone, whatsapp, address,
       facebook, instagram, twitter, linkedin,
       brand_color, logo_url
@@ -3766,21 +3777,22 @@ app.post('/api/admin/organizations', authenticateToken, requireAdmin, async (req
     
     if (!name) return res.status(400).json({ error: 'name is required' });
     
-    console.log('[POST /api/admin/organizations] Creating organization:', { name, category, hasLogo: !!logo_url });
+    console.log('[POST /api/admin/organizations] Creating organization:', { name, category, is_ondernemer, hasLogo: !!logo_url });
     
     const result = await executeInsert(
       `INSERT INTO organizations (
-        name, category, description, bio, is_approved,
+        name, category, description, bio, is_approved, is_ondernemer,
         website, email, phone, whatsapp, address,
         facebook, instagram, twitter, linkedin,
         brand_color, logo_url, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
       [
         name,
         category || null,
         description || null,
         bio || null,
         is_approved !== false,
+        !!is_ondernemer,
         website || null,
         email || null,
         phone || null,
@@ -3809,7 +3821,7 @@ app.post('/api/admin/organizations', authenticateToken, requireAdmin, async (req
     // Fetch the created organization
     console.log('[POST /api/admin/organizations] Fetching created organization with id:', result.insertId);
     const orgResult = await executeQuery(
-      `SELECT id, name, category, description, bio, is_approved, website, email, phone, whatsapp, address,
+      `SELECT id, name, category, description, bio, is_approved, is_ondernemer, website, email, phone, whatsapp, address,
               facebook, instagram, twitter, linkedin, brand_color, logo_url, created_at, updated_at
        FROM organizations WHERE id = ?`,
       [result.insertId]
@@ -3832,6 +3844,7 @@ app.post('/api/admin/organizations', authenticateToken, requireAdmin, async (req
     invalidateCache('/api/admin/stats');
     invalidateCache('/api/admin/moderation/count');
     invalidateCache('/api/admin/dashboard');
+    invalidateCache('/api/organizations');
     
     res.status(201).json({ organization: orgResult.rows[0] });
   } catch (error) {
@@ -3843,8 +3856,9 @@ app.post('/api/admin/organizations', authenticateToken, requireAdmin, async (req
 // Update organization (admin)
 app.put('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    await ensureOrgColumns();
     const { id } = req.params;
-    const { name, category, description, bio, is_approved, website, email, show_email, phone, whatsapp, address, 
+    const { name, category, description, bio, is_approved, is_ondernemer, website, email, show_email, phone, whatsapp, address, 
             facebook, instagram, twitter, linkedin, brand_color, logo_url, privacy_statement } = req.body;
     const sets = [];
     const params = [];
@@ -3854,6 +3868,7 @@ app.put('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (
     if (description !== undefined) sets.push(`description = ${push(description)}`);
     if (bio !== undefined) sets.push(`bio = ${push(bio)}`);
     if (is_approved !== undefined) sets.push(`is_approved = ${push(is_approved)}`);
+    if (is_ondernemer !== undefined) sets.push(`is_ondernemer = ${push(!!is_ondernemer)}`);
     if (website !== undefined) sets.push(`website = ${push(website)}`);
     if (email !== undefined) sets.push(`email = ${push(email)}`);
     if (show_email !== undefined) sets.push(`show_email = ${push(!!show_email)}`);
@@ -3878,7 +3893,7 @@ app.put('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (
     
     // Fetch the updated organization
     const result = await executeQuery(
-      `SELECT id, name, category, description, bio, is_approved, website, email, phone, whatsapp, address, 
+      `SELECT id, name, category, description, bio, is_approved, is_ondernemer, website, email, phone, whatsapp, address, 
               facebook, instagram, twitter, linkedin, brand_color, logo_url, created_at, updated_at
        FROM organizations WHERE id = ?`,
       [id]
@@ -3891,6 +3906,7 @@ app.put('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (
     invalidateCache('/api/admin/stats');
     invalidateCache('/api/admin/moderation/count');
     invalidateCache('/api/admin/dashboard');
+    invalidateCache('/api/organizations');
     
     res.json({ organization: result.rows[0] });
   } catch (error) {
@@ -5977,7 +5993,7 @@ app.get('/api/organizations/:id', async (req, res) => {
 
     const result = await executeQuery(
       `SELECT 
-        id, name, category, description, bio,
+        id, name, category, description, bio, is_ondernemer,
         website,
         CASE WHEN show_email = true OR show_email IS NULL THEN email ELSE NULL END AS email,
         phone, whatsapp, address,
@@ -6015,6 +6031,7 @@ app.get('/api/organizations', async (req, res) => {
       logo_url,
       brand_color,
       category,
+      is_ondernemer,
       CASE WHEN logo_url IS NOT NULL AND logo_url <> '' THEN true ELSE false END as has_logo
     ` : `
         id,
@@ -6033,6 +6050,7 @@ app.get('/api/organizations', async (req, res) => {
         logo_url,
         brand_color,
         category,
+        is_ondernemer,
         created_at
     `;
 
@@ -6167,7 +6185,7 @@ async function sendNewOrgNotificationEmail({ orgName, orgEmail, orgId }) {
 app.post('/api/organizations/register', orgRegisterRateLimiter, async (req, res) => {
   try {
     const {
-      name, category, description, bio,
+      name, category, description, bio, is_ondernemer = false,
       website, email, phone, whatsapp, address,
       brand_color, logo_url,
       facebook, instagram, twitter, linkedin,
@@ -6198,7 +6216,7 @@ app.post('/api/organizations/register', orgRegisterRateLimiter, async (req, res)
 
     const result = await executeInsert(
       `INSERT INTO organizations (
-        name, category, description, bio, is_approved,
+        name, category, description, bio, is_approved, is_ondernemer,
         website, email, phone, whatsapp, address,
         facebook, instagram, twitter, linkedin,
         brand_color, logo_url, privacy_statement, created_at, updated_at
@@ -6209,6 +6227,7 @@ app.post('/api/organizations/register', orgRegisterRateLimiter, async (req, res)
         norm(description),
         norm(bio),
         false, // is_approved = false: wacht op goedkeuring in admin
+        !!is_ondernemer,
         norm(website),
         norm(email),
         norm(phone),
@@ -6233,6 +6252,7 @@ app.post('/api/organizations/register', orgRegisterRateLimiter, async (req, res)
     invalidateCache('/api/admin/stats');
     invalidateCache('/api/admin/moderation/count');
     invalidateCache('/api/admin/pending');
+    invalidateCache('/api/organizations');
 
     console.log('[POST /api/organizations/register] New organization registered:', { id, name: name.trim() });
 
@@ -6359,6 +6379,7 @@ app.get('/api/migrate-columns', async (req, res) => {
     { table: 'news',          column: 'source_name',  sql: `ALTER TABLE news ADD COLUMN source_name VARCHAR(255)` },
     { table: 'news',          column: 'source_url',   sql: `ALTER TABLE news ADD COLUMN source_url VARCHAR(500)` },
     { table: 'organizations', column: 'show_email',   sql: `ALTER TABLE organizations ADD COLUMN show_email BOOLEAN DEFAULT true` },
+    { table: 'organizations', column: 'is_ondernemer', sql: `ALTER TABLE organizations ADD COLUMN is_ondernemer BOOLEAN DEFAULT false` },
   ];
   for (const m of migrations) {
     try {
