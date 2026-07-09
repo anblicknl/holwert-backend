@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Holwert app</title>
+<meta property="og:title" content="Holwert app" />
+<meta property="og:description" content="Nieuws en agenda uit Holwert — open dit bericht in de Holwert-app." />
+<style>
+  :root { --blue: #1E3A8A; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(160deg, #e8edf5, #f7f9ff 50%, #eef2fb);
+    color: #1f2937;
+    padding: 24px;
+  }
+  .card {
+    background: #fff;
+    border-radius: 20px;
+    box-shadow: 0 10px 40px rgba(30, 58, 138, .12);
+    max-width: 420px;
+    width: 100%;
+    padding: 36px 28px;
+    text-align: center;
+  }
+  h1 { font-size: 22px; margin-bottom: 8px; color: var(--blue); }
+  p  { font-size: 15px; line-height: 1.5; color: #4b5563; margin-bottom: 24px; }
+  .btn {
+    display: block;
+    width: 100%;
+    padding: 14px 18px;
+    border-radius: 12px;
+    font-size: 16px;
+    font-weight: 600;
+    text-decoration: none;
+    margin-bottom: 12px;
+  }
+  .btn-primary { background: var(--blue); color: #fff; }
+  .btn-secondary { background: #eef2fb; color: var(--blue); }
+  .note { font-size: 13px; color: #9ca3af; margin-top: 16px; margin-bottom: 0; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Holwert app</h1>
+  <p id="intro">Dit bericht opent in de Holwert-app…</p>
+  <a id="openBtn" class="btn btn-primary" href="#">Open in de app</a>
+  <a id="storeBtn" class="btn btn-secondary hidden" href="#">Download de app</a>
+  <p id="noStore" class="note hidden">
+    De app is binnenkort te downloaden in de App Store en Google Play.
+  </p>
+</div>
+<script>
+(function () {
+  // Vul deze in zodra de app in de stores staat:
+  var IOS_STORE_URL = '';      // bijv. https://apps.apple.com/nl/app/holwert/id1234567890
+  var ANDROID_STORE_URL = '';  // bijv. https://play.google.com/store/apps/details?id=com.appenvloed.holwert
+
+  var params = new URLSearchParams(window.location.search);
+  var typeMap = { news: 'news', nieuws: 'news', event: 'event', agenda: 'event', org: 'org', organisatie: 'org' };
+  var t = typeMap[(params.get('t') || '').toLowerCase()] || '';
+  var id = (params.get('id') || '').replace(/\D/g, '');
+
+  var appUrl = 'holwert://';
+  if (t && id) appUrl = 'holwert://' + t + '/' + id;
+
+  var isIOS = /iPad|iPhone|iPod/i.test(navigator.userAgent);
+  var isAndroid = /Android/i.test(navigator.userAgent);
+  var storeUrl = isIOS ? IOS_STORE_URL : isAndroid ? ANDROID_STORE_URL : (IOS_STORE_URL || ANDROID_STORE_URL);
+
+  var openBtn = document.getElementById('openBtn');
+  var storeBtn = document.getElementById('storeBtn');
+  var noStore = document.getElementById('noStore');
+  var intro = document.getElementById('intro');
+
+  openBtn.href = appUrl;
+  if (storeUrl) {
+    storeBtn.href = storeUrl;
+    storeBtn.classList.remove('hidden');
+  } else {
+    noStore.classList.remove('hidden');
+  }
+
+  // Alleen op mobiel automatisch proberen; desktop toont enkel de knoppen
+  if (isIOS || isAndroid) {
+    var started = Date.now();
+    setTimeout(function () {
+      // Als de app is geopend, is deze pagina naar de achtergrond gegaan
+      // (timer loopt dan vertraagd of het document is verborgen).
+      if (document.hidden || Date.now() - started > 2500) return;
+      intro.textContent = 'Heb je de Holwert-app nog niet?';
+      if (storeUrl) window.location.href = storeUrl;
+    }, 1800);
+    window.location.href = appUrl;
+  } else {
+    intro.textContent = 'Open deze link op je telefoon om het bericht in de Holwert-app te bekijken.';
+  }
+})();
+</script>
+</body>
+</html>
