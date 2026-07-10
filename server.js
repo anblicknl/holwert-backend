@@ -2837,7 +2837,6 @@ function isOrgDashboardPasswordResetEligible(u) {
 }
 
 async function sendOrgPasswordResetEmailViaHosting({ toEmail, resetUrl }) {
-  const from = (process.env.MAIL_FROM || '').trim();
   const esc = (s) =>
     String(s)
       .replace(/&/g, '&amp;')
@@ -2858,7 +2857,7 @@ async function sendOrgPasswordResetEmailViaHosting({ toEmail, resetUrl }) {
         to: toEmail,
         subject,
         html,
-        ...(from ? { from } : {}),
+        // Afzender altijd via hosting SMTP_FROM in send-mail.php (niet MAIL_FROM/RESEND_FROM van Vercel).
       },
       {
         headers: {
@@ -2868,8 +2867,12 @@ async function sendOrgPasswordResetEmailViaHosting({ toEmail, resetUrl }) {
         timeout: 10000,
       },
     );
-    if (response?.data?.ok === true) return { ok: true };
+    if (response?.data?.ok === true) {
+      console.log('[mail-proxy] ok naar', toEmail, response?.data?.via ? `via ${response.data.via}` : '');
+      return { ok: true };
+    }
     const msg = response?.data?.message || response?.data?.error || 'Mail versturen mislukt';
+    console.warn('[mail-proxy] mislukt naar', toEmail, msg);
     return { ok: false, reason: msg };
   } catch (e) {
     const status = e?.response?.status;
@@ -2878,7 +2881,7 @@ async function sendOrgPasswordResetEmailViaHosting({ toEmail, resetUrl }) {
       (typeof data === 'object' && data ? (data.message || data.error) : null) ||
       e?.message ||
       'Mail versturen mislukt';
-    console.error('[mail-proxy] error:', status || '-', msg);
+    console.error('[mail-proxy] error:', status || '-', msg, 'naar', toEmail);
     return { ok: false, reason: msg };
   }
 }
@@ -2904,7 +2907,6 @@ async function handleOrgForgotPasswordRequest(req, res) {
     await ensureOrgPasswordResetsTable();
     const rawToken = crypto.randomBytes(32).toString('hex');
     const tokenHash = hashOrgPasswordResetToken(rawToken);
-    const expiresAt = toMysqlDateTime(new Date(Date.now() + 60 * 60 * 1000));
     try {
       await executeQuery('DELETE FROM org_password_resets WHERE user_id = ?', [user.id]);
     } catch (delErr) {
@@ -2912,8 +2914,8 @@ async function handleOrgForgotPasswordRequest(req, res) {
       await ensureOrgPasswordResetsTable();
     }
     await executeInsert(
-      'INSERT INTO org_password_resets (user_id, token_hash, expires_at) VALUES (?, ?, ?)',
-      [user.id, tokenHash, expiresAt],
+      'INSERT INTO org_password_resets (user_id, token_hash, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR))',
+      [user.id, tokenHash],
     );
     const resetUrl = `${getOrgDashboardPublicBaseUrl()}?reset=${encodeURIComponent(rawToken)}`;
     const sent = await sendOrgPasswordResetEmailViaHosting({ toEmail: user.email, resetUrl });
