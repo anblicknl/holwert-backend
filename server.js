@@ -2844,11 +2844,17 @@ async function sendOrgPasswordResetEmailViaHosting({ toEmail, resetUrl }) {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
 
-  const subject = 'Holwert – wachtwoord vernieuwen (organisatie-dashboard)';
+  const subject = 'Holwert: wachtwoord wijzigen (organisatie-dashboard)';
   const html = `<p>Je hebt een nieuw wachtwoord aangevraagd voor het <strong>Holwert organisatie-dashboard</strong>.</p>
 <p><a href="${esc(resetUrl)}">Klik hier om een nieuw wachtwoord in te stellen</a></p>
 <p>Of kopieer deze link in je browser:<br><span style="word-break:break-all">${esc(resetUrl)}</span></p>
 <p>Deze link is <strong>1 uur</strong> geldig. Als je dit niet zelf hebt aangevraagd, kun je deze e-mail negeren.</p>`;
+  const text = `Je hebt een nieuw wachtwoord aangevraagd voor het Holwert organisatie-dashboard.
+
+Open deze link om een nieuw wachtwoord in te stellen:
+${resetUrl}
+
+Deze link is 1 uur geldig. Als je dit niet zelf hebt aangevraagd, kun je deze e-mail negeren.`;
 
   try {
     const response = await axios.post(
@@ -2857,6 +2863,7 @@ async function sendOrgPasswordResetEmailViaHosting({ toEmail, resetUrl }) {
         to: toEmail,
         subject,
         html,
+        text,
         // Afzender altijd via hosting SMTP_FROM in send-mail.php (niet MAIL_FROM/RESEND_FROM van Vercel).
       },
       {
