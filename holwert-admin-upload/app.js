@@ -5,6 +5,7 @@ const ORG_CATEGORIES = [
     { id: 'stichting', label: 'Stichting' },
     { id: 'gemeente', label: 'Gemeente' },
     { id: 'dorpsbelang', label: 'Dorpsbelang' },
+    { id: 'activiteiten', label: 'Activiteiten' },
     { id: 'sport', label: 'Sport' },
     { id: 'cultuur', label: 'Cultuur' },
     { id: 'muziek', label: 'Muziek' },

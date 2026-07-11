@@ -30,6 +30,7 @@ const ORG_CATEGORY_LABELS = {
   stichting: 'Stichting',
   gemeente: 'Gemeente',
   dorpsbelang: 'Dorpsbelang',
+  activiteiten: 'Activiteiten',
   sport: 'Sport',
   cultuur: 'Cultuur',
   muziek: 'Muziek',
