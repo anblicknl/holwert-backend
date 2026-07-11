@@ -20,6 +20,51 @@
         { id: 'overig', label: 'Overig' },
     ];
 
+    const ORG_CATEGORIES = [
+        { id: 'vereniging', label: 'Vereniging' },
+        { id: 'stichting', label: 'Stichting' },
+        { id: 'gemeente', label: 'Gemeente' },
+        { id: 'dorpsbelang', label: 'Dorpsbelang' },
+        { id: 'sport', label: 'Sport' },
+        { id: 'cultuur', label: 'Cultuur' },
+        { id: 'muziek', label: 'Muziek' },
+        { id: 'onderwijs', label: 'Onderwijs' },
+        { id: 'zorg', label: 'Zorg' },
+        { id: 'welzijn', label: 'Welzijn' },
+        { id: 'natuur', label: 'Natuur' },
+        { id: 'kerk', label: 'Kerk' },
+        { id: 'ondernemer', label: 'Ondernemer' },
+        { id: 'horeca', label: 'Horeca' },
+        { id: 'overig', label: 'Overig' },
+    ];
+
+    function resolveOrgCategoryId(raw) {
+        const s = (raw || '').trim();
+        if (!s) return 'vereniging';
+        const lower = s.toLowerCase();
+        const byId = ORG_CATEGORIES.find((c) => c.id === lower);
+        if (byId) return byId.id;
+        const byLabel = ORG_CATEGORIES.find((c) => c.label.toLowerCase() === lower);
+        if (byLabel) return byLabel.id;
+        for (const c of ORG_CATEGORIES) {
+            if (lower.includes(c.id) || lower.includes(c.label.toLowerCase())) return c.id;
+        }
+        return 'overig';
+    }
+
+    function orgCategoryLabel(raw) {
+        const id = resolveOrgCategoryId(raw);
+        const found = ORG_CATEGORIES.find((c) => c.id === id);
+        return found ? found.label : 'Overig';
+    }
+
+    function orgCategorySelectHtml(selectId, rawSelected) {
+        const selected = resolveOrgCategoryId(rawSelected);
+        return `<select id="${selectId}">${ORG_CATEGORIES.map((c) =>
+            `<option value="${c.id}"${selected === c.id ? ' selected' : ''}>${c.label}</option>`
+        ).join('')}</select>`;
+    }
+
     function syncNewsCustomCategoryField() {
         const select = document.getElementById('newsCategory');
         const group = document.getElementById('newsCustomCategoryGroup');
@@ -1261,7 +1306,7 @@
                 </div>
                 <div class="form-group">
                     <label for="profile_category">Categorie</label>
-                    <input type="text" id="profile_category" maxlength="120" placeholder="bijv. Muziek, Vereniging" value="${escapeHtml(org.category || '')}">
+                    ${orgCategorySelectHtml('profile_category', org.category || 'vereniging')}
                 </div>
                 <div class="form-group">
                     <label for="profile_description">Beschrijving</label>

@@ -24,6 +24,37 @@ const CACHE_TTL = {
   default: 5 * 1000 // 5 seconden default
 };
 
+/** Vaste organisatie-categorieën (slug → weergavelabel). */
+const ORG_CATEGORY_LABELS = {
+  vereniging: 'Vereniging',
+  stichting: 'Stichting',
+  gemeente: 'Gemeente',
+  dorpsbelang: 'Dorpsbelang',
+  sport: 'Sport',
+  cultuur: 'Cultuur',
+  muziek: 'Muziek',
+  onderwijs: 'Onderwijs',
+  zorg: 'Zorg',
+  welzijn: 'Welzijn',
+  natuur: 'Natuur',
+  kerk: 'Kerk',
+  ondernemer: 'Ondernemer',
+  horeca: 'Horeca',
+  overig: 'Overig',
+};
+
+function normalizeOrgCategory(input) {
+  if (input == null || String(input).trim() === '') return 'vereniging';
+  const raw = String(input).trim();
+  const lower = raw.toLowerCase();
+  if (ORG_CATEGORY_LABELS[lower]) return lower;
+  for (const [id, label] of Object.entries(ORG_CATEGORY_LABELS)) {
+    if (label.toLowerCase() === lower) return id;
+    if (lower.includes(id) || lower.includes(label.toLowerCase())) return id;
+  }
+  return 'overig';
+}
+
 function getCacheKey(endpoint, params = {}) {
   return `${endpoint}:${JSON.stringify(params)}`;
 }
@@ -4014,7 +4045,7 @@ app.post('/api/admin/organizations', authenticateToken, requireAdmin, async (req
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
       [
         name,
-        category || null,
+        normalizeOrgCategory(category),
         description || null,
         bio || null,
         is_approved !== false,
@@ -4090,7 +4121,7 @@ app.put('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (
     const params = [];
     const push = (v) => { params.push(v); return '?'; }; // MySQL uses ? instead of $1, $2, etc.
     if (name !== undefined) sets.push(`name = ${push(name)}`);
-    if (category !== undefined) sets.push(`category = ${push(category)}`);
+    if (category !== undefined) sets.push(`category = ${push(normalizeOrgCategory(category))}`);
     if (description !== undefined) sets.push(`description = ${push(description)}`);
     if (bio !== undefined) sets.push(`bio = ${push(bio)}`);
     if (is_approved !== undefined) sets.push(`is_approved = ${push(is_approved)}`);
@@ -5529,6 +5560,7 @@ app.put('/api/org/profile', authenticateToken, requireOrgPortal, async (req, res
       if (raw[key] !== undefined) {
         let v = raw[key];
         if (key === 'name') v = String(v).trim();
+        if (key === 'category') v = normalizeOrgCategory(v);
         if (key === 'show_email') v = !!v; // zorg dat het altijd een boolean is
         sets.push(`${key} = ?`);
         values.push(v);
@@ -6495,7 +6527,7 @@ app.post('/api/organizations/register', orgRegisterRateLimiter, async (req, res)
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
       [
         name.trim(),
-        norm(category),
+        normalizeOrgCategory(category),
         norm(description),
         norm(bio),
         false, // is_approved = false: wacht op goedkeuring in admin

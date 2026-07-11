@@ -1,5 +1,50 @@
 console.log('=== SCRIPT LOADED - VERSION 2026-03-03-21:PRAKTISCH-ICONS ===');
 
+const ORG_CATEGORIES = [
+    { id: 'vereniging', label: 'Vereniging' },
+    { id: 'stichting', label: 'Stichting' },
+    { id: 'gemeente', label: 'Gemeente' },
+    { id: 'dorpsbelang', label: 'Dorpsbelang' },
+    { id: 'sport', label: 'Sport' },
+    { id: 'cultuur', label: 'Cultuur' },
+    { id: 'muziek', label: 'Muziek' },
+    { id: 'onderwijs', label: 'Onderwijs' },
+    { id: 'zorg', label: 'Zorg' },
+    { id: 'welzijn', label: 'Welzijn' },
+    { id: 'natuur', label: 'Natuur' },
+    { id: 'kerk', label: 'Kerk' },
+    { id: 'ondernemer', label: 'Ondernemer' },
+    { id: 'horeca', label: 'Horeca' },
+    { id: 'overig', label: 'Overig' },
+];
+
+function resolveOrgCategoryId(raw) {
+    const s = (raw || '').trim();
+    if (!s) return 'vereniging';
+    const lower = s.toLowerCase();
+    const byId = ORG_CATEGORIES.find((c) => c.id === lower);
+    if (byId) return byId.id;
+    const byLabel = ORG_CATEGORIES.find((c) => c.label.toLowerCase() === lower);
+    if (byLabel) return byLabel.id;
+    for (const c of ORG_CATEGORIES) {
+        if (lower.includes(c.id) || lower.includes(c.label.toLowerCase())) return c.id;
+    }
+    return 'overig';
+}
+
+function orgCategoryLabel(raw) {
+    const id = resolveOrgCategoryId(raw);
+    const found = ORG_CATEGORIES.find((c) => c.id === id);
+    return found ? found.label : 'Overig';
+}
+
+function orgCategorySelectHtml(selectId, rawSelected) {
+    const selected = resolveOrgCategoryId(rawSelected);
+    return `<select id="${selectId}">${ORG_CATEGORIES.map((c) =>
+        `<option value="${c.id}"${selected === c.id ? ' selected' : ''}>${c.label}</option>`
+    ).join('')}</select>`;
+}
+
 class HolwertAdmin {
     constructor() {
         // Lokaal (localhost of 127.0.0.1) → backend op poort 3000; anders productie-API
@@ -1810,7 +1855,7 @@ class HolwertAdmin {
                     </div>
                 </td>
                 <td>${org.name || '-'}</td>
-                <td>${org.category || 'Geen categorie'}${org.is_ondernemer ? ' <span class="status-badge status-published" title="Ondernemer">Ondernemer</span>' : ''}</td>
+                <td>${orgCategoryLabel(org.category)}${org.is_ondernemer ? ' <span class="status-badge status-published" title="Ondernemer">Ondernemer</span>' : ''}</td>
                 <td>${org.followers_count ?? 0}</td>
                 <td>
                     <span class="status-badge ${org.is_approved ? 'status-published' : 'status-draft'}">
@@ -2101,7 +2146,7 @@ class HolwertAdmin {
                         </div>
                         <div class="form-group">
                             <label for="createOrgCategory">Categorie</label>
-                            <input type="text" id="createOrgCategory" placeholder="bijv. Vereniging, Gemeente, Sport">
+                            ${orgCategorySelectHtml('createOrgCategory', 'vereniging')}
                         </div>
                         <div class="form-group">
                             <label class="checkbox-label">
@@ -2212,7 +2257,7 @@ class HolwertAdmin {
             const logoFile = document.getElementById('createOrgLogoFile')?.files?.[0];
             const body = {
                 name,
-                category: document.getElementById('createOrgCategory')?.value?.trim() || undefined,
+                category: document.getElementById('createOrgCategory')?.value || 'vereniging',
                 description: document.getElementById('createOrgDescription')?.value?.trim() || undefined,
                 bio: document.getElementById('createOrgBio')?.value?.trim() || undefined,
                 email: document.getElementById('createOrgEmail')?.value?.trim() || undefined,
@@ -2324,7 +2369,7 @@ class HolwertAdmin {
                             </div>
                             <div class="form-group">
                                 <label for="editOrgCategory">Categorie</label>
-                                <input type="text" id="editOrgCategory" value="${escQ(org.category)}" placeholder="bijv. Vereniging">
+                                ${orgCategorySelectHtml('editOrgCategory', org.category)}
                             </div>
                             <div class="form-group">
                                 <label class="checkbox-label">
@@ -2458,7 +2503,7 @@ class HolwertAdmin {
                 const brand_color = /^#[0-9A-Fa-f]{6}$/i.test(hexRaw) ? hexRaw : undefined;
                 const body = {
                     name,
-                    category: document.getElementById('editOrgCategory').value.trim() || undefined,
+                    category: document.getElementById('editOrgCategory').value || 'vereniging',
                     description: document.getElementById('editOrgDescription').value.trim() || undefined,
                     bio: document.getElementById('editOrgBio').value.trim() || undefined,
                     email: document.getElementById('editOrgEmail').value.trim() || null,
@@ -5378,7 +5423,7 @@ class HolwertAdmin {
                             ${block('Status', `<span class="status-badge ${org.is_approved ? 'status-published' : 'status-draft'}">${h(statusNl)}</span>`)}
                             ${block('Aangemeld', h(created))}
                             ${block('Naam', textOrDash(org.name))}
-                            ${block('Categorie', textOrDash(org.category))}
+                            ${block('Categorie', textOrDash(orgCategoryLabel(org.category)))}
                             ${block('Beschrijving', textOrDash(org.description))}
                             ${block('Bio', textOrDash(org.bio))}
                             ${block('E-mail', textOrDash(org.email))}
