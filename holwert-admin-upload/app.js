@@ -6398,7 +6398,9 @@ class HolwertAdmin {
                         organization_id: ev.organization_id || '',
                         organization_name: ev.organization_name || '',
                         image_url: ev.image_url || '',
-                        pdf_url: ev.pdf_url || ''
+                        pdf_url: ev.pdf_url || '',
+                        ticket_url: ev.ticket_url || '',
+                        ticket_label: ev.ticket_label || ''
                     };
                     console.log('Initial data set:', initial);
                     
@@ -6537,6 +6539,15 @@ class HolwertAdmin {
                                     <input type="file" id="evPdf" accept="application/pdf,.pdf">
                                     <small class="form-hint">Downloadlink onder het evenement in de app (max 15 MB).</small>
                                     ${this.pdfAttachmentControlsHtml(initial.pdf_url, 'evPdfRemove')}
+                                </div>
+                                <div class="form-group">
+                                    <label>Ticketlink (optioneel)</label>
+                                    <input type="url" id="evTicketUrl" value="${initial.ticket_url || ''}" placeholder="https://… (bijv. MGTickets)">
+                                    <small class="form-hint">Wordt in de app een knop onder de omschrijving.</small>
+                                </div>
+                                <div class="form-group">
+                                    <label>Tekst op ticketknop (optioneel)</label>
+                                    <input type="text" id="evTicketLabel" value="${initial.ticket_label || ''}" placeholder="Koop hier de tickets">
                                 </div>
                             </form>
                         </div>
@@ -6722,6 +6733,9 @@ class HolwertAdmin {
             } else if (removePdf) {
                 body.pdf_url = null;
             }
+
+            body.ticket_url = (document.getElementById('evTicketUrl')?.value || '').trim() || null;
+            body.ticket_label = (document.getElementById('evTicketLabel')?.value || '').trim() || null;
 
             // Bepaal URL en method op basis van actualEventId (al gedeclareerd aan het begin)
             const url = actualEventId ? `${this.apiBaseUrl}/admin/events/${actualEventId}` : `${this.apiBaseUrl}/admin/events`;

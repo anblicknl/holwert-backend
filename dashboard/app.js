@@ -1206,6 +1206,23 @@
                                     : '<p class="form-hint">Geen PDF</p>')
                             }
                         </div>
+                        <div class="form-group">
+                            <label>Ticketlink (optioneel)</label>
+                            ${!isView
+                                ? `<input type="url" id="eventTicketUrl" placeholder="https://…" value="${escapeHtml(event?.ticket_url || '')}">
+                                   <p class="form-hint">Wordt in de app een knop (bijv. ticketverkoop).</p>`
+                                : (event?.ticket_url
+                                    ? `<a href="${escapeHtml(event.ticket_url)}" target="_blank" rel="noopener">${escapeHtml(event.ticket_url)}</a>`
+                                    : '<p class="form-hint">Geen ticketlink</p>')
+                            }
+                        </div>
+                        <div class="form-group">
+                            <label>Tekst ticketknop (optioneel)</label>
+                            ${!isView
+                                ? `<input type="text" id="eventTicketLabel" placeholder="Koop hier de tickets" value="${escapeHtml(event?.ticket_label || '')}">`
+                                : `<p>${escapeHtml(event?.ticket_label || 'Koop hier de tickets')}</p>`
+                            }
+                        </div>
                     </div>
                     <div class="modal-footer">
                         ${isView
@@ -1275,6 +1292,8 @@
                         price: rawPrice !== '' ? parseFloat(rawPrice) : null,
                         image_url: imageUrl || null,
                         pdf_url: pdfUrl,
+                        ticket_url: (document.getElementById('eventTicketUrl')?.value || '').trim() || null,
+                        ticket_label: (document.getElementById('eventTicketLabel')?.value || '').trim() || null,
                     };
                     const url = id ? `${apiBase}/org/events/${id}` : `${apiBase}/org/events`;
                     const method = id ? 'PUT' : 'POST';
