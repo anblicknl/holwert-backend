@@ -5547,6 +5547,10 @@ class HolwertAdmin {
                                     <span class="status-badge status-${user.is_active ? 'active' : 'inactive'}">${user.is_active ? 'Actief' : 'Inactief'}</span>
                                 </div>
                                 <div class="detail-row">
+                                    <label>App-versie:</label>
+                                    <span>${user.last_app_version ? user.last_app_version : 'Onbekend'}${user.last_app_version_at ? ` <span class="text-muted">(${new Date(user.last_app_version_at).toLocaleString('nl-NL')})</span>` : ''}</span>
+                                </div>
+                                <div class="detail-row">
                                     <label>Geregistreerd:</label>
                                     <span>${new Date(user.created_at).toLocaleDateString('nl-NL')} om ${new Date(user.created_at).toLocaleTimeString('nl-NL')}</span>
                                 </div>

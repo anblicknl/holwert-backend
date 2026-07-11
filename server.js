@@ -329,6 +329,48 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' })); // Verhoogd voor afbeelding uploads
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+/** App-versie uit mobiele client (X-App-Version: 1.0.3+2). */
+app.use((req, res, next) => {
+  const raw = req.headers['x-app-version'];
+  req.appVersion = typeof raw === 'string' ? raw.trim().slice(0, 32) : null;
+  next();
+});
+
+const appVersionLastSaved = new Map();
+
+async function ensureUserAppVersionColumns() {
+  for (const col of [
+    { name: 'last_app_version', type: 'VARCHAR(32) NULL' },
+    { name: 'last_app_version_at', type: 'DATETIME NULL' },
+  ]) {
+    try {
+      const result = await executeQuery(
+        "SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = ?",
+        [col.name]
+      );
+      if (result.rows?.length) continue;
+      await executeQuery(`ALTER TABLE users ADD COLUMN ${col.name} ${col.type}`);
+      console.log(`✅ users.${col.name} toegevoegd`);
+    } catch (e) {
+      if (e.code === 'ER_DUP_FIELDNAME' || String(e.message || '').includes('Duplicate')) continue;
+      console.warn(`ensureUserAppVersionColumns ${col.name}:`, e.message);
+    }
+  }
+}
+
+async function recordUserAppVersionIfNeeded(userId, version) {
+  if (!userId || !version) return;
+  const now = Date.now();
+  const last = appVersionLastSaved.get(userId) || 0;
+  if (now - last < 60 * 60 * 1000) return;
+  appVersionLastSaved.set(userId, now);
+  await ensureUserAppVersionColumns();
+  await executeQuery(
+    'UPDATE users SET last_app_version = ?, last_app_version_at = NOW() WHERE id = ?',
+    [String(version).slice(0, 32), userId]
+  );
+}
+
 // Wacht op database-migraties voor elke request (Vercel serverless cold start)
 let _migrationsReady = null;
 function getMigrationsReady() {
@@ -339,6 +381,7 @@ function getMigrationsReady() {
         await ensureProfileNumberColumn();
         await ensureHolwertRelationshipColumn();
         await ensureUsersPhoneColumn();
+        await ensureUserAppVersionColumns();
         await ensureUsersOrganizationIdColumn();
         await ensurePrivacyStatementColumn();
         await ensurePracticalInfoTable();
@@ -1022,6 +1065,9 @@ const authenticateToken = (req, res, next) => {
       });
     }
     req.user = user;
+    if (req.appVersion && user?.userId) {
+      recordUserAppVersionIfNeeded(user.userId, req.appVersion).catch(() => {});
+    }
     next();
   });
 };
@@ -2783,6 +2829,10 @@ app.post('/api/auth/login', loginRateLimiter, async (req, res) => {
     }
 
     const organizationId = user.organization_id != null ? parseInt(user.organization_id, 10) : null;
+
+    if (req.appVersion) {
+      recordUserAppVersionIfNeeded(user.id, req.appVersion).catch(() => {});
+    }
 
     // Generate JWT token (organization_id voor dashboard /api/org/*)
     const token = jwt.sign(
