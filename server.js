@@ -1759,12 +1759,27 @@ function isBookmarksTableDisallowed(error) {
   return /disallowed table/i.test(msg);
 }
 
+/** Verwijder bookmarks naar niet-gepubliceerd of verwijderd nieuws. */
+async function pruneStaleBookmarks(userId) {
+  await executeQuery(`
+    DELETE b FROM bookmarks b
+    LEFT JOIN news n ON n.id = b.news_id AND n.is_published = true
+    WHERE b.user_id = ? AND n.id IS NULL
+  `, [userId]);
+}
+
 // Fast bookmark count for profile stats
 app.get('/api/app/bookmarks/count', authenticateToken, async (req, res) => {
   try {
     await ensureBookmarksTable();
     const userId = req.user.userId;
-    const result = await executeQuery('SELECT COUNT(*) as count FROM bookmarks WHERE user_id = ?', [userId]);
+    await pruneStaleBookmarks(userId);
+    const result = await executeQuery(`
+      SELECT COUNT(*) as count
+      FROM bookmarks b
+      INNER JOIN news n ON n.id = b.news_id AND n.is_published = true
+      WHERE b.user_id = ?
+    `, [userId]);
     res.json({ count: result.rows?.[0]?.count ?? 0 });
   } catch (error) {
     if (isBookmarksTableDisallowed(error)) {
@@ -1781,11 +1796,13 @@ app.get('/api/app/bookmarks', authenticateToken, async (req, res) => {
     const userId = req.user.userId;
     const { with_news } = req.query;
 
+    await pruneStaleBookmarks(userId);
+
     if (with_news === '1' || with_news === 'true') {
       const result = await executeQuery(`
         SELECT n.id, n.title, n.excerpt, n.image_url, n.created_at, b.created_at as bookmarked_at
         FROM bookmarks b
-        JOIN news n ON n.id = b.news_id
+        INNER JOIN news n ON n.id = b.news_id AND n.is_published = true
         WHERE b.user_id = ?
         ORDER BY b.created_at DESC
         LIMIT 100
@@ -3891,6 +3908,7 @@ app.delete('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, r
     if (!result.rowCount) {
       return res.status(404).json({ error: 'Article not found' });
     }
+    await executeQuery('DELETE FROM bookmarks WHERE news_id = ?', [id]).catch(() => {});
     if (oldPdfUrl) {
       cleanupHostedPdfIfUnreferenced(oldPdfUrl).catch(() => {});
     }
@@ -5786,6 +5804,7 @@ app.delete('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req,
     const del = await executeQuery('DELETE FROM news WHERE id = ? AND organization_id = ?', [id, orgId]);
     const n = del.rowCount ?? del.rows?.length ?? 0;
     if (!n) return res.status(404).json({ error: 'Artikel niet gevonden' });
+    await executeQuery('DELETE FROM bookmarks WHERE news_id = ?', [id]).catch(() => {});
     if (oldPdfUrl) {
       cleanupHostedPdfIfUnreferenced(oldPdfUrl).catch(() => {});
     }
