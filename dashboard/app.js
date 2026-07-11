@@ -11,6 +11,32 @@
     const TOKEN_KEY = 'holwertDashboardToken';
     const TOKEN_KEY_LEGACY = 'orgPortalToken';
 
+    const NEWS_CATEGORIES = [
+        { id: 'dorpsnieuws', label: 'Dorpsnieuws' },
+        { id: 'sport', label: 'Sport' },
+        { id: 'cultuur', label: 'Cultuur' },
+        { id: 'onderwijs', label: 'Onderwijs' },
+        { id: 'zorg', label: 'Zorg' },
+        { id: 'overig', label: 'Overig' },
+    ];
+
+    function syncNewsCustomCategoryField() {
+        const select = document.getElementById('newsCategory');
+        const group = document.getElementById('newsCustomCategoryGroup');
+        if (!select || !group) return;
+        group.style.display = select.value === 'overig' ? 'block' : 'none';
+    }
+
+    function newsCategoryLabel(category, customCategory) {
+        const cat = (category || '').trim();
+        const custom = (customCategory || '').trim();
+        if (cat === 'overig' && custom) return custom;
+        const found = NEWS_CATEGORIES.find((c) => c.id === cat);
+        if (found) return found.label;
+        if (custom) return custom;
+        return 'Dorpsnieuws';
+    }
+
     function getStoredToken() {
         return localStorage.getItem(TOKEN_KEY) || localStorage.getItem(TOKEN_KEY_LEGACY);
     }
@@ -447,6 +473,53 @@
         return j.fileUrl;
     }
 
+    function pdfAttachmentControlsHtml(pdfUrl, flagId) {
+        if (!pdfUrl) return '';
+        return `
+            <input type="hidden" id="${flagId}" class="js-pdf-remove-flag" value="0">
+            <div class="js-pdf-current" style="margin-top:8px;display:flex;flex-wrap:wrap;align-items:center;gap:8px;">
+                <small>Huidige PDF: <a href="${escapeHtml(pdfUrl)}" target="_blank" rel="noopener">bekijken</a></small>
+                <button type="button" class="btn btn-sm btn-danger js-pdf-remove-btn">Verwijder PDF</button>
+            </div>
+            <p class="form-hint js-pdf-marked" hidden style="margin-top:6px;color:#c0304f;">
+                PDF wordt verwijderd bij opslaan.
+                <button type="button" class="btn btn-sm btn-secondary js-pdf-undo-btn">Ongedaan maken</button>
+            </p>
+        `;
+    }
+
+    function wirePdfRemoveControl(scope) {
+        const root = scope?.querySelector ? scope : document;
+        root.querySelectorAll('.form-group').forEach((group) => {
+            const flag = group.querySelector('.js-pdf-remove-flag');
+            const btn = group.querySelector('.js-pdf-remove-btn');
+            if (!flag || !btn || btn.dataset.wired) return;
+            btn.dataset.wired = '1';
+            const current = group.querySelector('.js-pdf-current');
+            const marked = group.querySelector('.js-pdf-marked');
+            const undo = group.querySelector('.js-pdf-undo-btn');
+            const fileInput = group.querySelector('input[type="file"][accept*="pdf"]');
+            btn.addEventListener('click', () => {
+                flag.value = '1';
+                if (current) current.hidden = true;
+                if (marked) marked.hidden = false;
+                if (fileInput) fileInput.value = '';
+            });
+            undo?.addEventListener('click', () => {
+                flag.value = '0';
+                if (current) current.hidden = false;
+                if (marked) marked.hidden = true;
+            });
+            fileInput?.addEventListener('change', () => {
+                if (fileInput.files?.[0]) {
+                    flag.value = '0';
+                    if (current) current.hidden = false;
+                    if (marked) marked.hidden = true;
+                }
+            });
+        });
+    }
+
     async function login(email, password) {
         const res = await fetch(`${apiBase}/auth/login`, {
             method: 'POST',
@@ -643,9 +716,10 @@
             if (!res.ok) throw new Error(data.error || 'Laden mislukt');
             const list = data.news || [];
             container.innerHTML = list.length
-                ? `<table class="data-table"><thead><tr><th>Titel</th><th>Status</th><th>Datum</th><th class="cell-actions">Acties</th></tr></thead><tbody>${
+                ? `<table class="data-table"><thead><tr><th>Titel</th><th>Onderwerp</th><th>Status</th><th>Datum</th><th class="cell-actions">Acties</th></tr></thead><tbody>${
                     list.map(n => `<tr>
                         <td>${escapeHtml(n.title || '')}</td>
+                        <td>${escapeHtml(newsCategoryLabel(n.category, n.custom_category))}</td>
                         <td>${n.is_published ? 'Gepubliceerd' : 'Concept'}</td>
                         <td>${n.published_at ? new Date(n.published_at).toLocaleDateString('nl-NL') : '-'}</td>
                         <td class="cell-actions">
@@ -711,6 +785,23 @@
             const publishedAtValue = article?.published_at
                 ? toDatetimeInputValue(article.published_at)
                 : '';
+            const selectedCategory = article?.category || 'dorpsnieuws';
+            const categoryFieldsHtml = !isPreview
+                ? `<div class="form-group">
+                        <label for="newsCategory">Onderwerp / categorie</label>
+                        <select id="newsCategory">
+                            ${NEWS_CATEGORIES.map((cat) => `<option value="${cat.id}" ${selectedCategory === cat.id ? 'selected' : ''}>${cat.label}</option>`).join('')}
+                        </select>
+                   </div>
+                   <div class="form-group" id="newsCustomCategoryGroup" style="display:${selectedCategory === 'overig' ? 'block' : 'none'}">
+                        <label for="newsCustomCategory">Eigen onderwerp</label>
+                        <input type="text" id="newsCustomCategory" maxlength="100" placeholder="bijv. Jaarverslag, Weersverwachting" value="${escapeHtml(article?.custom_category || '')}">
+                        <p class="form-hint">Wordt boven het artikel in de app getoond (alleen bij Overig).</p>
+                   </div>`
+                : `<div class="form-group">
+                        <label>Onderwerp</label>
+                        <p style="margin:0">${escapeHtml(newsCategoryLabel(article?.category, article?.custom_category))}</p>
+                   </div>`;
             const imageEditable = !isPreview
                 ? `${imgPreview}
                             <input type="file" id="newsImageFile" accept="image/*">
@@ -733,6 +824,7 @@
                             <label>Samenvatting</label>
                             <textarea id="newsExcerpt" rows="2" ${ro}>${escapeHtml(article?.excerpt || '')}</textarea>
                         </div>
+                        ${categoryFieldsHtml}
                         <div class="form-group">
                             <label>Inhoud</label>
                             ${editorToolbar}
@@ -780,10 +872,7 @@
                             ${!isPreview
                                 ? `<input type="file" id="newsPdfFile" accept="application/pdf,.pdf">
                                    <p class="form-hint">Wordt in de app als downloadlink onder het artikel getoond (max 15 MB).</p>
-                                   ${article?.pdf_url
-                                       ? `<p style="margin:8px 0 0"><small>Huidige PDF: <a href="${escapeHtml(article.pdf_url)}" target="_blank" rel="noopener">bekijken</a></small></p>
-                                          <label class="checkbox-label" style="margin-top:6px;display:block"><input type="checkbox" id="newsPdfRemove"> PDF verwijderen bij opslaan</label>`
-                                       : ''}`
+                                   ${pdfAttachmentControlsHtml(article?.pdf_url, 'newsPdfRemove')}`
                                 : (article?.pdf_url
                                     ? `<a href="${escapeHtml(article.pdf_url)}" target="_blank" rel="noopener">PDF openen</a>`
                                     : '<p class="form-hint">Geen PDF</p>')
@@ -800,6 +889,10 @@
                 </div>`;
             overlay.querySelector('.modal-close').addEventListener('click', () => overlay.remove());
             overlay.querySelector('.modal-close-btn').addEventListener('click', () => overlay.remove());
+            wirePdfRemoveControl(overlay);
+            const catSelect = overlay.querySelector('#newsCategory');
+            if (catSelect) catSelect.addEventListener('change', syncNewsCustomCategoryField);
+            syncNewsCustomCategoryField();
             if (!isPreview) {
                 overlay.querySelector('#newsSaveBtn').addEventListener('click', async () => {
                     const btn = overlay.querySelector('#newsSaveBtn');
@@ -808,7 +901,7 @@
                     if (!imageUrl && article?.image_url) imageUrl = article.image_url;
                     let pdfUrl = article?.pdf_url || null;
                     const pdfFile = document.getElementById('newsPdfFile')?.files?.[0];
-                    const removePdf = document.getElementById('newsPdfRemove')?.checked === true;
+                    const removePdf = document.getElementById('newsPdfRemove')?.value === '1';
                     if (file || pdfFile) {
                         btn.disabled = true;
                         btn.textContent = 'Uploaden…';
@@ -827,10 +920,16 @@
                         pdfUrl = null;
                     }
                     const publishedAtInput = (document.getElementById('newsPublishedAt')?.value || '').trim();
+                    const category = document.getElementById('newsCategory')?.value || 'dorpsnieuws';
+                    const custom_category = category === 'overig'
+                        ? ((document.getElementById('newsCustomCategory')?.value || '').trim() || null)
+                        : null;
                     const payload = {
                         title: document.getElementById('newsTitle').value.trim(),
                         excerpt: document.getElementById('newsExcerpt').value.trim(),
                         content: document.getElementById('newsContent').value.trim(),
+                        category,
+                        custom_category,
                         is_published: document.getElementById('newsPublished').checked,
                         image_url: imageUrl || null,
                         youtube_url:  (document.getElementById('newsYoutubeUrl')?.value  || '').trim() || null,
@@ -1045,10 +1144,7 @@
                             ${!isView
                                 ? `<input type="file" id="eventPdfFile" accept="application/pdf,.pdf">
                                    <p class="form-hint">Downloadlink onder het evenement in de app (max 15 MB).</p>
-                                   ${event?.pdf_url
-                                       ? `<p style="margin:8px 0 0"><small>Huidige PDF: <a href="${escapeHtml(event.pdf_url)}" target="_blank" rel="noopener">bekijken</a></small></p>
-                                          <label class="checkbox-label" style="margin-top:6px;display:block"><input type="checkbox" id="eventPdfRemove"> PDF verwijderen bij opslaan</label>`
-                                       : ''}`
+                                   ${pdfAttachmentControlsHtml(event?.pdf_url, 'eventPdfRemove')}`
                                 : (event?.pdf_url
                                     ? `<a href="${escapeHtml(event.pdf_url)}" target="_blank" rel="noopener">PDF openen</a>`
                                     : '<p class="form-hint">Geen PDF</p>')
@@ -1063,6 +1159,7 @@
                 </div>`;
             overlay.querySelector('.modal-close').addEventListener('click', () => overlay.remove());
             overlay.querySelector('.modal-close-btn').addEventListener('click', () => overlay.remove());
+            wirePdfRemoveControl(overlay);
 
             // Haal ALLE events van ALLE organisaties op voor de overlap-check.
             // Gebruik de publieke /api/events route (geen auth vereist, max 500 items).
@@ -1093,7 +1190,7 @@
                     if (!imageUrl && event?.image_url) imageUrl = event.image_url;
                     let pdfUrl = event?.pdf_url || null;
                     const pdfFile = document.getElementById('eventPdfFile')?.files?.[0];
-                    const removePdf = document.getElementById('eventPdfRemove')?.checked === true;
+                    const removePdf = document.getElementById('eventPdfRemove')?.value === '1';
                     if (file || pdfFile) {
                         btn.disabled = true;
                         btn.textContent = 'Uploaden…';

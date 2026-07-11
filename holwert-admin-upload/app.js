@@ -2027,6 +2027,54 @@ class HolwertAdmin {
         return uploadJson.fileUrl || null;
     }
 
+    /** HTML voor huidige PDF + verwijder-knop (hidden flag voor opslaan). */
+    pdfAttachmentControlsHtml(pdfUrl, flagId) {
+        if (!pdfUrl) return '';
+        return `
+            <input type="hidden" id="${flagId}" class="js-pdf-remove-flag" value="0">
+            <div class="js-pdf-current" style="margin-top:8px;display:flex;flex-wrap:wrap;align-items:center;gap:8px;">
+                <small>Huidige PDF: <a href="${pdfUrl}" target="_blank" rel="noopener noreferrer">bekijken</a></small>
+                <button type="button" class="btn btn-sm btn-danger js-pdf-remove-btn">Verwijder PDF</button>
+            </div>
+            <p class="form-hint js-pdf-marked" hidden style="margin-top:6px;color:#c0304f;">
+                PDF wordt verwijderd bij opslaan.
+                <button type="button" class="btn btn-sm btn-secondary js-pdf-undo-btn">Ongedaan maken</button>
+            </p>
+        `;
+    }
+
+    wirePdfRemoveControl(scope = document) {
+        const root = scope?.querySelector ? scope : document;
+        root.querySelectorAll('.form-group').forEach((group) => {
+            const flag = group.querySelector('.js-pdf-remove-flag');
+            const btn = group.querySelector('.js-pdf-remove-btn');
+            if (!flag || !btn || btn.dataset.wired) return;
+            btn.dataset.wired = '1';
+            const current = group.querySelector('.js-pdf-current');
+            const marked = group.querySelector('.js-pdf-marked');
+            const undo = group.querySelector('.js-pdf-undo-btn');
+            const fileInput = group.querySelector('input[type="file"][accept*="pdf"]');
+            btn.addEventListener('click', () => {
+                flag.value = '1';
+                if (current) current.hidden = true;
+                if (marked) marked.hidden = false;
+                if (fileInput) fileInput.value = '';
+            });
+            undo?.addEventListener('click', () => {
+                flag.value = '0';
+                if (current) current.hidden = false;
+                if (marked) marked.hidden = true;
+            });
+            fileInput?.addEventListener('change', () => {
+                if (fileInput.files?.[0]) {
+                    flag.value = '0';
+                    if (current) current.hidden = false;
+                    if (marked) marked.hidden = true;
+                }
+            });
+        });
+    }
+
     /**
      * @param {(createdOrganization: object) => void} [onCreatedOrg] — optioneel, na succesvol aanmaken (bijv. dashboard-accountmodal bijwerken).
      */
@@ -2908,7 +2956,15 @@ class HolwertAdmin {
                 this.showNotification('Fout bij laden organisaties. Organisatie dropdown is mogelijk leeg.', 'warning');
             }
 
-            const categories = ['dorpsnieuws', 'sport', 'cultuur', 'onderwijs', 'zorg', 'overig'];
+            const categories = [
+                { id: 'dorpsnieuws', label: 'Dorpsnieuws' },
+                { id: 'sport', label: 'Sport' },
+                { id: 'cultuur', label: 'Cultuur' },
+                { id: 'onderwijs', label: 'Onderwijs' },
+                { id: 'zorg', label: 'Zorg' },
+                { id: 'overig', label: 'Overig' },
+            ];
+            const selectedCategory = article?.category || 'dorpsnieuws';
             
             // Als edit mode, haal nieuws artikel op
             let article = null;
@@ -2975,14 +3031,21 @@ class HolwertAdmin {
                             
                             <div class="form-row">
                                 <div class="form-group">
-                                    <label for="newsCategory">Categorie</label>
-                                    <select id="newsCategory" name="category">
+                                    <label for="newsCategory">Onderwerp / categorie</label>
+                                    <select id="newsCategory" name="category" onchange="admin.syncNewsCustomCategoryField()">
                                         ${categories.map(cat => `
-                                            <option value="${cat}" ${article?.category === cat ? 'selected' : ''}>
-                                                ${cat.charAt(0).toUpperCase() + cat.slice(1)}
+                                            <option value="${cat.id}" ${selectedCategory === cat.id ? 'selected' : ''}>
+                                                ${cat.label}
                                             </option>
                                         `).join('')}
                                     </select>
+                                </div>
+                                <div class="form-group" id="newsCustomCategoryGroup" style="display: ${selectedCategory === 'overig' ? 'block' : 'none'}">
+                                    <label for="newsCustomCategory">Eigen onderwerp</label>
+                                    <input type="text" id="newsCustomCategory" name="custom_category" maxlength="100"
+                                        value="${article?.custom_category || ''}"
+                                        placeholder="bijv. Jaarverslag, Weersverwachting">
+                                    <small class="form-hint">Wordt boven het artikel in de app getoond (alleen bij Overig)</small>
                                 </div>
                                 <div class="form-group">
                                     <label for="newsOrganization">Organisatie</label>
@@ -3043,15 +3106,7 @@ class HolwertAdmin {
                                 <label for="newsPdfFile">PDF-bijlage (optioneel)</label>
                                 <input type="file" id="newsPdfFile" accept="application/pdf,.pdf" class="file-input">
                                 <small class="form-hint">Wordt in de app als downloadlink onder het artikel getoond (max 15 MB).</small>
-                                ${article?.pdf_url ? `
-                                    <div class="current-image" style="margin-top:8px;">
-                                        <small>Huidige PDF: <a href="${article.pdf_url}" target="_blank" rel="noopener noreferrer">bekijken</a></small>
-                                        <label class="checkbox-label" style="margin-top:6px;display:block;">
-                                            <input type="checkbox" id="newsPdfRemove">
-                                            PDF verwijderen bij opslaan
-                                        </label>
-                                    </div>
-                                ` : ''}
+                                ${this.pdfAttachmentControlsHtml(article?.pdf_url, 'newsPdfRemove')}
                             </div>
                             
                             <div class="form-group">
@@ -3114,6 +3169,8 @@ class HolwertAdmin {
             overlay.style.visibility = 'visible';
             overlay.style.opacity = '1';
             console.log('🔧 Forced modal display to flex');
+            this.wirePdfRemoveControl(overlay);
+            this.syncNewsCustomCategoryField();
         } catch (e) {
             console.error('openNewsModal error:', e);
             console.error('💥 Stack:', e.stack);
@@ -3150,6 +3207,13 @@ class HolwertAdmin {
             };
             reader.readAsDataURL(input.files[0]);
         }
+    }
+
+    syncNewsCustomCategoryField() {
+        const select = document.getElementById('newsCategory');
+        const group = document.getElementById('newsCustomCategoryGroup');
+        if (!select || !group) return;
+        group.style.display = select.value === 'overig' ? 'block' : 'none';
     }
 
     removeNewsImagePreview() {
@@ -3218,7 +3282,10 @@ class HolwertAdmin {
             const title = (document.getElementById('newsTitle').value || '').trim();
             const excerpt = (document.getElementById('newsExcerpt').value || '').trim();
             const content = (document.getElementById('newsArticleContent').value || '').trim();
-            const category = document.getElementById('newsCategory')?.value;
+            const category = document.getElementById('newsCategory')?.value || 'dorpsnieuws';
+            const custom_category = category === 'overig'
+                ? ((document.getElementById('newsCustomCategory')?.value || '').trim() || null)
+                : null;
             const organization_id_val = document.getElementById('newsOrganization')?.value;
             const organization_id = (organization_id_val && organization_id_val !== '' && organization_id_val !== '0') 
                 ? parseInt(organization_id_val) 
@@ -3295,6 +3362,7 @@ class HolwertAdmin {
                 excerpt: excerpt || null,
                 content,
                 category,
+                custom_category,
                 organization_id,
                 is_published: document.getElementById('newsPublished').checked
             };
@@ -3314,7 +3382,7 @@ class HolwertAdmin {
             body.source_url  = (document.getElementById('newsSourceUrl')?.value  || '').trim() || null;
 
             const pdfFile = document.getElementById('newsPdfFile')?.files?.[0];
-            const removePdf = document.getElementById('newsPdfRemove')?.checked === true;
+            const removePdf = document.getElementById('newsPdfRemove')?.value === '1';
             if (pdfFile) {
                 try {
                     body.pdf_url = await this.uploadPdfFile(pdfFile, organization_id);
@@ -3867,15 +3935,7 @@ class HolwertAdmin {
                             <label for="editEventPdfFile">PDF-bijlage (optioneel)</label>
                             <input type="file" id="editEventPdfFile" accept="application/pdf,.pdf" class="file-input">
                             <small class="form-hint">Downloadlink onder het evenement in de app (max 15 MB).</small>
-                            ${event.pdf_url ? `
-                                <div style="margin-top:8px;">
-                                    <small>Huidige PDF: <a href="${event.pdf_url}" target="_blank" rel="noopener noreferrer">bekijken</a></small>
-                                    <label class="checkbox-label" style="margin-top:6px;display:block;">
-                                        <input type="checkbox" id="editEventPdfRemove">
-                                        PDF verwijderen bij opslaan
-                                    </label>
-                                </div>
-                            ` : ''}
+                            ${this.pdfAttachmentControlsHtml(event.pdf_url, 'editEventPdfRemove')}
                         </div>
                     </form>
                 </div>
@@ -3887,6 +3947,7 @@ class HolwertAdmin {
         `;
         
         document.body.appendChild(modal);
+        this.wirePdfRemoveControl(modal);
     }
 
     async createEvent() {
@@ -3958,7 +4019,7 @@ class HolwertAdmin {
         };
 
         const pdfFile = document.getElementById('editEventPdfFile')?.files?.[0];
-        const removePdf = document.getElementById('editEventPdfRemove')?.checked === true;
+        const removePdf = document.getElementById('editEventPdfRemove')?.value === '1';
         if (pdfFile) {
             try {
                 eventData.pdf_url = await this.uploadPdfFile(pdfFile, eventData.organization_id ? parseInt(eventData.organization_id, 10) : null);
@@ -6415,15 +6476,7 @@ class HolwertAdmin {
                                     <label>PDF-bijlage (optioneel)</label>
                                     <input type="file" id="evPdf" accept="application/pdf,.pdf">
                                     <small class="form-hint">Downloadlink onder het evenement in de app (max 15 MB).</small>
-                                    ${initial.pdf_url ? `
-                                        <div style="margin-top:8px;">
-                                            <small>Huidige PDF: <a href="${initial.pdf_url}" target="_blank" rel="noopener noreferrer">bekijken</a></small>
-                                            <label class="checkbox-label" style="margin-top:6px;display:block;">
-                                                <input type="checkbox" id="evPdfRemove">
-                                                PDF verwijderen bij opslaan
-                                            </label>
-                                        </div>
-                                    ` : ''}
+                                    ${this.pdfAttachmentControlsHtml(initial.pdf_url, 'evPdfRemove')}
                                 </div>
                             </form>
                         </div>
@@ -6436,6 +6489,7 @@ class HolwertAdmin {
             }
             overlay.style.display = 'flex';
             document.body.appendChild(overlay);
+            this.wirePdfRemoveControl(overlay);
 
             const closeOverlay = () => overlay.remove();
             overlay.querySelectorAll('.js-event-modal-close').forEach((b) => {
@@ -6596,7 +6650,7 @@ class HolwertAdmin {
             }
 
             const pdfFile = document.getElementById('evPdf')?.files?.[0];
-            const removePdf = document.getElementById('evPdfRemove')?.checked === true;
+            const removePdf = document.getElementById('evPdfRemove')?.value === '1';
             if (pdfFile) {
                 try {
                     body.pdf_url = await this.uploadPdfFile(pdfFile, organization_id);

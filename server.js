@@ -1506,6 +1506,8 @@ app.get('/api/news', async (req, res) => {
         n.updated_at, 
         COALESCE(n.published_at, n.created_at) as published_at,
         n.organization_id,
+        n.category,
+        n.custom_category,
         o.name as organization_name, 
         o.logo_url as organization_logo,
         o.brand_color as organization_brand_color
@@ -2227,7 +2229,8 @@ app.get('/api/news/head', async (req, res) => {
         COALESCE(n.excerpt, LEFT(COALESCE(n.content, ''), 500)) as excerpt,
         n.image_url, n.created_at, n.updated_at,
         COALESCE(n.published_at, n.created_at) as published_at,
-        n.organization_id, o.name as organization_name, o.logo_url as organization_logo,
+        n.organization_id, n.category, n.custom_category,
+        o.name as organization_name, o.logo_url as organization_logo,
         o.brand_color as organization_brand_color
         ${userId ? ', CASE WHEN b.user_id IS NOT NULL THEN true ELSE false END as is_bookmarked' : ', false as is_bookmarked'}
       FROM news n
@@ -5646,9 +5649,11 @@ app.post('/api/org/news', authenticateToken, requireOrgPortal, async (req, res) 
     const userId = req.user.userId;
     const { title, content, excerpt, category, custom_category, image_url, youtube_url, source_name, source_url, pdf_url, is_published } = req.body || {};
     if (!title) return res.status(400).json({ error: 'title is required' });
+    const finalCategory = category || 'dorpsnieuws';
+    const finalCustomCategory = finalCategory === 'overig' && custom_category ? String(custom_category).trim() : null;
     const result = await executeInsert(
       'INSERT INTO news (title, content, excerpt, author_id, organization_id, image_url, youtube_url, source_name, source_url, pdf_url, category, custom_category, is_published, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())',
-      [title || '', content || '', excerpt || null, userId, orgId, image_url || null, youtube_url || null, source_name || null, source_url || null, pdf_url || null, category || null, custom_category || null, is_published === true]
+      [title || '', content || '', excerpt || null, userId, orgId, image_url || null, youtube_url || null, source_name || null, source_url || null, pdf_url || null, finalCategory, finalCustomCategory, is_published === true]
     );
     const id = result.insertId || (result.rows && result.rows[0] && result.rows[0].id);
     const row = await executeQuery('SELECT id, title, excerpt, is_published, organization_id, created_at FROM news WHERE id = ?', [id]);
@@ -5670,9 +5675,11 @@ app.put('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req, re
     const oldPdfUrl = existing.rows[0].pdf_url || null;
     const publishedAtSql = published_at ? toMysqlDateTime(published_at) : null;
     const publishedAtVal = publishedAtSql || null;
+    const finalCategory = category ?? 'dorpsnieuws';
+    const finalCustomCategory = finalCategory === 'overig' && custom_category ? String(custom_category).trim() : null;
     await executeQuery(
       'UPDATE news SET title = ?, content = ?, excerpt = ?, category = ?, custom_category = ?, image_url = ?, youtube_url = ?, source_name = ?, source_url = ?, pdf_url = ?, is_published = ?, published_at = COALESCE(?, published_at), updated_at = NOW() WHERE id = ?',
-      [title ?? '', content ?? '', excerpt ?? null, category ?? null, custom_category ?? null, image_url ?? null, youtube_url ?? null, source_name ?? null, source_url ?? null, pdf_url ?? null, is_published === true, publishedAtVal, id]
+      [title ?? '', content ?? '', excerpt ?? null, finalCategory, finalCustomCategory, image_url ?? null, youtube_url ?? null, source_name ?? null, source_url ?? null, pdf_url ?? null, is_published === true, publishedAtVal, id]
     );
     const newPdfUrl = pdf_url ?? null;
     if (oldPdfUrl && oldPdfUrl !== newPdfUrl) {
