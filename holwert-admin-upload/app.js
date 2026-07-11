@@ -17,7 +17,16 @@ const ORG_CATEGORIES = [
     { id: 'ondernemer', label: 'Ondernemer' },
     { id: 'horeca', label: 'Horeca' },
     { id: 'overig', label: 'Overig' },
-];
+].sort((a, b) => a.label.localeCompare(b.label, 'nl'));
+
+function populateOrgCategoryFilterSelect() {
+    const sel = document.getElementById('orgCategoryFilter');
+    if (!sel) return;
+    const current = sel.value;
+    sel.innerHTML = '<option value="">Alle categorieën</option>' +
+        ORG_CATEGORIES.map((c) => `<option value="${c.id}">${c.label}</option>`).join('');
+    if (current) sel.value = current;
+}
 
 function resolveOrgCategoryId(raw) {
     const s = (raw || '').trim();
@@ -72,6 +81,7 @@ class HolwertAdmin {
     }
 
     init() {
+        populateOrgCategoryFilterSelect();
         this.setupEventListeners();
         this.checkAuth();
     }

@@ -37,7 +37,17 @@
         { id: 'ondernemer', label: 'Ondernemer' },
         { id: 'horeca', label: 'Horeca' },
         { id: 'overig', label: 'Overig' },
-    ];
+    ].sort((a, b) => a.label.localeCompare(b.label, 'nl'));
+
+    function populateOrgRegistrationCategorySelect() {
+        const sel = document.getElementById('org_reg_category');
+        if (!sel) return;
+        const prev = sel.value;
+        sel.innerHTML = ORG_CATEGORIES.map((c) =>
+            `<option value="${c.id}">${c.label}</option>`
+        ).join('');
+        sel.value = prev && ORG_CATEGORIES.some((c) => c.id === prev) ? prev : 'vereniging';
+    }
 
     function resolveOrgCategoryId(raw) {
         const s = (raw || '').trim();
@@ -1729,6 +1739,8 @@
             container.innerHTML = '<p class="form-hint" style="padding:1rem;color:#c00">Kon statistieken niet laden.</p>';
         }
     }
+
+    populateOrgRegistrationCategorySelect();
 })();
 
 /**
