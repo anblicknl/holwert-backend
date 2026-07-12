@@ -7219,10 +7219,35 @@ app.use('*', (req, res) => {
 
 // ==================== PUSH NOTIFICATION HELPER FUNCTIONS ====================
 
+const PUSH_IMAGE_BASE = 'https://holwert.appenvloed.com';
+
+/** Publieke https-URL voor richContent.image; geen base64. Fallback = org-logo. */
+function pushRichImageUrl(primaryUrl, fallbackUrl) {
+  const normalize = (url) => {
+    if (url == null || url === '') return null;
+    const s = String(url).trim();
+    if (!s || s.startsWith('data:')) return null;
+    if (/^https:\/\/.+/i.test(s)) return s;
+    if (s.startsWith('//')) return `https:${s}`;
+    if (s.startsWith('/')) return `${PUSH_IMAGE_BASE}${s}`;
+    if (/^http:\/\/.+/i.test(s)) {
+      try {
+        const u = new URL(s);
+        u.protocol = 'https:';
+        return u.href;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  };
+  return normalize(primaryUrl) || normalize(fallbackUrl) || null;
+}
+
 /**
  * Send push notification via Expo Push API
  * @param {Array} pushTokens - Array of Expo push tokens
- * @param {Object} notification - Notification object { title, body, data }
+ * @param {Object} notification - Notification object { title, body, data, imageUrl? }
  * @returns {Promise<Object>} Result with success/failure info
  */
 async function sendPushNotification(pushTokens, notification) {
@@ -7236,17 +7261,25 @@ async function sendPushNotification(pushTokens, notification) {
       console.log('⚠️ No valid Expo push tokens to send to');
       return { success: false, message: 'No valid tokens' };
     }
+
+    const imageUrl = pushRichImageUrl(notification.imageUrl, null);
     
     // Prepare messages for Expo Push API
-    const messages = validTokens.map(token => ({
-      to: token,
-      sound: 'default',
-      title: notification.title,
-      body: notification.body,
-      data: notification.data || {},
-      priority: 'high',
-      channelId: 'default'
-    }));
+    const messages = validTokens.map(token => {
+      const msg = {
+        to: token,
+        sound: 'default',
+        title: notification.title,
+        body: notification.body,
+        data: notification.data || {},
+        priority: 'high',
+        channelId: 'default',
+      };
+      if (imageUrl) {
+        msg.richContent = { image: imageUrl };
+      }
+      return msg;
+    });
     
     const pushHeaders = {
       Accept: 'application/json',
@@ -7305,25 +7338,27 @@ async function sendPushNotification(pushTokens, notification) {
  */
 async function notifyFollowersOfNewsArticle(organizationId, newsId, title) {
   if (!organizationId || !newsId || !title) return;
-  const orgResult = await executeQuery(
-    'SELECT name FROM organizations WHERE id = ?',
-    [organizationId]
-  );
+  const [orgResult, newsResult] = await Promise.all([
+    executeQuery('SELECT name, logo_url FROM organizations WHERE id = ?', [organizationId]),
+    executeQuery('SELECT image_url FROM news WHERE id = ? LIMIT 1', [newsId]),
+  ]);
   if (!orgResult.rows.length) return;
   const orgName = orgResult.rows[0].name;
-  await sendNotificationToFollowers(
-    organizationId,
-    {
-      title: `📣 Nieuw bericht van ${orgName}`,
-      body: title,
-      data: {
-        type: 'news',
-        newsId: Number(newsId),
-        organizationId: Number(organizationId)
-      }
-    },
-    'news'
+  const imageUrl = pushRichImageUrl(
+    newsResult.rows?.[0]?.image_url,
+    orgResult.rows[0].logo_url
   );
+  const payload = {
+    title: `📣 ${orgName}`,
+    body: title,
+    data: {
+      type: 'news',
+      newsId: Number(newsId),
+      organizationId: Number(organizationId),
+    },
+  };
+  if (imageUrl) payload.imageUrl = imageUrl;
+  await sendNotificationToFollowers(organizationId, payload, 'news');
   console.log(`📢 Queued push notification for news article ${newsId}`);
 }
 
@@ -7332,28 +7367,31 @@ async function notifyFollowersOfNewsArticle(organizationId, newsId, title) {
  */
 async function notifyFollowersOfEvent(organizationId, eventId, title, eventDateRaw) {
   if (!organizationId || !eventId || !title) return;
-  const orgResult = await executeQuery(
-    'SELECT name FROM organizations WHERE id = ?',
-    [organizationId]
-  );
+  const [orgResult, eventResult] = await Promise.all([
+    executeQuery('SELECT name, logo_url FROM organizations WHERE id = ?', [organizationId]),
+    executeQuery('SELECT image_url, event_date FROM events WHERE id = ? LIMIT 1', [eventId]),
+  ]);
   if (!orgResult.rows.length) return;
   const orgName = orgResult.rows[0].name;
-  const eventDate = eventDateRaw
-    ? new Date(eventDateRaw).toLocaleDateString('nl-NL', { day: 'numeric', month: 'long' })
+  const dateSource = eventDateRaw ?? eventResult.rows?.[0]?.event_date;
+  const eventDate = dateSource
+    ? new Date(dateSource).toLocaleDateString('nl-NL', { day: 'numeric', month: 'long' })
     : '';
-  await sendNotificationToFollowers(
-    organizationId,
-    {
-      title: `📅 Nieuw evenement: ${title}`,
-      body: eventDate ? `${orgName} organiseert dit op ${eventDate}` : orgName,
-      data: {
-        type: 'event',
-        eventId: Number(eventId),
-        organizationId: Number(organizationId)
-      }
-    },
-    'agenda'
+  const imageUrl = pushRichImageUrl(
+    eventResult.rows?.[0]?.image_url,
+    orgResult.rows[0].logo_url
   );
+  const payload = {
+    title: `📅 ${orgName}`,
+    body: eventDate ? `${title} · ${eventDate}` : title,
+    data: {
+      type: 'event',
+      eventId: Number(eventId),
+      organizationId: Number(organizationId),
+    },
+  };
+  if (imageUrl) payload.imageUrl = imageUrl;
+  await sendNotificationToFollowers(organizationId, payload, 'agenda');
   console.log(`📢 Queued push notification for event ${eventId}`);
 }
 
