@@ -2186,14 +2186,25 @@ const DEFAULT_PUSH_PREFERENCES = {
   news: true,
   agenda: true,
   organizations: true,
-  weather: true,
+  practical: true,
 };
 
 function parseNotificationPreferences(raw) {
   if (!raw) return { ...DEFAULT_PUSH_PREFERENCES };
   try {
     const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-    return { ...DEFAULT_PUSH_PREFERENCES, ...parsed };
+    const practical =
+      parsed.practical !== undefined
+        ? !!parsed.practical
+        : parsed.weather !== undefined
+          ? !!parsed.weather
+          : true;
+    return {
+      news: parsed.news !== undefined ? !!parsed.news : true,
+      agenda: parsed.agenda !== undefined ? !!parsed.agenda : true,
+      organizations: parsed.organizations !== undefined ? !!parsed.organizations : true,
+      practical,
+    };
   } catch {
     return { ...DEFAULT_PUSH_PREFERENCES };
   }
@@ -2220,7 +2231,12 @@ function mergeNotificationPreferencesPayload(existingRaw, incoming) {
     agenda: incoming?.agenda !== undefined ? !!incoming.agenda : existing.agenda,
     organizations:
       incoming?.organizations !== undefined ? !!incoming.organizations : existing.organizations,
-    weather: incoming?.weather !== undefined ? !!incoming.weather : existing.weather,
+    practical:
+      incoming?.practical !== undefined
+        ? !!incoming.practical
+        : incoming?.weather !== undefined
+          ? !!incoming.weather
+          : existing.practical,
     muted_organization_ids: muted,
   };
 }
@@ -2452,6 +2468,25 @@ app.get('/api/push/muted-organizations', authenticateToken, async (req, res) => 
   } catch (error) {
     console.warn('Get muted organizations error (returning empty list):', error?.message || error);
     return res.json({ muted_organization_ids: [] });
+  }
+});
+
+// Cron: herinnering 18:00 (Europe/Amsterdam) dag vóór oud papier / containers
+app.get('/api/cron/afval-reminders', async (req, res) => {
+  try {
+    const cronSecret = process.env.CRON_SECRET;
+    if (cronSecret) {
+      const auth = req.headers.authorization || '';
+      if (auth !== `Bearer ${cronSecret}`) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+    }
+    const force = req.query.force === '1';
+    const result = await runAfvalReminderJob({ force });
+    res.json(result);
+  } catch (error) {
+    console.error('Afval reminder cron error:', error);
+    res.status(500).json({ error: 'Cron failed', message: error.message });
   }
 });
 
@@ -6483,6 +6518,157 @@ function isTodayContainer(config) {
   return next.some((x) => x.date === today);
 }
 
+function amsterdamTodayStr() {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Amsterdam' }).format(new Date());
+}
+
+function amsterdamTomorrowStr() {
+  const today = amsterdamTodayStr();
+  const [y, m, d] = today.split('-').map(Number);
+  const dt = new Date(y, m - 1, d + 1);
+  const yy = dt.getFullYear();
+  const mm = String(dt.getMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
+
+function amsterdamHour() {
+  return parseInt(
+    new Intl.DateTimeFormat('nl-NL', {
+      timeZone: 'Europe/Amsterdam',
+      hour: 'numeric',
+      hour12: false,
+    }).format(new Date()),
+    10
+  );
+}
+
+function isOudPapierOnDate(config, dateStr) {
+  return computeNextOudPapierDates(config, 40).some((x) => x.date === dateStr);
+}
+
+function getContainerOnDate(config, dateStr) {
+  return computeNextContainerDates(config, 40).find((x) => x.date === dateStr) || null;
+}
+
+function containerLabelNl(label) {
+  if (label === 'groen') return 'groene container';
+  if (label === 'grijs') return 'grijze container';
+  if (label === 'extra') return 'extra container';
+  return 'containers';
+}
+
+async function loadAfvalkalenderConfig() {
+  const row = await executeQuery(
+    'SELECT config_json FROM afvalkalender_config WHERE id = 1 LIMIT 1'
+  ).then((r) => r.rows && r.rows[0]);
+  let config = row && row.config_json;
+  if (typeof config === 'string') {
+    try {
+      config = JSON.parse(config);
+    } catch {
+      config = null;
+    }
+  }
+  return config || getDefaultAfvalkalenderConfig();
+}
+
+function buildTomorrowAfvalReminder(config) {
+  const tomorrowStr = amsterdamTomorrowStr();
+  const hasOud = isOudPapierOnDate(config, tomorrowStr);
+  const container = getContainerOnDate(config, tomorrowStr);
+  if (!hasOud && !container) return null;
+
+  const parts = [];
+  if (hasOud) parts.push('oud papier');
+  if (container) parts.push(containerLabelNl(container.label));
+
+  const subject = parts.join(' en ');
+  return {
+    title: `Morgen ${subject}`,
+    body: 'Zet het op tijd klaar aan de straat.',
+    data: { type: 'practical', screen: 'praktisch' },
+  };
+}
+
+async function alreadySentPracticalReminderToday(title) {
+  try {
+    const result = await executeQuery(
+      `SELECT id FROM notification_history
+       WHERE notification_type = 'practical' AND title = ?
+       AND sent_at >= DATE_SUB(NOW(), INTERVAL 36 HOUR)
+       LIMIT 1`,
+      [title]
+    );
+    return (result.rows || []).length > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function sendPracticalReminderToSubscribers(notification) {
+  const result = await executeQuery(
+    `SELECT pt.id, pt.user_id, pt.token, pt.notification_preferences
+     FROM push_tokens pt
+     WHERE pt.is_active = true`
+  );
+  const rows = (result.rows || []).filter((row) => {
+    const prefs = parseNotificationPreferences(row.notification_preferences);
+    return prefs.practical !== false;
+  });
+  if (!rows.length) {
+    console.log('⚠️ Geen tokens met Praktisch-meldingen aan');
+    return { success: true, sent: 0 };
+  }
+  const tokens = rows.map((row) => row.token);
+  const sendResult = await sendPushNotification(tokens, notification);
+  if (sendResult.success) {
+    for (const row of rows) {
+      try {
+        await executeQuery(
+          `INSERT INTO notification_history
+           (user_id, push_token_id, notification_type, title, body, data, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [
+            row.user_id,
+            row.id,
+            'practical',
+            notification.title,
+            notification.body,
+            JSON.stringify(notification.data || {}),
+            'sent',
+          ]
+        );
+      } catch {
+        /* history optioneel */
+      }
+    }
+  }
+  return sendResult;
+}
+
+async function runAfvalReminderJob(options = {}) {
+  const force = !!options.force;
+  if (!force && amsterdamHour() !== 18) {
+    return { skipped: true, reason: 'not_18_amsterdam', hour: amsterdamHour() };
+  }
+  const config = await loadAfvalkalenderConfig();
+  const notification = buildTomorrowAfvalReminder(config);
+  if (!notification) {
+    return { skipped: true, reason: 'nothing_tomorrow' };
+  }
+  if (!force && (await alreadySentPracticalReminderToday(notification.title))) {
+    return { skipped: true, reason: 'already_sent', title: notification.title };
+  }
+  const sendResult = await sendPracticalReminderToSubscribers(notification);
+  return {
+    skipped: false,
+    title: notification.title,
+    sent: sendResult.sent ?? 0,
+    success: sendResult.success !== false,
+  };
+}
+
 app.get('/api/app/afvalkalender', async (req, res) => {
   try {
     const row = await executeQuery('SELECT config_json FROM afvalkalender_config WHERE id = 1 LIMIT 1').then((r) => r.rows && r.rows[0]);
@@ -7257,7 +7443,7 @@ app.post('/api/setup-mysql-database', async (req, res) => {
           token VARCHAR(255) UNIQUE NOT NULL,
           device_type VARCHAR(50),
           device_name VARCHAR(255),
-          notification_preferences JSON DEFAULT ('{"news":true,"agenda":true,"organizations":true,"weather":true}'),
+          notification_preferences JSON DEFAULT ('{"news":true,"agenda":true,"organizations":true,"practical":true}'),
           is_active BOOLEAN DEFAULT true,
           last_used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -7788,7 +7974,7 @@ async function initializePushNotificationsTables() {
           "news": true,
           "agenda": true,
           "organizations": true,
-          "weather": true
+          "practical": true
         }'),
         is_active BOOLEAN DEFAULT true,
         last_used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

@@ -1,19 +1,8 @@
 {
-  "version": 2,
-  "rewrites": [
+  "crons": [
     {
-      "source": "/(.*)",
-      "destination": "/server.js"
+      "path": "/api/cron/afval-reminders",
+      "schedule": "0 * * * *"
     }
-  ],
-  "functions": {
-    "server.js": {
-      "maxDuration": 30,
-      "memory": 1024
-    }
-  }
+  ]
 }
-
-
-
-
