@@ -5114,12 +5114,31 @@ app.put('/api/admin/events/:id', authenticateToken, requireAdmin, async (req, re
 app.post('/api/admin/events/:id/publish', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
+    const prevResult = await executeQuery(
+      'SELECT title, organization_id, event_date, status, is_published FROM events WHERE id = ? LIMIT 1',
+      [id]
+    );
+    if (!prevResult.rows?.length) {
+      return res.status(404).json({ error: 'Evenement niet gevonden' });
+    }
+    const prevEvent = prevResult.rows[0];
+    const wasPublished = !!prevEvent.is_published;
+
     const upd = await executeQuery(
       'UPDATE events SET is_published = true, updated_at = NOW() WHERE id = ?',
       [id],
     );
     if (!upd.rowCount) {
       return res.status(404).json({ error: 'Evenement niet gevonden' });
+    }
+    const eventStatus = prevEvent.status || 'scheduled';
+    if (!wasPublished && eventStatus === 'scheduled' && prevEvent.organization_id) {
+      notifyFollowersOfEvent(
+        prevEvent.organization_id,
+        id,
+        prevEvent.title,
+        prevEvent.event_date
+      ).catch(err => console.error('Push notification error:', err));
     }
     invalidateCache('/api/admin/moderation/count');
     invalidateCache('/api/admin/dashboard');
@@ -6045,7 +6064,7 @@ app.post('/api/org/events', authenticateToken, requireOrgPortal, async (req, res
     }
     const id = result.insertId || (result.rows && result.rows[0] && result.rows[0].id);
     const finalStatus = status || 'scheduled';
-    if (publishFlag === 1 && finalStatus === 'scheduled' && id && title) {
+    if (finalStatus === 'scheduled' && orgId && id && title) {
       notifyFollowersOfEvent(orgId, id, title, event_date).catch(err =>
         console.error('Push notification error:', err)
       );
@@ -7295,7 +7314,7 @@ async function notifyFollowersOfNewsArticle(organizationId, newsId, title) {
   await sendNotificationToFollowers(
     organizationId,
     {
-      title: `📢 Nieuw bericht van ${orgName}`,
+      title: `📣 Nieuw bericht van ${orgName}`,
       body: title,
       data: {
         type: 'news',
