@@ -7295,7 +7295,7 @@ async function notifyFollowersOfNewsArticle(organizationId, newsId, title) {
   await sendNotificationToFollowers(
     organizationId,
     {
-      title: `Nieuw bericht van ${orgName}`,
+      title: `📢 Nieuw bericht van ${orgName}`,
       body: title,
       data: {
         type: 'news',
@@ -7325,7 +7325,7 @@ async function notifyFollowersOfEvent(organizationId, eventId, title, eventDateR
   await sendNotificationToFollowers(
     organizationId,
     {
-      title: `Nieuw evenement: ${title}`,
+      title: `📅 Nieuw evenement: ${title}`,
       body: eventDate ? `${orgName} organiseert dit op ${eventDate}` : orgName,
       data: {
         type: 'event',
