@@ -2106,11 +2106,17 @@ app.post('/api/push/token', authenticateToken, async (req, res) => {
     
     // Check if token already exists
     const existingToken = await executeQuery(
-      'SELECT id FROM push_tokens WHERE token = ?',
+      'SELECT id, notification_preferences FROM push_tokens WHERE token = ?',
       [token]
     );
     
     if (existingToken.rows.length > 0) {
+      const mergedPrefs = notification_preferences
+        ? mergeNotificationPreferencesPayload(
+            existingToken.rows[0].notification_preferences,
+            notification_preferences
+          )
+        : null;
       // Update existing token
       await executeQuery(
         `UPDATE push_tokens 
@@ -2122,7 +2128,7 @@ app.post('/api/push/token', authenticateToken, async (req, res) => {
              last_used_at = CURRENT_TIMESTAMP,
              updated_at = CURRENT_TIMESTAMP
          WHERE token = ?`,
-        [userId, device_type, device_name, notification_preferences ? JSON.stringify(notification_preferences) : null, token]
+        [userId, device_type, device_name, mergedPrefs ? JSON.stringify(mergedPrefs) : null, token]
       );
       
       console.log(`✅ Updated push token for user ${userId}`);
@@ -2153,13 +2159,21 @@ app.put('/api/push/preferences', authenticateToken, async (req, res) => {
     if (!notification_preferences) {
       return res.status(400).json({ error: 'Notification preferences are required' });
     }
-    
-    await executeQuery(
-      `UPDATE push_tokens 
-       SET notification_preferences = ?, updated_at = CURRENT_TIMESTAMP
-       WHERE user_id = ?`,
-      [JSON.stringify(notification_preferences), userId]
+
+    const tokenRows = await executeQuery(
+      'SELECT id, notification_preferences FROM push_tokens WHERE user_id = ?',
+      [userId]
     );
+    for (const row of tokenRows.rows || []) {
+      const merged = mergeNotificationPreferencesPayload(
+        row.notification_preferences,
+        notification_preferences
+      );
+      await executeQuery(
+        'UPDATE push_tokens SET notification_preferences = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        [JSON.stringify(merged), row.id]
+      );
+    }
     
     res.json({ success: true, message: 'Notification preferences updated' });
   } catch (error) {
@@ -2183,6 +2197,105 @@ function parseNotificationPreferences(raw) {
   } catch {
     return { ...DEFAULT_PUSH_PREFERENCES };
   }
+}
+
+function extractMutedOrganizationIds(raw) {
+  if (!raw) return [];
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!Array.isArray(parsed.muted_organization_ids)) return [];
+    return parsed.muted_organization_ids
+      .map((id) => parseInt(id, 10))
+      .filter((id) => Number.isFinite(id) && id > 0);
+  } catch {
+    return [];
+  }
+}
+
+function mergeNotificationPreferencesPayload(existingRaw, incoming) {
+  const existing = parseNotificationPreferences(existingRaw);
+  const muted = extractMutedOrganizationIds(existingRaw);
+  return {
+    news: incoming?.news !== undefined ? !!incoming.news : existing.news,
+    agenda: incoming?.agenda !== undefined ? !!incoming.agenda : existing.agenda,
+    organizations:
+      incoming?.organizations !== undefined ? !!incoming.organizations : existing.organizations,
+    weather: incoming?.weather !== undefined ? !!incoming.weather : existing.weather,
+    muted_organization_ids: muted,
+  };
+}
+
+async function syncMutedOrgOnUserPushTokens(userId, organizationId, muted) {
+  const orgIdNum = parseInt(organizationId, 10);
+  if (!Number.isFinite(orgIdNum)) return;
+  const rows = await executeQuery(
+    'SELECT id, notification_preferences FROM push_tokens WHERE user_id = ?',
+    [userId]
+  );
+  for (const row of rows.rows || []) {
+    const mutedIds = new Set(extractMutedOrganizationIds(row.notification_preferences));
+    if (muted) mutedIds.add(orgIdNum);
+    else mutedIds.delete(orgIdNum);
+    const merged = {
+      ...parseNotificationPreferences(row.notification_preferences),
+      muted_organization_ids: [...mutedIds],
+    };
+    await executeQuery(
+      'UPDATE push_tokens SET notification_preferences = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [JSON.stringify(merged), row.id]
+    );
+  }
+}
+
+async function getMutedOrganizationIdsForUser(userId) {
+  const ids = new Set();
+  try {
+    const result = await executeQuery(
+      'SELECT organization_id FROM push_notification_mutes WHERE user_id = ?',
+      [userId]
+    );
+    (result.rows || []).forEach((row) => {
+      const id = parseInt(row.organization_id, 10);
+      if (Number.isFinite(id)) ids.add(id);
+    });
+  } catch (error) {
+    if (!isPushMutesTableDisallowed(error)) throw error;
+  }
+  const tokenRows = await executeQuery(
+    'SELECT notification_preferences FROM push_tokens WHERE user_id = ?',
+    [userId]
+  );
+  for (const row of tokenRows.rows || []) {
+    extractMutedOrganizationIds(row.notification_preferences).forEach((id) => ids.add(id));
+  }
+  return [...ids];
+}
+
+async function getMutedUserIdsForOrganization(organizationId, userIds) {
+  const muted = new Set();
+  if (!userIds.length) return muted;
+  const orgIdNum = parseInt(organizationId, 10);
+  try {
+    const placeholders = userIds.map(() => '?').join(',');
+    const mutedResult = await executeQuery(
+      `SELECT user_id FROM push_notification_mutes WHERE organization_id = ? AND user_id IN (${placeholders})`,
+      [orgIdNum, ...userIds]
+    );
+    (mutedResult.rows || []).forEach((row) => muted.add(row.user_id));
+  } catch (error) {
+    if (!isPushMutesTableDisallowed(error)) throw error;
+  }
+  const placeholders = userIds.map(() => '?').join(',');
+  const tokenRows = await executeQuery(
+    `SELECT user_id, notification_preferences FROM push_tokens WHERE user_id IN (${placeholders})`,
+    userIds
+  );
+  for (const row of tokenRows.rows || []) {
+    if (extractMutedOrganizationIds(row.notification_preferences).includes(orgIdNum)) {
+      muted.add(row.user_id);
+    }
+  }
+  return muted;
 }
 
 // Get notification preferences for current user (from most recently updated active token)
@@ -2291,16 +2404,18 @@ app.post('/api/push/mute-organization', authenticateToken, async (req, res) => {
     if (!organization_id) {
       return res.status(400).json({ error: 'organization_id is required' });
     }
-    await executeQuery(
-      'INSERT IGNORE INTO push_notification_mutes (user_id, organization_id) VALUES (?, ?)',
-      [userId, organization_id]
-    );
+    await syncMutedOrgOnUserPushTokens(userId, organization_id, true);
+    try {
+      await executeQuery(
+        'INSERT IGNORE INTO push_notification_mutes (user_id, organization_id) VALUES (?, ?)',
+        [userId, organization_id]
+      );
+    } catch (error) {
+      if (!isPushMutesTableDisallowed(error)) throw error;
+      console.warn('Push mute: push_notification_mutes niet beschikbaar – mute opgeslagen in push_tokens');
+    }
     res.json({ success: true, muted: true });
   } catch (error) {
-    if (isPushMutesTableDisallowed(error)) {
-      console.warn('Push mute: tabel push_notification_mutes niet toegestaan in proxy – voeg toe aan whitelist (zie docs/DB_PROXY_PUSH_MUTES.md)');
-      return res.json({ success: true, muted: true }); // voorkom 500 in app
-    }
     console.error('Mute organization error:', error);
     res.status(500).json({ error: 'Failed to mute organization', message: error.message });
   }
@@ -2311,16 +2426,18 @@ app.delete('/api/push/mute-organization/:organizationId', authenticateToken, asy
   try {
     const userId = req.user.userId;
     const organizationId = req.params.organizationId;
-    await executeQuery(
-      'DELETE FROM push_notification_mutes WHERE user_id = ? AND organization_id = ?',
-      [userId, organizationId]
-    );
+    await syncMutedOrgOnUserPushTokens(userId, organizationId, false);
+    try {
+      await executeQuery(
+        'DELETE FROM push_notification_mutes WHERE user_id = ? AND organization_id = ?',
+        [userId, organizationId]
+      );
+    } catch (error) {
+      if (!isPushMutesTableDisallowed(error)) throw error;
+      console.warn('Push unmute: push_notification_mutes niet beschikbaar – unmute via push_tokens');
+    }
     res.json({ success: true, muted: false });
   } catch (error) {
-    if (isPushMutesTableDisallowed(error)) {
-      console.warn('Push unmute: tabel push_notification_mutes niet toegestaan in proxy');
-      return res.json({ success: true, muted: false });
-    }
     console.error('Unmute organization error:', error);
     res.status(500).json({ error: 'Failed to unmute organization', message: error.message });
   }
@@ -2330,19 +2447,10 @@ app.delete('/api/push/mute-organization/:organizationId', authenticateToken, asy
 app.get('/api/push/muted-organizations', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.userId;
-    const result = await executeQuery(
-      'SELECT organization_id FROM push_notification_mutes WHERE user_id = ?',
-      [userId]
-    );
-    const ids = (result.rows || []).map(r => r.organization_id);
+    const ids = await getMutedOrganizationIdsForUser(userId);
     res.json({ muted_organization_ids: ids });
   } catch (error) {
-    if (isPushMutesTableDisallowed(error)) {
-      console.warn('Push muted-organizations: tabel push_notification_mutes niet toegestaan in proxy – voeg toe aan whitelist (zie docs/DB_PROXY_PUSH_MUTES.md)');
-    } else {
-      console.warn('Get muted organizations error (returning empty list):', error?.message || error);
-    }
-    // Altijd 200 + lege lijst bij fout, zodat organisatiepagina gewoon werkt
+    console.warn('Get muted organizations error (returning empty list):', error?.message || error);
     return res.json({ muted_organization_ids: [] });
   }
 });
@@ -7478,22 +7586,13 @@ async function sendNotificationToFollowers(organizationId, notification, notific
     
     let userIds = followersResult.rows.map(row => row.user_id);
     try {
-      const placeholdersMute = userIds.map(() => '?').join(',');
-      const mutedResult = await executeQuery(
-        `SELECT user_id FROM push_notification_mutes WHERE organization_id = ? AND user_id IN (${placeholdersMute})`,
-        [organizationId, ...userIds]
-      );
-      const mutedSet = new Set((mutedResult.rows || []).map(r => r.user_id));
-      userIds = userIds.filter(id => !mutedSet.has(id));
+      const mutedSet = await getMutedUserIdsForOrganization(organizationId, userIds);
       if (mutedSet.size) {
+        userIds = userIds.filter((id) => !mutedSet.has(id));
         console.log(`📢 Excluding ${mutedSet.size} user(s) who muted org ${organizationId}`);
       }
     } catch (muteErr) {
-      if (isPushMutesTableDisallowed(muteErr)) {
-        console.warn('Push followers: mute-tabel niet beschikbaar – stuur naar alle volgers (zie docs/DB_PROXY_PUSH_MUTES.md)');
-      } else {
-        throw muteErr;
-      }
+      console.warn('Push followers: kon mutes niet ophalen – stuur naar alle volgers:', muteErr.message);
     }
     if (userIds.length === 0) {
       console.log(`⚠️ No users to notify after applying mutes for organization ${organizationId}`);
