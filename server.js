@@ -5049,41 +5049,9 @@ app.post('/api/admin/events', authenticateToken, requireAdmin, async (req, res) 
     
     // Send push notification if event is scheduled and has organization
     if (status === 'scheduled' && organization_id) {
-      try {
-        // Get organization name
-        const orgResult = await executeQuery(
-          'SELECT name FROM organizations WHERE id = $1',
-          [organization_id]
-        );
-        
-        if (orgResult.rows.length > 0) {
-          const orgName = orgResult.rows[0].name;
-          const eventDate = new Date(event_date).toLocaleDateString('nl-NL', { 
-            day: 'numeric', 
-            month: 'long' 
-          });
-          
-          // Send notification to followers (async, don't wait)
-          sendNotificationToFollowers(
-            organization_id,
-            {
-              title: `📅 Nieuw evenement: ${title}`,
-              body: `${orgName} organiseert dit op ${eventDate}`,
-              data: {
-                type: 'event',
-                eventId: newEvent.id,
-                organizationId: organization_id
-              }
-            },
-            'agenda'
-          ).catch(err => console.error('Push notification error:', err));
-          
-          console.log(`📢 Queued push notification for event ${newEvent.id}`);
-        }
-      } catch (notifError) {
-        console.error('Error preparing push notification:', notifError);
-        // Don't fail the request if notification fails
-      }
+      notifyFollowersOfEvent(organization_id, newEvent.id, title, event_date).catch(err =>
+        console.error('Push notification error:', err)
+      );
     }
     
     res.status(201).json({ event: newEvent });
@@ -6076,6 +6044,12 @@ app.post('/api/org/events', authenticateToken, requireOrgPortal, async (req, res
       }
     }
     const id = result.insertId || (result.rows && result.rows[0] && result.rows[0].id);
+    const finalStatus = status || 'scheduled';
+    if (publishFlag === 1 && finalStatus === 'scheduled' && id && title) {
+      notifyFollowersOfEvent(orgId, id, title, event_date).catch(err =>
+        console.error('Push notification error:', err)
+      );
+    }
     const row = await executeQuery('SELECT id, title, event_date, organization_id, created_at FROM events WHERE id = ?', [id]);
     res.status(201).json({ event: row.rows[0] });
   } catch (error) {
@@ -7332,6 +7306,36 @@ async function notifyFollowersOfNewsArticle(organizationId, newsId, title) {
     'news'
   );
   console.log(`📢 Queued push notification for news article ${newsId}`);
+}
+
+/**
+ * Stuur push naar volgers wanneer een evenement (nieuw) gepubliceerd is.
+ */
+async function notifyFollowersOfEvent(organizationId, eventId, title, eventDateRaw) {
+  if (!organizationId || !eventId || !title) return;
+  const orgResult = await executeQuery(
+    'SELECT name FROM organizations WHERE id = ?',
+    [organizationId]
+  );
+  if (!orgResult.rows.length) return;
+  const orgName = orgResult.rows[0].name;
+  const eventDate = eventDateRaw
+    ? new Date(eventDateRaw).toLocaleDateString('nl-NL', { day: 'numeric', month: 'long' })
+    : '';
+  await sendNotificationToFollowers(
+    organizationId,
+    {
+      title: `Nieuw evenement: ${title}`,
+      body: eventDate ? `${orgName} organiseert dit op ${eventDate}` : orgName,
+      data: {
+        type: 'event',
+        eventId: Number(eventId),
+        organizationId: Number(organizationId)
+      }
+    },
+    'agenda'
+  );
+  console.log(`📢 Queued push notification for event ${eventId}`);
 }
 
 /**
