@@ -2157,6 +2157,56 @@ app.put('/api/push/preferences', authenticateToken, async (req, res) => {
   }
 });
 
+const DEFAULT_PUSH_PREFERENCES = {
+  news: true,
+  agenda: true,
+  organizations: true,
+  weather: true,
+};
+
+function parseNotificationPreferences(raw) {
+  if (!raw) return { ...DEFAULT_PUSH_PREFERENCES };
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    return { ...DEFAULT_PUSH_PREFERENCES, ...parsed };
+  } catch {
+    return { ...DEFAULT_PUSH_PREFERENCES };
+  }
+}
+
+// Get notification preferences for current user (from most recently updated active token)
+app.get('/api/push/preferences', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const result = await executeQuery(
+      `SELECT notification_preferences, is_active
+       FROM push_tokens
+       WHERE user_id = ?
+       ORDER BY is_active DESC, updated_at DESC
+       LIMIT 1`,
+      [userId]
+    );
+
+    if (!result.rows.length) {
+      return res.json({
+        notification_preferences: { ...DEFAULT_PUSH_PREFERENCES },
+        has_token: false,
+        is_active: false,
+      });
+    }
+
+    const row = result.rows[0];
+    res.json({
+      notification_preferences: parseNotificationPreferences(row.notification_preferences),
+      has_token: true,
+      is_active: !!row.is_active,
+    });
+  } catch (error) {
+    console.error('Get notification preferences error:', error);
+    res.status(500).json({ error: 'Failed to get preferences', message: error.message });
+  }
+});
+
 // Delete push token (unregister device)
 app.delete('/api/push/token/:token', authenticateToken, async (req, res) => {
   try {
@@ -2195,6 +2245,24 @@ app.post('/api/push/deactivate', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Deactivate push tokens error:', error);
     res.status(500).json({ error: 'Failed to deactivate push tokens', message: error.message });
+  }
+});
+
+// Reactivate all push tokens for current user (bijv. na hoofdschakelaar weer aan)
+app.post('/api/push/reactivate', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    await executeQuery(
+      'UPDATE push_tokens SET is_active = true, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?',
+      [userId]
+    );
+
+    console.log(`✅ Reactivated push tokens for user ${userId}`);
+    res.json({ success: true, message: 'Push tokens reactivated' });
+  } catch (error) {
+    console.error('Reactivate push tokens error:', error);
+    res.status(500).json({ error: 'Failed to reactivate push tokens', message: error.message });
   }
 });
 
