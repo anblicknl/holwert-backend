@@ -1433,7 +1433,8 @@ app.get('/api/app/bootstrap', async (req, res) => {
         COALESCE(n.excerpt, LEFT(COALESCE(n.content, ''), 2000)) as excerpt,
         n.image_url, n.youtube_url, n.source_name, n.source_url, n.pdf_url, n.created_at, n.updated_at,
         COALESCE(n.published_at, n.created_at) as published_at,
-        n.organization_id, o.name as organization_name, o.logo_url as organization_logo,
+        n.organization_id, n.category, n.custom_category,
+        o.name as organization_name, o.logo_url as organization_logo,
         o.brand_color as organization_brand_color
         ${userId ? ', CASE WHEN b.user_id IS NOT NULL THEN true ELSE false END as is_bookmarked' : ', false as is_bookmarked'}
       FROM news n
