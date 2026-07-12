@@ -6001,7 +6001,7 @@ app.post('/api/org/events', authenticateToken, requireOrgPortal, async (req, res
         orgCheck.rows[0].is_approved === true);
     const publishFlag = approved ? 1 : 0;
 
-    const insertParams = [
+    const baseInsertParams = [
       title || '',
       description || null,
       eventDateSql,
@@ -6012,40 +6012,61 @@ app.post('/api/org/events', authenticateToken, requireOrgPortal, async (req, res
       organizerId,
       priceVal,
       imageUrlSafe,
-      pdfUrlSafe,
-      ticketUrlSafe,
-      ticketLabelSafe,
     ];
     let result;
     try {
       result = await executeInsert(
         `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, pdf_url, ticket_url, ticket_label, is_published, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-        [...insertParams, publishFlag]
+        [...baseInsertParams, pdfUrlSafe, ticketUrlSafe, ticketLabelSafe, publishFlag]
       );
     } catch (insErr) {
       if (isMysqlMissingColumnError(insErr)) {
-        result = await executeInsert(
-          `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-          insertParams.slice(0, -1)
-        );
-      } else if (isMysqlDataTooLongError(insErr)) {
-        const insertNoImg = [...insertParams];
-        insertNoImg[9] = null;
         try {
           result = await executeInsert(
             `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, pdf_url, is_published, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-            [...insertNoImg, publishFlag]
+            [...baseInsertParams, pdfUrlSafe, publishFlag]
           );
         } catch (e2) {
           if (isMysqlMissingColumnError(e2)) {
             result = await executeInsert(
               `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-              insertNoImg.slice(0, -1)
+              baseInsertParams
             );
+          } else {
+            throw e2;
+          }
+        }
+      } else if (isMysqlDataTooLongError(insErr)) {
+        const baseNoImg = [...baseInsertParams];
+        baseNoImg[9] = null;
+        try {
+          result = await executeInsert(
+            `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, pdf_url, ticket_url, ticket_label, is_published, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+            [...baseNoImg, pdfUrlSafe, ticketUrlSafe, ticketLabelSafe, publishFlag]
+          );
+        } catch (e2) {
+          if (isMysqlMissingColumnError(e2)) {
+            try {
+              result = await executeInsert(
+                `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, pdf_url, is_published, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+                [...baseNoImg, pdfUrlSafe, publishFlag]
+              );
+            } catch (e3) {
+              if (isMysqlMissingColumnError(e3)) {
+                result = await executeInsert(
+                  `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+                  baseNoImg
+                );
+              } else {
+                throw e3;
+              }
+            }
           } else {
             throw e2;
           }
@@ -7300,7 +7321,7 @@ async function notifyFollowersOfNewsArticle(organizationId, newsId, title) {
   await sendNotificationToFollowers(
     organizationId,
     {
-      title: `📰 Nieuw bericht van ${orgName}`,
+      title: `Nieuw bericht van ${orgName}`,
       body: title,
       data: {
         type: 'news',
