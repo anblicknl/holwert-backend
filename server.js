@@ -85,6 +85,16 @@ function invalidateCache(pattern) {
   }
 }
 
+function invalidatePublicNewsCaches(newsId) {
+  invalidateCache('/api/news');
+  invalidateCache('/api/news/head');
+  invalidateCache('/api/app/bootstrap');
+  invalidateCache('/api/featured');
+  if (newsId != null) {
+    invalidateCache(`/api/news/${newsId}`);
+  }
+}
+
 // Cleanup old cache entries every minute
 setInterval(() => {
   const now = Date.now();
@@ -5837,6 +5847,13 @@ app.post('/api/org/news', authenticateToken, requireOrgPortal, async (req, res) 
       [title || '', content || '', excerpt || null, userId, orgId, image_url || null, youtube_url || null, source_name || null, source_url || null, pdf_url || null, finalCategory, finalCustomCategory, is_published === true]
     );
     const id = result.insertId || (result.rows && result.rows[0] && result.rows[0].id);
+    const isPublished = is_published === true;
+    if (isPublished && orgId && id) {
+      notifyFollowersOfNewsArticle(orgId, id, title || '').catch(err =>
+        console.error('Push notification error:', err)
+      );
+    }
+    invalidatePublicNewsCaches(id);
     const row = await executeQuery('SELECT id, title, excerpt, is_published, organization_id, created_at FROM news WHERE id = ?', [id]);
     res.status(201).json({ article: row.rows[0] });
   } catch (error) {
@@ -5851,8 +5868,9 @@ app.put('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req, re
     const orgId = req.organizationId;
     const id = parseInt(req.params.id);
     const { title, content, excerpt, category, custom_category, image_url, youtube_url, source_name, source_url, pdf_url, is_published, published_at } = req.body || {};
-    const existing = await executeQuery('SELECT id, pdf_url FROM news WHERE id = ? AND organization_id = ?', [id, orgId]);
+    const existing = await executeQuery('SELECT id, pdf_url, is_published FROM news WHERE id = ? AND organization_id = ?', [id, orgId]);
     if (!existing.rows?.length) return res.status(404).json({ error: 'Artikel niet gevonden' });
+    const wasPublished = !!existing.rows[0].is_published;
     const oldPdfUrl = existing.rows[0].pdf_url || null;
     const publishedAtSql = published_at ? toMysqlDateTime(published_at) : null;
     const publishedAtVal = publishedAtSql || null;
@@ -5867,6 +5885,13 @@ app.put('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req, re
       cleanupHostedPdfIfUnreferenced(oldPdfUrl).catch(() => {});
     }
     const row = await executeQuery('SELECT id, title, excerpt, is_published, COALESCE(published_at, created_at) as published_at, updated_at FROM news WHERE id = ?', [id]);
+    const nowPublished = is_published === true;
+    if (!wasPublished && nowPublished && orgId) {
+      notifyFollowersOfNewsArticle(orgId, id, title ?? row.rows[0]?.title ?? '').catch(err =>
+        console.error('Push notification error:', err)
+      );
+    }
+    invalidatePublicNewsCaches(id);
     res.json({ article: row.rows[0] });
   } catch (error) {
     console.error('PUT /api/org/news/:id error:', error);
@@ -5888,6 +5913,7 @@ app.delete('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req,
     if (oldPdfUrl) {
       cleanupHostedPdfIfUnreferenced(oldPdfUrl).catch(() => {});
     }
+    invalidatePublicNewsCaches(id);
     res.json({ success: true });
   } catch (error) {
     console.error('DELETE /api/org/news/:id error:', error);

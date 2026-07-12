@@ -767,7 +767,10 @@
         const container = document.getElementById('newsList');
         if (!container) return;
         try {
-            const res = await fetch(`${apiBase}/org/news?limit=50`, { headers: authHeaders() });
+            const res = await fetch(`${apiBase}/org/news?limit=50&_=${Date.now()}`, {
+                headers: authHeaders(),
+                cache: 'no-store',
+            });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || 'Laden mislukt');
             const list = data.news || [];
@@ -813,7 +816,8 @@
             const r = await fetch(`${apiBase}/org/news/${newsId}`, { method: 'DELETE', headers: authHeaders() });
             const j = await r.json().catch(() => ({}));
             if (!r.ok) { alert(j.message || j.error || 'Verwijderen mislukt'); return; }
-            loadNews();
+            document.querySelector(`[data-delete-news="${newsId}"]`)?.closest('tr')?.remove();
+            await loadNews();
         } catch (err) {
             alert(err.message || 'Verwijderen mislukt');
         }
