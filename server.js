@@ -2721,37 +2721,9 @@ app.post('/api/news', authenticateToken, async (req, res) => {
     
     // Send push notification if published and has organization
     if (isPublished && organization_id) {
-      try {
-        // Get organization name
-        const orgResult = await executeQuery(
-          'SELECT name FROM organizations WHERE id = ?',
-          [organization_id]
-        );
-        
-        if (orgResult.rows.length > 0) {
-          const orgName = orgResult.rows[0].name;
-          
-          // Send notification to followers (async, don't wait)
-          sendNotificationToFollowers(
-            organization_id,
-            {
-              title: `📰 Nieuw bericht van ${orgName}`,
-              body: title,
-              data: {
-                type: 'news',
-                newsId: newArticle.id,
-                organizationId: organization_id
-              }
-            },
-            'news'
-          ).catch(err => console.error('Push notification error:', err));
-          
-          console.log(`📢 Queued push notification for news article ${newArticle.id}`);
-        }
-      } catch (notifError) {
-        console.error('Error preparing push notification:', notifError);
-        // Don't fail the request if notification fails
-      }
+      notifyFollowersOfNewsArticle(organization_id, newArticle.id, title).catch(err =>
+        console.error('Push notification error:', err)
+      );
     }
 
     // Invalidate cache for news endpoints
@@ -3791,8 +3763,12 @@ app.put('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res)
     const { id } = req.params;
     const { title, content, excerpt, category, custom_category, organization_id, image_url, youtube_url, source_name, source_url, pdf_url, image_data, is_published, published_at } = req.body;
 
-    const prevNews = await executeQuery('SELECT pdf_url FROM news WHERE id = ? LIMIT 1', [id]);
+    const prevNews = await executeQuery(
+      'SELECT pdf_url, is_published, organization_id FROM news WHERE id = ? LIMIT 1',
+      [id]
+    );
     const oldPdfUrl = prevNews.rows?.[0]?.pdf_url || null;
+    const wasPublished = !!prevNews.rows?.[0]?.is_published;
 
     // Validation
     if (!title || !content) {
@@ -3922,9 +3898,18 @@ app.put('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res)
       }
     }
 
+    const updatedArticle = result.rows[0];
+    const orgIdForPush = updatedArticle.organization_id ?? organization_id;
+    const nowPublished = !!updatedArticle.is_published;
+    if (nowPublished && orgIdForPush && !wasPublished) {
+      notifyFollowersOfNewsArticle(orgIdForPush, updatedArticle.id, updatedArticle.title).catch(err =>
+        console.error('Push notification error:', err)
+      );
+    }
+
     res.json({
       message: 'Article updated successfully',
-      article: result.rows[0]
+      article: updatedArticle
     });
 
   } catch (error) {
@@ -3940,6 +3925,16 @@ app.put('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res)
 app.post('/api/admin/news/:id/publish', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
+    const prevResult = await executeQuery(
+      'SELECT title, organization_id, is_published FROM news WHERE id = ? LIMIT 1',
+      [id]
+    );
+    if (!prevResult.rows?.length) {
+      return res.status(404).json({ error: 'Artikel niet gevonden' });
+    }
+    const prevArticle = prevResult.rows[0];
+    const wasPublished = !!prevArticle.is_published;
+
     let upd;
     try {
       upd = await executeQuery(
@@ -3958,6 +3953,13 @@ app.post('/api/admin/news/:id/publish', authenticateToken, requireAdmin, async (
     }
     if (!upd.rowCount) {
       return res.status(404).json({ error: 'Artikel niet gevonden' });
+    }
+    if (!wasPublished && prevArticle.organization_id) {
+      notifyFollowersOfNewsArticle(
+        prevArticle.organization_id,
+        id,
+        prevArticle.title
+      ).catch(err => console.error('Push notification error:', err));
     }
     invalidateCache('/api/news');
     invalidateCache(`/api/news/${id}`);
@@ -7258,6 +7260,33 @@ async function sendPushNotification(pushTokens, notification) {
 }
 
 /**
+ * Stuur push naar volgers wanneer een nieuwsartikel (nieuw) gepubliceerd is.
+ */
+async function notifyFollowersOfNewsArticle(organizationId, newsId, title) {
+  if (!organizationId || !newsId || !title) return;
+  const orgResult = await executeQuery(
+    'SELECT name FROM organizations WHERE id = ?',
+    [organizationId]
+  );
+  if (!orgResult.rows.length) return;
+  const orgName = orgResult.rows[0].name;
+  await sendNotificationToFollowers(
+    organizationId,
+    {
+      title: `📰 Nieuw bericht van ${orgName}`,
+      body: title,
+      data: {
+        type: 'news',
+        newsId: Number(newsId),
+        organizationId: Number(organizationId)
+      }
+    },
+    'news'
+  );
+  console.log(`📢 Queued push notification for news article ${newsId}`);
+}
+
+/**
  * Send notification to specific users
  * @param {Array} userIds - Array of user IDs
  * @param {Object} notification - Notification object
@@ -7339,15 +7368,23 @@ async function sendNotificationToFollowers(organizationId, notification, notific
     }
     
     let userIds = followersResult.rows.map(row => row.user_id);
-    const placeholdersMute = userIds.map(() => '?').join(',');
-    const mutedResult = await executeQuery(
-      `SELECT user_id FROM push_notification_mutes WHERE organization_id = ? AND user_id IN (${placeholdersMute})`,
-      [organizationId, ...userIds]
-    );
-    const mutedSet = new Set((mutedResult.rows || []).map(r => r.user_id));
-    userIds = userIds.filter(id => !mutedSet.has(id));
-    if (mutedSet.size) {
-      console.log(`📢 Excluding ${mutedSet.size} user(s) who muted org ${organizationId}`);
+    try {
+      const placeholdersMute = userIds.map(() => '?').join(',');
+      const mutedResult = await executeQuery(
+        `SELECT user_id FROM push_notification_mutes WHERE organization_id = ? AND user_id IN (${placeholdersMute})`,
+        [organizationId, ...userIds]
+      );
+      const mutedSet = new Set((mutedResult.rows || []).map(r => r.user_id));
+      userIds = userIds.filter(id => !mutedSet.has(id));
+      if (mutedSet.size) {
+        console.log(`📢 Excluding ${mutedSet.size} user(s) who muted org ${organizationId}`);
+      }
+    } catch (muteErr) {
+      if (isPushMutesTableDisallowed(muteErr)) {
+        console.warn('Push followers: mute-tabel niet beschikbaar – stuur naar alle volgers (zie docs/DB_PROXY_PUSH_MUTES.md)');
+      } else {
+        throw muteErr;
+      }
     }
     if (userIds.length === 0) {
       console.log(`⚠️ No users to notify after applying mutes for organization ${organizationId}`);
