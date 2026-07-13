@@ -2187,23 +2187,31 @@ const DEFAULT_PUSH_PREFERENCES = {
   agenda: true,
   organizations: true,
   practical: true,
+  practical_oud_papier: true,
+  practical_containers: true,
 };
 
 function parseNotificationPreferences(raw) {
   if (!raw) return { ...DEFAULT_PUSH_PREFERENCES };
   try {
     const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-    const practical =
+    const practicalLegacy =
       parsed.practical !== undefined
         ? !!parsed.practical
         : parsed.weather !== undefined
           ? !!parsed.weather
           : true;
+    const practical_oud_papier =
+      parsed.practical_oud_papier !== undefined ? !!parsed.practical_oud_papier : practicalLegacy;
+    const practical_containers =
+      parsed.practical_containers !== undefined ? !!parsed.practical_containers : practicalLegacy;
     return {
       news: parsed.news !== undefined ? !!parsed.news : true,
       agenda: parsed.agenda !== undefined ? !!parsed.agenda : true,
       organizations: parsed.organizations !== undefined ? !!parsed.organizations : true,
-      practical,
+      practical: practical_oud_papier || practical_containers,
+      practical_oud_papier,
+      practical_containers,
     };
   } catch {
     return { ...DEFAULT_PUSH_PREFERENCES };
@@ -2226,17 +2234,34 @@ function extractMutedOrganizationIds(raw) {
 function mergeNotificationPreferencesPayload(existingRaw, incoming) {
   const existing = parseNotificationPreferences(existingRaw);
   const muted = extractMutedOrganizationIds(existingRaw);
+  const practical_oud_papier =
+    incoming?.practical_oud_papier !== undefined
+      ? !!incoming.practical_oud_papier
+      : existing.practical_oud_papier;
+  const practical_containers =
+    incoming?.practical_containers !== undefined
+      ? !!incoming.practical_containers
+      : existing.practical_containers;
+  let practical =
+    incoming?.practical !== undefined
+      ? !!incoming.practical
+      : incoming?.weather !== undefined
+        ? !!incoming.weather
+        : existing.practical;
+  if (
+    incoming?.practical_oud_papier !== undefined ||
+    incoming?.practical_containers !== undefined
+  ) {
+    practical = practical_oud_papier || practical_containers;
+  }
   return {
     news: incoming?.news !== undefined ? !!incoming.news : existing.news,
     agenda: incoming?.agenda !== undefined ? !!incoming.agenda : existing.agenda,
     organizations:
       incoming?.organizations !== undefined ? !!incoming.organizations : existing.organizations,
-    practical:
-      incoming?.practical !== undefined
-        ? !!incoming.practical
-        : incoming?.weather !== undefined
-          ? !!incoming.weather
-          : existing.practical,
+    practical,
+    practical_oud_papier,
+    practical_containers,
     muted_organization_ids: muted,
   };
 }
@@ -6626,14 +6651,13 @@ function buildTomorrowAfvalReminder(config) {
   };
 }
 
-async function alreadySentPracticalReminderToday(title) {
+async function alreadySentPracticalReminderToday() {
   try {
     const result = await executeQuery(
       `SELECT id FROM notification_history
-       WHERE notification_type = 'practical' AND title = ?
-       AND sent_at >= DATE_SUB(NOW(), INTERVAL 36 HOUR)
-       LIMIT 1`,
-      [title]
+       WHERE notification_type = 'practical'
+       AND sent_at >= DATE_SUB(NOW(), INTERVAL 20 HOUR)
+       LIMIT 1`
     );
     return (result.rows || []).length > 0;
   } catch {
@@ -6641,45 +6665,63 @@ async function alreadySentPracticalReminderToday(title) {
   }
 }
 
-async function sendPracticalReminderToSubscribers(notification) {
+async function sendPracticalReminderToSubscribers(config) {
+  const tomorrowStr = amsterdamTomorrowStr();
+  const hasOud = isOudPapierOnDate(config, tomorrowStr);
+  const container = getContainerOnDate(config, tomorrowStr);
+  if (!hasOud && !container) {
+    return { success: true, sent: 0 };
+  }
+
   const result = await executeQuery(
     `SELECT pt.id, pt.user_id, pt.token, pt.notification_preferences
      FROM push_tokens pt
      WHERE pt.is_active = true`
   );
-  const rows = (result.rows || []).filter((row) => {
+
+  let sent = 0;
+  for (const row of result.rows || []) {
     const prefs = parseNotificationPreferences(row.notification_preferences);
-    return prefs.practical !== false;
-  });
-  if (!rows.length) {
-    console.log('⚠️ Geen tokens met Praktisch-meldingen aan');
-    return { success: true, sent: 0 };
-  }
-  const tokens = rows.map((row) => row.token);
-  const sendResult = await sendPushNotification(tokens, notification);
-  if (sendResult.success) {
-    for (const row of rows) {
-      try {
-        await executeQuery(
-          `INSERT INTO notification_history
-           (user_id, push_token_id, notification_type, title, body, data, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [
-            row.user_id,
-            row.id,
-            'practical',
-            notification.title,
-            notification.body,
-            JSON.stringify(notification.data || {}),
-            'sent',
-          ]
-        );
-      } catch {
-        /* history optioneel */
-      }
+    const parts = [];
+    if (hasOud && prefs.practical_oud_papier) parts.push('oud papier');
+    if (container && prefs.practical_containers) parts.push(containerLabelNl(container.label));
+    if (!parts.length) continue;
+
+    const notification = {
+      title: `Morgen ${parts.join(' en ')}`,
+      body: 'Zet het op tijd klaar aan de straat.',
+      data: { type: 'practical', screen: 'praktisch' },
+    };
+
+    const sendResult = await sendPushNotification([row.token], notification);
+    if (!sendResult.success) continue;
+    sent += sendResult.sent ?? 1;
+
+    try {
+      await executeQuery(
+        `INSERT INTO notification_history
+         (user_id, push_token_id, notification_type, title, body, data, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          row.user_id,
+          row.id,
+          'practical',
+          notification.title,
+          notification.body,
+          JSON.stringify(notification.data || {}),
+          'sent',
+        ]
+      );
+    } catch {
+      /* history optioneel */
     }
   }
-  return sendResult;
+
+  if (!sent) {
+    console.log('⚠️ Geen tokens met Praktisch-meldingen aan voor morgen');
+  }
+
+  return { success: true, sent };
 }
 
 async function runAfvalReminderJob(options = {}) {
@@ -6688,17 +6730,20 @@ async function runAfvalReminderJob(options = {}) {
     return { skipped: true, reason: 'not_18_amsterdam', hour: amsterdamHour() };
   }
   const config = await loadAfvalkalenderConfig();
-  const notification = buildTomorrowAfvalReminder(config);
-  if (!notification) {
+  const tomorrowStr = amsterdamTomorrowStr();
+  const hasOud = isOudPapierOnDate(config, tomorrowStr);
+  const hasContainer = !!getContainerOnDate(config, tomorrowStr);
+  if (!hasOud && !hasContainer) {
     return { skipped: true, reason: 'nothing_tomorrow' };
   }
-  if (!force && (await alreadySentPracticalReminderToday(notification.title))) {
-    return { skipped: true, reason: 'already_sent', title: notification.title };
+  const sampleNotification = buildTomorrowAfvalReminder(config);
+  if (!force && (await alreadySentPracticalReminderToday())) {
+    return { skipped: true, reason: 'already_sent', title: sampleNotification?.title ?? null };
   }
-  const sendResult = await sendPracticalReminderToSubscribers(notification);
+  const sendResult = await sendPracticalReminderToSubscribers(config);
   return {
     skipped: false,
-    title: notification.title,
+    title: sampleNotification?.title ?? null,
     sent: sendResult.sent ?? 0,
     success: sendResult.success !== false,
   };
