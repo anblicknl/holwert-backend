@@ -5930,7 +5930,7 @@ app.get('/api/org/news', authenticateToken, requireOrgPortal, async (req, res) =
     const params = [orgId];
     if (status === 'published') { query += ` AND n.is_published = true`; }
     else if (status === 'pending') { query += ` AND n.is_published = false`; }
-    query += ` ORDER BY n.created_at DESC LIMIT ? OFFSET ?`;
+    query += ` ORDER BY COALESCE(n.published_at, n.created_at) DESC LIMIT ? OFFSET ?`;
     params.push(parseInt(limit), parseInt(offset));
     const result = await executeQuery(query, params);
     const countResult = await executeQuery(
@@ -5968,23 +5968,41 @@ app.post('/api/org/news', authenticateToken, requireOrgPortal, async (req, res) 
     await ensureNewsColumns();
     const orgId = req.organizationId;
     const userId = req.user.userId;
-    const { title, content, excerpt, category, custom_category, image_url, youtube_url, source_name, source_url, pdf_url, is_published } = req.body || {};
+    const { title, content, excerpt, category, custom_category, image_url, youtube_url, source_name, source_url, pdf_url, is_published, published_at } = req.body || {};
     if (!title) return res.status(400).json({ error: 'title is required' });
     const finalCategory = category || 'dorpsnieuws';
     const finalCustomCategory = finalCategory === 'overig' && custom_category ? String(custom_category).trim() : null;
-    const result = await executeInsert(
-      'INSERT INTO news (title, content, excerpt, author_id, organization_id, image_url, youtube_url, source_name, source_url, pdf_url, category, custom_category, is_published, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())',
-      [title || '', content || '', excerpt || null, userId, orgId, image_url || null, youtube_url || null, source_name || null, source_url || null, pdf_url || null, finalCategory, finalCustomCategory, is_published === true]
-    );
-    const id = result.insertId || (result.rows && result.rows[0] && result.rows[0].id);
     const isPublished = is_published === true;
+    const pubAt = (published_at != null && String(published_at).trim() !== '')
+      ? toMysqlDateTime(published_at)
+      : null;
+
+    let insertSql;
+    let insertParams;
+    const baseCols = 'title, content, excerpt, author_id, organization_id, image_url, youtube_url, source_name, source_url, pdf_url, category, custom_category, is_published';
+    const baseVals = '?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?';
+    const baseParams = [title || '', content || '', excerpt || null, userId, orgId, image_url || null, youtube_url || null, source_name || null, source_url || null, pdf_url || null, finalCategory, finalCustomCategory, isPublished];
+
+    if (pubAt) {
+      insertSql = `INSERT INTO news (${baseCols}, published_at, created_at, updated_at) VALUES (${baseVals}, ?, NOW(), NOW())`;
+      insertParams = [...baseParams, pubAt];
+    } else if (isPublished) {
+      insertSql = `INSERT INTO news (${baseCols}, published_at, created_at, updated_at) VALUES (${baseVals}, NOW(), NOW(), NOW())`;
+      insertParams = baseParams;
+    } else {
+      insertSql = `INSERT INTO news (${baseCols}, created_at, updated_at) VALUES (${baseVals}, NOW(), NOW())`;
+      insertParams = baseParams;
+    }
+
+    const result = await executeInsert(insertSql, insertParams);
+    const id = result.insertId || (result.rows && result.rows[0] && result.rows[0].id);
     if (isPublished && orgId && id) {
       notifyFollowersOfNewsArticle(orgId, id, title || '').catch(err =>
         console.error('Push notification error:', err)
       );
     }
     invalidatePublicNewsCaches(id);
-    const row = await executeQuery('SELECT id, title, excerpt, is_published, organization_id, created_at FROM news WHERE id = ?', [id]);
+    const row = await executeQuery('SELECT id, title, excerpt, is_published, COALESCE(published_at, created_at) as published_at, organization_id, created_at FROM news WHERE id = ?', [id]);
     res.status(201).json({ article: row.rows[0] });
   } catch (error) {
     console.error('POST /api/org/news error:', error);
@@ -6002,20 +6020,37 @@ app.put('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req, re
     if (!existing.rows?.length) return res.status(404).json({ error: 'Artikel niet gevonden' });
     const wasPublished = !!existing.rows[0].is_published;
     const oldPdfUrl = existing.rows[0].pdf_url || null;
-    const publishedAtSql = published_at ? toMysqlDateTime(published_at) : null;
-    const publishedAtVal = publishedAtSql || null;
+    const pubAt = (published_at != null && String(published_at).trim() !== '')
+      ? toMysqlDateTime(published_at)
+      : null;
     const finalCategory = category ?? 'dorpsnieuws';
     const finalCustomCategory = finalCategory === 'overig' && custom_category ? String(custom_category).trim() : null;
+    const nowPublished = is_published === true;
+
+    let publishedAtClause = 'published_at = published_at';
+    if (pubAt) {
+      publishedAtClause = 'published_at = ?';
+    } else if (nowPublished && !wasPublished) {
+      publishedAtClause = 'published_at = COALESCE(published_at, NOW())';
+    }
+
+    const updateParams = [
+      title ?? '', content ?? '', excerpt ?? null, finalCategory, finalCustomCategory,
+      image_url ?? null, youtube_url ?? null, source_name ?? null, source_url ?? null, pdf_url ?? null,
+      nowPublished,
+    ];
+    if (pubAt) updateParams.push(pubAt);
+    updateParams.push(id);
+
     await executeQuery(
-      'UPDATE news SET title = ?, content = ?, excerpt = ?, category = ?, custom_category = ?, image_url = ?, youtube_url = ?, source_name = ?, source_url = ?, pdf_url = ?, is_published = ?, published_at = COALESCE(?, published_at), updated_at = NOW() WHERE id = ?',
-      [title ?? '', content ?? '', excerpt ?? null, finalCategory, finalCustomCategory, image_url ?? null, youtube_url ?? null, source_name ?? null, source_url ?? null, pdf_url ?? null, is_published === true, publishedAtVal, id]
+      `UPDATE news SET title = ?, content = ?, excerpt = ?, category = ?, custom_category = ?, image_url = ?, youtube_url = ?, source_name = ?, source_url = ?, pdf_url = ?, is_published = ?, ${publishedAtClause}, updated_at = NOW() WHERE id = ?`,
+      updateParams
     );
     const newPdfUrl = pdf_url ?? null;
     if (oldPdfUrl && oldPdfUrl !== newPdfUrl) {
       cleanupHostedPdfIfUnreferenced(oldPdfUrl).catch(() => {});
     }
     const row = await executeQuery('SELECT id, title, excerpt, is_published, COALESCE(published_at, created_at) as published_at, updated_at FROM news WHERE id = ?', [id]);
-    const nowPublished = is_published === true;
     if (!wasPublished && nowPublished && orgId) {
       notifyFollowersOfNewsArticle(orgId, id, title ?? row.rows[0]?.title ?? '').catch(err =>
         console.error('Push notification error:', err)
