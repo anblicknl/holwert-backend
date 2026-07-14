@@ -909,6 +909,7 @@ app.get('/api/health', async (req, res) => {
     
     res.json({ 
       status: 'OK', 
+      apiVersion: '758b526-org-register-fix',
       timestamp: new Date().toISOString(),
       environment: process.env.NODE_ENV || 'development',
       database: `Connected to MySQL (${dbHost}/${dbName})`
