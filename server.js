@@ -7062,6 +7062,9 @@ async function sendNewOrgNotificationEmail({ orgName, orgEmail, orgId }) {
 
 app.post('/api/organizations/register', orgRegisterRateLimiter, async (req, res) => {
   try {
+    await ensureOrgColumns();
+    await ensurePrivacyStatementColumn();
+
     const {
       name, category, description, bio, is_ondernemer = false,
       website, email, phone, whatsapp, address,
@@ -7097,8 +7100,8 @@ app.post('/api/organizations/register', orgRegisterRateLimiter, async (req, res)
         name, category, description, bio, is_approved, is_ondernemer,
         website, email, phone, whatsapp, address,
         facebook, instagram, twitter, linkedin,
-        brand_color, logo_url, privacy_statement, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        brand_color, logo_url, privacy_statement
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         name.trim(),
         normalizeOrgCategory(category),
