@@ -7098,7 +7098,7 @@ app.post('/api/organizations/register', orgRegisterRateLimiter, async (req, res)
         website, email, phone, whatsapp, address,
         facebook, instagram, twitter, linkedin,
         brand_color, logo_url, privacy_statement, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
       [
         name.trim(),
         normalizeOrgCategory(category),
