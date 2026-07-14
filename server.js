@@ -56,6 +56,13 @@ function normalizeOrgCategory(input) {
   return 'overig';
 }
 
+/** Ondernemer-vinkje of categorie ondernemer/horeca → zichtbaar bij Ondernemers in de app. */
+function resolveIsOndernemer(category, isOndernemerInput) {
+  if (isOndernemerInput === true || isOndernemerInput === 1 || isOndernemerInput === 'true') return true;
+  const cat = normalizeOrgCategory(category);
+  return cat === 'ondernemer' || cat === 'horeca';
+}
+
 function getCacheKey(endpoint, params = {}) {
   return `${endpoint}:${JSON.stringify(params)}`;
 }
@@ -909,7 +916,7 @@ app.get('/api/health', async (req, res) => {
     
     res.json({ 
       status: 'OK', 
-      apiVersion: '758b526-org-register-fix',
+      apiVersion: 'org-approve-mail-ondernemer-fix',
       timestamp: new Date().toISOString(),
       environment: process.env.NODE_ENV || 'development',
       database: `Connected to MySQL (${dbHost}/${dbName})`
@@ -1537,6 +1544,19 @@ async function ensureOrgColumns() {
         console.warn(`[ensureOrgColumns] ${col.name}:`, e.message);
       }
     }
+  }
+  try {
+    const sync = await executeQuery(
+      `UPDATE organizations SET is_ondernemer = 1
+       WHERE LOWER(TRIM(category)) IN ('ondernemer', 'horeca')
+         AND (is_ondernemer IS NULL OR is_ondernemer = 0 OR is_ondernemer = false)`,
+    );
+    if (sync.rowCount > 0) {
+      console.log(`[ensureOrgColumns] is_ondernemer gesynchroniseerd voor ${sync.rowCount} organisatie(s)`);
+      invalidateCache('/api/organizations');
+    }
+  } catch (e) {
+    console.warn('[ensureOrgColumns] sync is_ondernemer:', e.message);
   }
   _orgColsMigrated = true;
 }
@@ -3165,36 +3185,11 @@ function isOrgDashboardPasswordResetEligible(u) {
   return !Number.isNaN(oid) && oid > 0;
 }
 
-async function sendOrgPasswordResetEmailViaHosting({ toEmail, resetUrl }) {
-  const esc = (s) =>
-    String(s)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-
-  const subject = 'Holwert: wachtwoord wijzigen (organisatie-dashboard)';
-  const html = `<p>Je hebt een nieuw wachtwoord aangevraagd voor het <strong>Holwert organisatie-dashboard</strong>.</p>
-<p><a href="${esc(resetUrl)}">Klik hier om een nieuw wachtwoord in te stellen</a></p>
-<p>Of kopieer deze link in je browser:<br><span style="word-break:break-all">${esc(resetUrl)}</span></p>
-<p>Deze link is <strong>1 uur</strong> geldig. Als je dit niet zelf hebt aangevraagd, kun je deze e-mail negeren.</p>`;
-  const text = `Je hebt een nieuw wachtwoord aangevraagd voor het Holwert organisatie-dashboard.
-
-Open deze link om een nieuw wachtwoord in te stellen:
-${resetUrl}
-
-Deze link is 1 uur geldig. Als je dit niet zelf hebt aangevraagd, kun je deze e-mail negeren.`;
-
+async function sendMailViaHosting({ toEmail, subject, html, text }) {
   try {
     const response = await axios.post(
       MAIL_PROXY_URL,
-      {
-        to: toEmail,
-        subject,
-        html,
-        text,
-        // Afzender altijd via hosting SMTP_FROM in send-mail.php (niet MAIL_FROM/RESEND_FROM van Vercel).
-      },
+      { to: toEmail, subject, html, text },
       {
         headers: {
           'X-API-Key': PHP_PROXY_API_KEY,
@@ -3220,6 +3215,64 @@ Deze link is 1 uur geldig. Als je dit niet zelf hebt aangevraagd, kun je deze e-
     console.error('[mail-proxy] error:', status || '-', msg, 'naar', toEmail);
     return { ok: false, reason: msg };
   }
+}
+
+async function sendOrgDashboardWelcomeEmailViaHosting({ toEmail, orgName, loginEmail, temporaryPassword }) {
+  const esc = (s) =>
+    String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+
+  const dashUrl = getOrgDashboardPublicBaseUrl();
+  const orgLabel = orgName ? String(orgName).trim() : 'jullie organisatie';
+  const subject = 'Holwert: jullie organisatie-dashboard is goedgekeurd';
+  const html = `<p>Goed nieuws: <strong>${esc(orgLabel)}</strong> is goedgekeurd voor de Holwert-app.</p>
+<p>Je kunt nu inloggen op het <strong>organisatie-dashboard</strong> om jullie profiel, nieuws en agenda te beheren.</p>
+<p><a href="${esc(dashUrl)}">Open het dashboard</a></p>
+<p><strong>Inloggegevens</strong></p>
+<ul>
+  <li>E-mail: <strong>${esc(loginEmail)}</strong></li>
+  <li>Tijdelijk wachtwoord: <strong>${esc(temporaryPassword)}</strong></li>
+</ul>
+<p>Wijzig dit wachtwoord na de eerste inlog. Bewaar deze gegevens veilig; deel ze niet via openbare kanalen.</p>
+<p>Heb je vragen? Neem contact op met de beheerder van Holwert.</p>`;
+  const text = `Goed nieuws: ${orgLabel} is goedgekeurd voor de Holwert-app.
+
+Je kunt nu inloggen op het organisatie-dashboard:
+${dashUrl}
+
+Inloggegevens:
+E-mail: ${loginEmail}
+Tijdelijk wachtwoord: ${temporaryPassword}
+
+Wijzig dit wachtwoord na de eerste inlog.`;
+
+  return sendMailViaHosting({ toEmail, subject, html, text });
+}
+
+async function sendOrgPasswordResetEmailViaHosting({ toEmail, resetUrl }) {
+  const esc = (s) =>
+    String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+
+  const subject = 'Holwert: wachtwoord wijzigen (organisatie-dashboard)';
+  const html = `<p>Je hebt een nieuw wachtwoord aangevraagd voor het <strong>Holwert organisatie-dashboard</strong>.</p>
+<p><a href="${esc(resetUrl)}">Klik hier om een nieuw wachtwoord in te stellen</a></p>
+<p>Of kopieer deze link in je browser:<br><span style="word-break:break-all">${esc(resetUrl)}</span></p>
+<p>Deze link is <strong>1 uur</strong> geldig. Als je dit niet zelf hebt aangevraagd, kun je deze e-mail negeren.</p>`;
+  const text = `Je hebt een nieuw wachtwoord aangevraagd voor het Holwert organisatie-dashboard.
+
+Open deze link om een nieuw wachtwoord in te stellen:
+${resetUrl}
+
+Deze link is 1 uur geldig. Als je dit niet zelf hebt aangevraagd, kun je deze e-mail negeren.`;
+
+  return sendMailViaHosting({ toEmail, subject, html, text });
 }
 
 // Wachtwoord vergeten (alleen accounts met organisatie, geen beheerdersrollen)
@@ -4375,7 +4428,7 @@ app.post('/api/admin/organizations', authenticateToken, requireAdmin, async (req
         description || null,
         bio || null,
         is_approved !== false,
-        !!is_ondernemer,
+        resolveIsOndernemer(category, is_ondernemer),
         website || null,
         email || null,
         phone || null,
@@ -4451,7 +4504,11 @@ app.put('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (
     if (description !== undefined) sets.push(`description = ${push(description)}`);
     if (bio !== undefined) sets.push(`bio = ${push(bio)}`);
     if (is_approved !== undefined) sets.push(`is_approved = ${push(is_approved)}`);
-    if (is_ondernemer !== undefined) sets.push(`is_ondernemer = ${push(!!is_ondernemer)}`);
+    if (is_ondernemer !== undefined) {
+      sets.push(`is_ondernemer = ${push(resolveIsOndernemer(category, is_ondernemer))}`);
+    } else if (category !== undefined) {
+      sets.push(`is_ondernemer = ${push(resolveIsOndernemer(category, false))}`);
+    }
     if (website !== undefined) sets.push(`website = ${push(website)}`);
     if (email !== undefined) sets.push(`email = ${push(email)}`);
     if (show_email !== undefined) sets.push(`show_email = ${push(!!show_email)}`);
@@ -4659,6 +4716,8 @@ app.post('/api/admin/organizations/:id/approve', authenticateToken, requireAdmin
     let dashboard_login_email = null;
     let temporary_password = null;
     let user_notice = null;
+    let credentials_email_sent = false;
+    let credentials_email_error = null;
 
     let alreadyLinked = false;
     try {
@@ -4710,6 +4769,23 @@ app.post('/api/admin/organizations/:id/approve', authenticateToken, requireAdmin
       }
     }
 
+    if (temporary_password && dashboard_login_email) {
+      const mailResult = await sendOrgDashboardWelcomeEmailViaHosting({
+        toEmail: dashboard_login_email,
+        orgName: org.name,
+        loginEmail: dashboard_login_email,
+        temporaryPassword: temporary_password,
+      });
+      credentials_email_sent = !!mailResult.ok;
+      if (mailResult.ok) {
+        user_notice = `${user_notice || ''} Inloggegevens zijn ook per e-mail naar de organisatie verstuurd.`.trim();
+      } else {
+        credentials_email_error = mailResult.reason || 'Mail versturen mislukt';
+        user_notice = `${user_notice || ''} Kon inloggegevens niet per e-mail versturen — geef ze handmatig door.`.trim();
+        console.warn('[approve org] credentials mail mislukt:', credentials_email_error, 'naar', dashboard_login_email);
+      }
+    }
+
     invalidateCache('/api/admin/organizations');
     invalidateCache('/api/admin/stats');
     invalidateCache('/api/admin/moderation/count');
@@ -4723,6 +4799,8 @@ app.post('/api/admin/organizations/:id/approve', authenticateToken, requireAdmin
       ...(dashboard_login_email ? { dashboard_login_email } : {}),
       ...(temporary_password ? { temporary_password } : {}),
       ...(user_notice ? { user_notice } : {}),
+      ...(credentials_email_sent ? { credentials_email_sent: true } : {}),
+      ...(credentials_email_error ? { credentials_email_error } : {}),
     });
   } catch (error) {
     console.error('Approve organization error:', error);
@@ -7109,7 +7187,7 @@ app.post('/api/organizations/register', orgRegisterRateLimiter, async (req, res)
         norm(description),
         norm(bio),
         false, // is_approved = false: wacht op goedkeuring in admin
-        !!is_ondernemer,
+        resolveIsOndernemer(category, is_ondernemer),
         norm(website),
         norm(email),
         norm(phone),

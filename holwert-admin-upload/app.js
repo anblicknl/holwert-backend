@@ -1045,6 +1045,7 @@ class HolwertAdmin {
                         <small style="display:block;margin-top:0.35rem;color:#666;">Als het pad bij jullie anders is, gebruik dan die URL (meestal <code>/dashboard/</code> op hetzelfde domein).</small>
                     </p>
                     <div id="orgDashCredNotice" class="org-dash-cred-notice" style="display:none;margin-bottom:1rem;padding:0.65rem 0.75rem;background:#fff3cd;border:1px solid #ffc107;border-radius:6px;color:#664d03;font-size:0.9rem;"></div>
+                    <div id="orgDashCredEmailStatus" class="org-dash-cred-notice" style="display:none;margin-bottom:1rem;padding:0.65rem 0.75rem;border-radius:6px;font-size:0.9rem;"></div>
                     <div class="form-group">
                         <label for="orgDashCredEmail">E-mail (inlognaam)</label>
                         <div style="display:flex;gap:0.5rem;align-items:center;">
@@ -1059,7 +1060,7 @@ class HolwertAdmin {
                             <button type="button" class="btn btn-secondary" id="orgDashCredCopyPw">Kopiëren</button>
                         </div>
                     </div>
-                    <p style="margin-bottom:0;font-size:0.9rem;color:#666;">Bewaar dit wachtwoord niet in e-mail of chat; geef het zo mogelijk persoonlijk door. De organisatie kan daarna het wachtwoord wijzigen na inloggen (of jij wijzigt het onder Gebruikers).</p>
+                    <p style="margin-bottom:0;font-size:0.9rem;color:#666;">Bewaar dit wachtwoord niet in e-mail of chat; geef het zo mogelijk persoonlijk door. De organisatie ontvangt deze gegevens ook per e-mail (indien verzending lukt). De organisatie kan daarna het wachtwoord wijzigen na inloggen (of jij wijzigt het onder Gebruikers).</p>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-primary" data-org-dash-cred-close>Sluiten</button>
@@ -1077,6 +1078,23 @@ class HolwertAdmin {
         if (noticeEl && notice) {
             noticeEl.textContent = notice;
             noticeEl.style.display = 'block';
+        }
+
+        const emailStatusEl = modal.querySelector('#orgDashCredEmailStatus');
+        if (emailStatusEl) {
+            if (result.credentials_email_sent) {
+                emailStatusEl.textContent = 'Inloggegevens zijn per e-mail naar de organisatie verstuurd.';
+                emailStatusEl.style.display = 'block';
+                emailStatusEl.style.background = '#d1e7dd';
+                emailStatusEl.style.border = '1px solid #badbcc';
+                emailStatusEl.style.color = '#0f5132';
+            } else if (result.credentials_email_error) {
+                emailStatusEl.textContent = `E-mail versturen mislukt: ${result.credentials_email_error}. Geef de gegevens handmatig door.`;
+                emailStatusEl.style.display = 'block';
+                emailStatusEl.style.background = '#f8d7da';
+                emailStatusEl.style.border = '1px solid #f5c2c7';
+                emailStatusEl.style.color = '#842029';
+            }
         }
 
         const close = () => modal.remove();
@@ -3012,17 +3030,7 @@ class HolwertAdmin {
                 this.showNotification('Fout bij laden organisaties. Organisatie dropdown is mogelijk leeg.', 'warning');
             }
 
-            const categories = [
-                { id: 'dorpsnieuws', label: 'Dorpsnieuws' },
-                { id: 'sport', label: 'Sport' },
-                { id: 'cultuur', label: 'Cultuur' },
-                { id: 'onderwijs', label: 'Onderwijs' },
-                { id: 'zorg', label: 'Zorg' },
-                { id: 'overig', label: 'Overig' },
-            ];
-            const selectedCategory = article?.category || 'dorpsnieuws';
-            
-            // Als edit mode, haal nieuws artikel op
+            // Als edit mode, haal nieuws artikel op (vóór category-selectie)
             let article = null;
             if (mode === 'edit' && newsId) {
                 console.log('📡 Fetching article:', `${this.apiBaseUrl}/admin/news/${newsId}`);
@@ -3040,6 +3048,16 @@ class HolwertAdmin {
                     console.error('Error response:', errorText);
                 }
             }
+
+            const categories = [
+                { id: 'dorpsnieuws', label: 'Dorpsnieuws' },
+                { id: 'sport', label: 'Sport' },
+                { id: 'cultuur', label: 'Cultuur' },
+                { id: 'onderwijs', label: 'Onderwijs' },
+                { id: 'zorg', label: 'Zorg' },
+                { id: 'overig', label: 'Overig' },
+            ];
+            const selectedCategory = article?.category || 'dorpsnieuws';
 
             console.log('🔍 Article object:', article);
             console.log('🔍 Article structure:', JSON.stringify(article, null, 2).substring(0, 500));
