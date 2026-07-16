@@ -380,6 +380,10 @@ class HolwertAdmin {
         if (saveModerationNotificationEmailBtn) {
             saveModerationNotificationEmailBtn.addEventListener('click', () => this.saveModerationNotificationEmail());
         }
+        const testModerationNotificationEmailBtn = document.getElementById('testModerationNotificationEmailBtn');
+        if (testModerationNotificationEmailBtn) {
+            testModerationNotificationEmailBtn.addEventListener('click', () => this.testModerationNotificationEmail());
+        }
         const afvalOudPapierType = document.getElementById('afvalOudPapierType');
         if (afvalOudPapierType) {
             afvalOudPapierType.addEventListener('change', (e) => {
@@ -5519,6 +5523,41 @@ class HolwertAdmin {
                 msgEl.textContent = 'Opslaan mislukt: ' + (error.message || error);
                 msgEl.className = 'form-message error';
             }
+        }
+    }
+
+    async testModerationNotificationEmail() {
+        const msgEl = document.getElementById('moderationNotificationEmailMsg');
+        const btn = document.getElementById('testModerationNotificationEmailBtn');
+        if (btn) btn.disabled = true;
+        if (msgEl) {
+            msgEl.textContent = 'Testmail versturen…';
+            msgEl.className = 'form-message';
+        }
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/admin/settings/moderation-notification/test`, {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${this.token}`,
+                    'Content-Type': 'application/json',
+                },
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data.message || data.error || `HTTP ${response.status}`);
+            }
+            if (msgEl) {
+                msgEl.textContent = data.message || 'Testmail verstuurd.';
+                msgEl.className = 'form-message success';
+            }
+            this.showNotification(data.message || 'Testmail verstuurd', 'success');
+        } catch (error) {
+            if (msgEl) {
+                msgEl.textContent = 'Testmail mislukt: ' + (error.message || error);
+                msgEl.className = 'form-message error';
+            }
+        } finally {
+            if (btn) btn.disabled = false;
         }
     }
 

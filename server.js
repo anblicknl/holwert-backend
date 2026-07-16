@@ -3294,7 +3294,7 @@ async function sendMailViaHosting({ toEmail, subject, html, text }) {
           'X-API-Key': PHP_PROXY_API_KEY,
           'Content-Type': 'application/json',
         },
-        timeout: 10000,
+        timeout: 15000,
       },
     );
     if (response?.data?.ok === true) {
@@ -5672,6 +5672,28 @@ app.put('/api/admin/settings/moderation-notification', authenticateToken, requir
   }
 });
 
+app.post('/api/admin/settings/moderation-notification/test', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const toEmail = await getModerationNotificationEmail();
+    if (!toEmail) {
+      return res.status(400).json({ error: 'Geen notificatie-adres ingesteld' });
+    }
+    const result = await sendMailViaHosting({
+      toEmail,
+      subject: 'Holwert: test moderatie-notificatie',
+      html: '<p>Dit is een testmail van het Holwert admin-panel.</p><p>Als je dit leest, werken moderatie-notificaties.</p>',
+      text: 'Dit is een testmail van het Holwert admin-panel. Als je dit leest, werken moderatie-notificaties.',
+    });
+    if (!result.ok) {
+      return res.status(502).json({ error: 'Testmail mislukt', message: result.reason || 'Onbekende fout' });
+    }
+    res.json({ success: true, message: `Testmail verstuurd naar ${toEmail}` });
+  } catch (error) {
+    console.error('Test moderation notification email error:', error);
+    res.status(500).json({ error: 'Testmail mislukt', message: error.message });
+  }
+});
+
 // ── Content Pages (admin) ────────────────────────────────────
 app.get('/api/admin/content-pages', authenticateToken, requireAdmin, async (req, res) => {
   try {
@@ -7429,21 +7451,34 @@ app.post('/api/organizations/register', orgRegisterRateLimiter, async (req, res)
 
     console.log('[POST /api/organizations/register] New organization registered:', { id, name: name.trim() });
 
-    // Stuur notificatie-e-mail naar de beheerder (fire-and-forget, nooit blocking)
-    sendNewOrgNotificationEmail({ orgName: name.trim(), orgEmail: email?.trim() ?? '', orgId: id })
-      .then((result) => {
-        if (result?.ok) {
-          console.log('[register] Notificatie-mail verstuurd via mail-proxy');
-        } else if (result?.reason !== 'no_recipient') {
-          console.warn('[register] Notificatie-mail mislukt:', result?.reason || 'onbekend');
-        }
-      })
-      .catch((err) => console.error('[register] notificatie-mail mislukt:', err.message));
+    // Mail moet vóór de response klaar zijn — op Vercel stopt fire-and-forget na res.json()
+    let mailStatus = 'skipped';
+    try {
+      const mailResult = await sendNewOrgNotificationEmail({
+        orgName: name.trim(),
+        orgEmail: email?.trim() ?? '',
+        orgId: id,
+      });
+      if (mailResult?.ok) {
+        mailStatus = 'sent';
+        console.log('[register] Notificatie-mail verstuurd via mail-proxy naar', await getModerationNotificationEmail());
+      } else if (mailResult?.reason === 'no_recipient') {
+        mailStatus = 'no_recipient';
+        console.log('[register] Notificatie-mail overgeslagen (geen adres ingesteld)');
+      } else {
+        mailStatus = 'failed';
+        console.warn('[register] Notificatie-mail mislukt:', mailResult?.reason || 'onbekend');
+      }
+    } catch (mailErr) {
+      mailStatus = 'failed';
+      console.error('[register] notificatie-mail mislukt:', mailErr.message);
+    }
 
     res.status(201).json({
       success: true,
       message: 'Organisatie aangemeld. Deze wordt zichtbaar in de app na goedkeuring door de beheerder.',
-      id
+      id,
+      notification_mail: mailStatus,
     });
   } catch (error) {
     console.error('Organization register error:', error);
