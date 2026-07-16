@@ -19,6 +19,22 @@ const ORG_CATEGORIES = [
     { id: 'overig', label: 'Overig' },
 ].sort((a, b) => a.label.localeCompare(b.label, 'nl'));
 
+function formatAppPlatformLabel(platform) {
+    const p = String(platform || '').trim().toLowerCase();
+    if (p === 'ios') return 'iOS';
+    if (p === 'android') return 'Android';
+    if (p === 'web') return 'Web';
+    return platform ? String(platform) : '';
+}
+
+function formatUserAppClientSummary(user) {
+    const version = user?.last_app_version ? String(user.last_app_version) : '';
+    const platform = formatAppPlatformLabel(user?.last_app_platform);
+    if (!version && !platform) return 'Onbekend';
+    if (version && platform) return `${version} · ${platform}`;
+    return version || platform;
+}
+
 function populateOrgCategoryFilterSelect() {
     const sel = document.getElementById('orgCategoryFilter');
     if (!sel) return;
@@ -289,6 +305,10 @@ class HolwertAdmin {
                     this.editEvent(id);
                     return;
                 }
+                if (action === 'duplicate') {
+                    this.duplicateEvent(id);
+                    return;
+                }
                 if (action === 'delete') {
                     let title = '';
                     const enc = el.getAttribute('data-event-title');
@@ -304,10 +324,10 @@ class HolwertAdmin {
             });
         }
 
-        // Organizations table actions (edit/delete) via event delegation
-        const organizationsTableBody = document.getElementById('organizationsTableBody');
-        if (organizationsTableBody) {
-            organizationsTableBody.addEventListener('click', (e) => {
+        // Organizations table + mobiele kaarten (edit/delete/approve) via event delegation
+        const organizationsListWrap = document.getElementById('organizationsListWrap');
+        if (organizationsListWrap) {
+            organizationsListWrap.addEventListener('click', (e) => {
                 const editBtn = e.target.closest('.organization-edit-btn');
                 const deleteBtn = e.target.closest('.organization-delete-btn');
                 const approveBtn = e.target.closest('.organization-approve-btn');
@@ -342,6 +362,8 @@ class HolwertAdmin {
             });
         });
 
+        this.initSidebarToggle();
+
         // Praktisch (tegels) - nieuw item
         const addPracticalBtn = document.getElementById('addPracticalBtn');
         if (addPracticalBtn) {
@@ -352,6 +374,11 @@ class HolwertAdmin {
         const saveAfvalkalenderBtn = document.getElementById('saveAfvalkalenderBtn');
         if (saveAfvalkalenderBtn) {
             saveAfvalkalenderBtn.addEventListener('click', () => this.saveAfvalkalender());
+        }
+
+        const saveModerationNotificationEmailBtn = document.getElementById('saveModerationNotificationEmailBtn');
+        if (saveModerationNotificationEmailBtn) {
+            saveModerationNotificationEmailBtn.addEventListener('click', () => this.saveModerationNotificationEmail());
         }
         const afvalOudPapierType = document.getElementById('afvalOudPapierType');
         if (afvalOudPapierType) {
@@ -383,6 +410,46 @@ class HolwertAdmin {
             this.showLoginScreen();
         }
         console.log('=== END CHECK AUTH ===');
+    }
+
+    initSidebarToggle() {
+        const mainScreen = document.getElementById('mainScreen');
+        const toggle = document.getElementById('sidebarToggle');
+        const backdrop = document.getElementById('sidebarBackdrop');
+        if (!mainScreen || !toggle) return;
+
+        const mq = window.matchMedia('(max-width: 768px)');
+
+        const setOpen = (open) => {
+            mainScreen.classList.toggle('sidebar-open', open);
+            toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+            toggle.setAttribute('aria-label', open ? 'Menu sluiten' : 'Menu openen');
+            if (backdrop) backdrop.setAttribute('aria-hidden', open ? 'false' : 'true');
+            document.body.style.overflow = open && mq.matches ? 'hidden' : '';
+        };
+
+        const close = () => setOpen(false);
+
+        toggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setOpen(!mainScreen.classList.contains('sidebar-open'));
+        });
+
+        if (backdrop) backdrop.addEventListener('click', close);
+
+        document.querySelectorAll('.nav-item').forEach((el) => {
+            el.addEventListener('click', () => {
+                if (mq.matches) close();
+            });
+        });
+
+        window.addEventListener('resize', () => {
+            if (!mq.matches) close();
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && mainScreen.classList.contains('sidebar-open')) close();
+        });
     }
 
     showLoginScreen() {
@@ -736,6 +803,34 @@ class HolwertAdmin {
         }
     }
 
+    renderDashboardStats(statsData) {
+        const totalUsersEl = document.getElementById('totalUsers');
+        const totalOrgsEl = document.getElementById('totalOrganizations');
+        const totalNewsEl = document.getElementById('totalNews');
+        const totalEventsEl = document.getElementById('totalEvents');
+
+        if (totalUsersEl) {
+            const appUsers = statsData.app_users ?? statsData.users ?? 0;
+            totalUsersEl.textContent = String(appUsers);
+        }
+        if (totalOrgsEl) {
+            const orgs = statsData.organizations || 0;
+            const orgLogins = statsData.org_dashboard_users || 0;
+            if (orgLogins > 0) {
+                totalOrgsEl.innerHTML =
+                    `${orgs} <span class="stat-sub" title="Dashboard-inlogaccounts voor organisaties">(${orgLogins})</span>`;
+            } else {
+                totalOrgsEl.textContent = String(orgs);
+            }
+        }
+        if (totalNewsEl) {
+            totalNewsEl.textContent = String(statsData.news || 0);
+        }
+        if (totalEventsEl) {
+            totalEventsEl.textContent = String(statsData.events || 0);
+        }
+    }
+
     async loadDashboard() {
         try {
             console.log('=== LOADING DASHBOARD ===');
@@ -754,38 +849,7 @@ class HolwertAdmin {
             if (statsRes.ok) {
                 const statsData = await statsRes.json();
                 console.log('Stats loaded:', statsData);
-                console.log('Users count:', statsData.users);
-                console.log('Organizations count:', statsData.organizations);
-                
-                // Update DOM elements
-                const totalUsersEl = document.getElementById('totalUsers');
-                const totalOrgsEl = document.getElementById('totalOrganizations');
-                const totalNewsEl = document.getElementById('totalNews');
-                const totalEventsEl = document.getElementById('totalEvents');
-                
-                console.log('DOM elements found:', {
-                    totalUsers: !!totalUsersEl,
-                    totalOrganizations: !!totalOrgsEl,
-                    totalNews: !!totalNewsEl,
-                    totalEvents: !!totalEventsEl
-                });
-                
-                if (totalUsersEl) {
-                    totalUsersEl.textContent = statsData.users || 0;
-                    console.log('Updated totalUsers to:', totalUsersEl.textContent);
-                }
-                if (totalOrgsEl) {
-                    totalOrgsEl.textContent = statsData.organizations || 0;
-                    console.log('Updated totalOrganizations to:', totalOrgsEl.textContent);
-                }
-                if (totalNewsEl) {
-                    totalNewsEl.textContent = statsData.news || 0;
-                    console.log('Updated totalNews to:', totalNewsEl.textContent);
-                }
-                if (totalEventsEl) {
-                    totalEventsEl.textContent = statsData.events || 0;
-                    console.log('Updated totalEvents to:', totalEventsEl.textContent);
-                }
+                this.renderDashboardStats(statsData);
             } else {
                 console.error('Failed to load stats:', statsRes.status);
                 const errorText = await statsRes.text();
@@ -891,12 +955,14 @@ class HolwertAdmin {
     }
 
     updateDashboardStats(data) {
-        // Update statistics
         if (data.statistics) {
-            document.getElementById('totalUsers').textContent = data.statistics.totalUsers || 0;
-            document.getElementById('totalOrganizations').textContent = data.statistics.totalOrganizations || 0;
-            document.getElementById('totalNews').textContent = data.statistics.totalNews || 0;
-            document.getElementById('totalEvents').textContent = data.statistics.totalEvents || 0;
+            this.renderDashboardStats({
+                app_users: data.statistics.app_users ?? data.statistics.totalUsers,
+                organizations: data.statistics.totalOrganizations,
+                org_dashboard_users: data.statistics.org_dashboard_users,
+                news: data.statistics.totalNews,
+                events: data.statistics.totalEvents,
+            });
         }
 
         // Update pending content
@@ -1858,8 +1924,17 @@ class HolwertAdmin {
     }
 
     // Organization management
+    organizationActionButtonsHtml(org) {
+        return `
+            ${!org.is_approved ? `<button type="button" class="btn-icon btn-approve organization-approve-btn" data-org-id="${org.id}" title="Goedkeuren"><i class="fas fa-check"></i></button>` : ''}
+            <button class="btn-icon btn-edit organization-edit-btn" data-org-id="${org.id}" title="Bewerken"><i class="fas fa-edit"></i></button>
+            <button class="btn-icon btn-delete organization-delete-btn" data-org-id="${org.id}" title="Verwijderen"><i class="fas fa-trash"></i></button>
+        `;
+    }
+
     displayOrganizations(organizations) {
         const container = document.getElementById('organizationsTableBody');
+        const mobileList = document.getElementById('organizationsMobileList');
         if (!container) {
             console.error('organizationsTableBody container not found');
             return;
@@ -1867,6 +1942,7 @@ class HolwertAdmin {
 
         if (!organizations || organizations.length === 0) {
             container.innerHTML = '<tr><td colspan="6" class="empty-message">Geen organisaties gevonden</td></tr>';
+            if (mobileList) mobileList.innerHTML = '<p class="empty-message">Geen organisaties gevonden</p>';
             return;
         }
 
@@ -1893,33 +1969,32 @@ class HolwertAdmin {
                 </td>
                 <td>
                     <div class="action-buttons">
-                        ${
-                            !org.is_approved
-                                ? `<button
-                            type="button"
-                            class="btn-icon btn-approve organization-approve-btn"
-                            data-org-id="${org.id}"
-                            title="Goedkeuren">
-                            <i class="fas fa-check"></i>
-                        </button>`
-                                : ''
-                        }
-                        <button 
-                            class="btn-icon btn-edit organization-edit-btn" 
-                            data-org-id="${org.id}" 
-                            title="Bewerken">
-                            <i class="fas fa-edit"></i>
-                        </button>
-                        <button 
-                            class="btn-icon btn-delete organization-delete-btn" 
-                            data-org-id="${org.id}" 
-                            title="Verwijderen">
-                            <i class="fas fa-trash"></i>
-                        </button>
+                        ${this.organizationActionButtonsHtml(org)}
                     </div>
                 </td>
             </tr>
         `).join('');
+
+        if (mobileList) {
+            mobileList.innerHTML = organizations.map(org => {
+                const category = orgCategoryLabel(org.category);
+                const statusLabel = org.is_approved ? 'Goedgekeurd' : 'In afwachting';
+                const statusClass = org.is_approved ? 'status-published' : 'status-draft';
+                return `<div class="list-card">
+                    <div class="list-card-title">${this.escHtml(org.name || '-')}</div>
+                    <div class="list-card-meta">
+                        <span>${this.escHtml(category)}${org.is_ondernemer ? ' · Ondernemer' : ''}</span>
+                        <span class="list-card-meta-sep" aria-hidden="true">·</span>
+                        <span>${org.followers_count ?? 0} volgers</span>
+                        <span class="list-card-meta-sep" aria-hidden="true">·</span>
+                        <span class="list-card-status ${statusClass}">${statusLabel}</span>
+                    </div>
+                    <div class="list-card-actions action-buttons">
+                        ${this.organizationActionButtonsHtml(org)}
+                    </div>
+                </div>`;
+            }).join('');
+        }
     }
 
     async loadOrganizations() {
@@ -2576,9 +2651,49 @@ class HolwertAdmin {
         }
     }
 
-    deleteOrganization(id) {
-        this.showNotification('Organisatie verwijderen functie is nog niet geïmplementeerd', 'info');
-        // TODO: Implementeer delete organization
+    async deleteOrganization(id) {
+        if (!this.token) {
+            this.showNotification('Niet ingelogd.', 'error');
+            return;
+        }
+        const org = (this.organizationsList || []).find(
+            (o) => o.id === id || o.id === parseInt(id, 10),
+        );
+        const name = org?.name || `organisatie #${id}`;
+        if (
+            !confirm(
+                `"${name}" definitief verwijderen?\n\nGekoppeld nieuws, events, volgers en dashboard-accounts worden ook verwijderd. Dit kan niet ongedaan worden.`,
+            )
+        ) {
+            return;
+        }
+        try {
+            const res = await fetch(`${this.apiBaseUrl}/admin/organizations/${id}`, {
+                method: 'DELETE',
+                headers: { Authorization: `Bearer ${this.token}` },
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                this.showNotification(
+                    data.message || data.error || `Verwijderen mislukt (${res.status})`,
+                    'error',
+                );
+                return;
+            }
+            this.showNotification(data.message || 'Organisatie verwijderd', 'success');
+            this.loadOrganizations();
+            this.loadDashboard();
+            this.loadNotificationCounts();
+            if (typeof this.loadUsers === 'function') {
+                this.loadUsers();
+            }
+            if (typeof this.loadPendingContent === 'function') {
+                this.loadPendingContent();
+            }
+        } catch (e) {
+            console.error('deleteOrganization error:', e);
+            this.showNotification('Verwijderen mislukt.', 'error');
+        }
     }
 
 
@@ -2850,7 +2965,7 @@ class HolwertAdmin {
         console.log('✅ Rendering', news.length, 'news articles');
 
         const newsHTML = `
-            <div class="data-table-container">
+            <div class="desktop-view data-table-container">
                 <table class="data-table">
                     <thead>
                         <tr>
@@ -2906,6 +3021,30 @@ class HolwertAdmin {
                         `).join('')}
                     </tbody>
                 </table>
+            </div>
+            <div class="mobile-cards-container mobile-view">
+                ${news.map(article => {
+                    const dateStr = this.formatNewsArticleDate(article);
+                    const category = article.custom_category || article.category || '–';
+                    const org = article.organization_name || 'Geen organisatie';
+                    return `<div class="list-card">
+                        <div class="list-card-title">${this.escHtml(article.title || '')}</div>
+                        <div class="list-card-meta">
+                            <span>${dateStr}</span>
+                            <span class="list-card-meta-sep" aria-hidden="true">·</span>
+                            <span>${this.escHtml(category)}</span>
+                            <span class="list-card-meta-sep" aria-hidden="true">·</span>
+                            <span>${this.escHtml(org)}</span>
+                            <span class="list-card-meta-sep" aria-hidden="true">·</span>
+                            <span class="list-card-status status-published">Gepubliceerd</span>
+                        </div>
+                        <div class="list-card-actions action-buttons">
+                            <button class="btn btn-icon btn-view" data-action="view" data-id="${article.id}" title="Bekijken"><i class="fas fa-eye"></i></button>
+                            <button class="btn btn-icon btn-edit" data-action="edit" data-id="${article.id}" title="Bewerken"><i class="fas fa-edit"></i></button>
+                            <button class="btn btn-icon btn-delete" data-action="delete" data-id="${article.id}" data-title="${article.title.replace(/"/g, '&quot;')}" title="Verwijderen"><i class="fas fa-trash"></i></button>
+                        </div>
+                    </div>`;
+                }).join('')}
             </div>
         `;
 
@@ -3765,6 +3904,9 @@ class HolwertAdmin {
                         <button type="button" class="btn-icon btn-edit" data-event-action="edit" data-event-id="${ev.id}" title="Bewerken">
                             <i class="fas fa-edit"></i>
                         </button>
+                        <button type="button" class="btn-icon btn-secondary" data-event-action="duplicate" data-event-id="${ev.id}" title="Dupliceren">
+                            <i class="fas fa-copy"></i>
+                        </button>
                         <button type="button" class="btn-icon btn-delete" data-event-action="delete" data-event-id="${ev.id}" data-event-title="${encodeURIComponent(ev.title || '')}">
                             <i class="fas fa-trash"></i>
                         </button>
@@ -3773,11 +3915,32 @@ class HolwertAdmin {
             </tr>`;
         }).join('');
 
+        const mobileCards = (events || []).map(ev => {
+            const startTxt = ev.event_date ? new Date(ev.event_date).toLocaleString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Geen datum';
+            const location = ev.location || 'Geen locatie';
+            const org = ev.organization_name || 'Geen organisatie';
+            return `<div class="list-card">
+                <div class="list-card-title">${this.escHtml(ev.title || '')}</div>
+                <div class="list-card-meta">
+                    <span>${startTxt}</span>
+                    <span class="list-card-meta-sep" aria-hidden="true">·</span>
+                    <span>${this.escHtml(location)}</span>
+                    <span class="list-card-meta-sep" aria-hidden="true">·</span>
+                    <span>${this.escHtml(org)}</span>
+                    <span class="list-card-meta-sep" aria-hidden="true">·</span>
+                    <span class="list-card-status status-published">Gepubliceerd</span>
+                </div>
+                <div class="list-card-actions action-buttons">
+                    <button type="button" class="btn-icon btn-view" data-event-action="view" data-event-id="${ev.id}" title="Bekijken"><i class="fas fa-eye"></i></button>
+                    <button type="button" class="btn-icon btn-edit" data-event-action="edit" data-event-id="${ev.id}" title="Bewerken"><i class="fas fa-edit"></i></button>
+                    <button type="button" class="btn-icon btn-secondary" data-event-action="duplicate" data-event-id="${ev.id}" title="Dupliceren"><i class="fas fa-copy"></i></button>
+                    <button type="button" class="btn-icon btn-delete" data-event-action="delete" data-event-id="${ev.id}" data-event-title="${encodeURIComponent(ev.title || '')}" title="Verwijderen"><i class="fas fa-trash"></i></button>
+                </div>
+            </div>`;
+        }).join('');
+
         container.innerHTML = `
-            <div class="section-header">
-                <h2>Evenementen</h2>
-            </div>
-            <div class="data-table-container">
+            <div class="desktop-view data-table-container">
                 <table class="data-table">
                     <thead>
                         <tr>
@@ -3793,6 +3956,9 @@ class HolwertAdmin {
                         ${rows || ''}
                     </tbody>
                 </table>
+            </div>
+            <div class="mobile-cards-container mobile-view">
+                ${mobileCards || '<p class="empty-message">Geen evenementen</p>'}
             </div>
         `;
     }
@@ -3820,6 +3986,21 @@ class HolwertAdmin {
     async editEvent(id) {
         // Gebruik de nieuwe uniforme openEventModal functie
         await this.openEventModal(id, 'edit');
+    }
+
+    async duplicateEvent(id) {
+        await this.openEventModal(id, 'duplicate');
+    }
+
+    /** Voor dupliceren: titel met (kopie), datums leeg. */
+    applyEventDuplicateDefaults(initial) {
+        const baseTitle = String(initial.title || '').trim();
+        initial.title =
+            baseTitle && !/\(kopie\)\s*$/i.test(baseTitle)
+                ? `${baseTitle} (kopie)`
+                : baseTitle || 'Evenement (kopie)';
+        initial.event_date = '';
+        initial.event_end_date = '';
     }
 
     async deleteEvent(id, title) {
@@ -4409,8 +4590,11 @@ class HolwertAdmin {
 
     async loadPractical() {
         const tbody = document.getElementById('practicalTableBody');
+        const mobileList = document.getElementById('practicalMobileList');
         if (!tbody) return;
+        const emptyMsg = 'Nog geen praktische items. Klik op "Nieuw item" om de eerste tegel toe te voegen.';
         tbody.innerHTML = '<tr><td colspan="6">Laden...</td></tr>';
+        if (mobileList) mobileList.innerHTML = '<p class="empty-message">Laden...</p>';
         try {
             const response = await fetch(`${this.apiBaseUrl}/admin/practical-info`, {
                 headers: { 'Authorization': `Bearer ${this.token}` }
@@ -4419,12 +4603,14 @@ class HolwertAdmin {
                 const errText = await response.text().catch(() => '');
                 console.error('Failed to load practical info:', response.status, errText);
                 tbody.innerHTML = `<tr><td colspan="6">Fout bij laden (status ${response.status})</td></tr>`;
+                if (mobileList) mobileList.innerHTML = `<p class="empty-message">Fout bij laden (status ${response.status})</p>`;
                 return;
             }
             const data = await response.json();
             const items = data.items || [];
             if (!items.length) {
-                tbody.innerHTML = '<tr><td colspan="6">Nog geen praktische items. Klik op \"Nieuw item\" om de eerste tegel toe te voegen.</td></tr>';
+                tbody.innerHTML = `<tr><td colspan="6">${emptyMsg}</td></tr>`;
+                if (mobileList) mobileList.innerHTML = `<p class="empty-message">${emptyMsg}</p>`;
                 return;
             }
             tbody.innerHTML = items.map(item => `
@@ -4440,9 +4626,30 @@ class HolwertAdmin {
                     </td>
                 </tr>
             `).join('');
+            if (mobileList) {
+                mobileList.innerHTML = items.map(item => {
+                    const statusLabel = item.is_active ? 'Actief' : 'Inactief';
+                    const statusClass = item.is_active ? 'status-published' : 'status-draft';
+                    return `<div class="list-card">
+                        <div class="list-card-title">${this.escHtml(item.title || '')}</div>
+                        <div class="list-card-meta">
+                            <span>Volgorde ${item.sort_order ?? 0}</span>
+                            <span class="list-card-meta-sep" aria-hidden="true">·</span>
+                            <span>${this.escHtml(item.type || 'info')}</span>
+                            <span class="list-card-meta-sep" aria-hidden="true">·</span>
+                            <span class="list-card-status ${statusClass}">${statusLabel}</span>
+                        </div>
+                        <div class="list-card-actions">
+                            <button class="btn btn-sm btn-warning" onclick="admin.editPractical(${item.id})"><i class="fas fa-edit"></i> Bewerken</button>
+                            <button class="btn btn-sm btn-danger" onclick="admin.deletePractical(${item.id})"><i class="fas fa-trash"></i> Verwijderen</button>
+                        </div>
+                    </div>`;
+                }).join('');
+            }
         } catch (error) {
             console.error('Error loading practical info:', error);
             tbody.innerHTML = '<tr><td colspan="6">Fout bij laden praktische info</td></tr>';
+            if (mobileList) mobileList.innerHTML = '<p class="empty-message">Fout bij laden praktische info</p>';
         }
     }
 
@@ -4544,8 +4751,8 @@ class HolwertAdmin {
                             <small class="text-muted">Alleen gebruikt als type = Telefoon/Link. In de app wordt telefoon en website beide getoond (indien ingevuld).</small>
                         </div>
                         <div class="form-group">
-                            <label for="practicalContent">Beschrijving / extra tekst</label>
-                            <textarea id="practicalContent" rows="3" placeholder="Korte omschrijving van deze tegel...">${(item?.content || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
+                            <label for="practicalDescription">Beschrijving / extra tekst</label>
+                            <textarea id="practicalDescription" rows="3" placeholder="Korte omschrijving van deze tegel...">${(item?.content || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
                         </div>
                         <div class="form-group">
                             <label for="practicalSortOrder">Volgorde</label>
@@ -5099,15 +5306,17 @@ class HolwertAdmin {
 
     async savePractical(existingItem = null) {
         try {
-            const titleEl = document.getElementById('practicalTitle');
-            const subtitleEl = document.getElementById('practicalSubtitle');
-            const iconEl = document.getElementById('practicalIcon');
-            const typeEl = document.getElementById('practicalType');
-            const phoneEl = document.getElementById('practicalPhone');
-            const urlEl = document.getElementById('practicalUrl');
-            const contentEl = document.getElementById('practicalContent');
-            const sortEl = document.getElementById('practicalSortOrder');
-            const activeEl = document.getElementById('practicalActive');
+            const modal = document.querySelector('.modal-overlay.practical-modal');
+            const q = (sel) => modal?.querySelector(sel) || document.getElementById(sel.replace('#', ''));
+            const titleEl = q('#practicalTitle');
+            const subtitleEl = q('#practicalSubtitle');
+            const iconEl = q('#practicalIcon');
+            const typeEl = q('#practicalType');
+            const phoneEl = q('#practicalPhone');
+            const urlEl = q('#practicalUrl');
+            const contentEl = q('#practicalDescription');
+            const sortEl = q('#practicalSortOrder');
+            const activeEl = q('#practicalActive');
 
             if (!titleEl) {
                 this.showNotification('Formulier voor Praktisch niet gevonden.', 'error');
@@ -5132,7 +5341,7 @@ class HolwertAdmin {
             const url = parts.length ? parts.join(', ') : '';
             const sort_order = parseInt(sortEl?.value || '0', 10) || 0;
             const is_active = !!activeEl?.checked;
-            const content = contentEl?.value || existingItem?.content || null;
+            const content = (contentEl?.value ?? '').trim() || null;
 
             const body = {
                 title,
@@ -5250,8 +5459,73 @@ class HolwertAdmin {
         }
     }
 
+    async loadModerationNotificationEmail() {
+        const input = document.getElementById('moderationNotificationEmail');
+        if (!input) return;
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/admin/settings/moderation-notification`, {
+                headers: {
+                    Authorization: `Bearer ${this.token}`,
+                    'Content-Type': 'application/json',
+                },
+            });
+            if (!response.ok) return;
+            const data = await response.json();
+            input.value = data.email || '';
+        } catch (error) {
+            console.warn('Kon moderation notification email niet laden:', error.message);
+        }
+    }
+
+    async saveModerationNotificationEmail() {
+        const input = document.getElementById('moderationNotificationEmail');
+        const msgEl = document.getElementById('moderationNotificationEmailMsg');
+        if (!input) return;
+
+        const email = (input.value || '').trim();
+        if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            if (msgEl) {
+                msgEl.textContent = 'Voer een geldig e-mailadres in.';
+                msgEl.className = 'form-message error';
+            }
+            return;
+        }
+
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/admin/settings/moderation-notification`, {
+                method: 'PUT',
+                headers: {
+                    Authorization: `Bearer ${this.token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ email }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data.error || data.message || `HTTP ${response.status}`);
+            }
+            if (msgEl) {
+                msgEl.textContent = email
+                    ? 'Notificatie-adres opgeslagen.'
+                    : 'Notificaties uitgeschakeld (geen adres ingesteld).';
+                msgEl.className = 'form-message success';
+            }
+            this.showNotification(
+                email ? 'Notificatie-adres opgeslagen' : 'Moderatie-mails uitgeschakeld',
+                'success',
+            );
+        } catch (error) {
+            if (msgEl) {
+                msgEl.textContent = 'Opslaan mislukt: ' + (error.message || error);
+                msgEl.className = 'form-message error';
+            }
+        }
+    }
+
     async loadModeration() {
         try {
+            await this.loadModerationNotificationEmail();
+
             const container = document.getElementById('moderationContent');
             if (!container) return;
 
@@ -5566,7 +5840,11 @@ class HolwertAdmin {
                                 </div>
                                 <div class="detail-row">
                                     <label>App-versie:</label>
-                                    <span>${user.last_app_version ? user.last_app_version : 'Onbekend'}${user.last_app_version_at ? ` <span class="text-muted">(${new Date(user.last_app_version_at).toLocaleString('nl-NL')})</span>` : ''}</span>
+                                    <span>${formatUserAppClientSummary(user)}${user.last_app_version_at ? ` <span class="text-muted">(laatst gezien ${new Date(user.last_app_version_at).toLocaleString('nl-NL')})</span>` : ''}</span>
+                                </div>
+                                <div class="detail-row">
+                                    <label>Platform:</label>
+                                    <span>${formatAppPlatformLabel(user.last_app_platform) || 'Onbekend'}</span>
                                 </div>
                                 <div class="detail-row">
                                     <label>Geregistreerd:</label>
@@ -6421,6 +6699,10 @@ class HolwertAdmin {
                         ticket_label: ev.ticket_label || ''
                     };
                     console.log('Initial data set:', initial);
+
+                    if (mode === 'duplicate') {
+                        this.applyEventDuplicateDefaults(initial);
+                    }
                     
                 } catch (err) {
                     console.error('Error loading event:', err);
@@ -6502,11 +6784,12 @@ class HolwertAdmin {
                 overlay.innerHTML = `
                     <div class="modal-content">
                         <div class="modal-header">
-                            <h3>${mode === 'create' ? 'Nieuw event' : 'Event bewerken'}</h3>
+                            <h3>${mode === 'create' ? 'Nieuw event' : mode === 'duplicate' ? 'Evenement dupliceren' : 'Event bewerken'}</h3>
                             <button type="button" class="close js-event-modal-close" aria-label="Sluiten">&times;</button>
                         </div>
                         <div class="modal-body">
                             <form id="eventForm" class="form">
+                                ${initial.pdf_url ? `<input type="hidden" id="evExistingPdf" value="${initial.pdf_url}">` : ''}
                                 <div class="form-group">
                                     <label>Titel</label>
                                     <input type="text" id="evTitle" value="${initial.title}" placeholder="Titel">
@@ -6519,10 +6802,12 @@ class HolwertAdmin {
                                     <div class="form-group">
                                         <label>Begindatum</label>
                                         <input type="datetime-local" id="evStart" value="${initial.event_date}">
+                                        ${mode === 'duplicate' ? '<small class="form-hint">Vul een nieuwe begindatum in.</small>' : ''}
                                     </div>
                                     <div class="form-group">
                                         <label>Einddatum</label>
                                         <input type="datetime-local" id="evEnd" value="${initial.event_end_date}">
+                                        ${mode === 'duplicate' ? '<small class="form-hint">Optioneel; leeg = eendaags.</small>' : ''}
                                     </div>
                                 </div>
                                 <div class="form-group">
@@ -6589,7 +6874,12 @@ class HolwertAdmin {
             });
 
             if (mode !== 'view') {
-                const saveId = eventId != null && eventId !== '' ? parseInt(eventId, 10) : null;
+                const saveId =
+                    mode === 'create' || mode === 'duplicate'
+                        ? null
+                        : eventId != null && eventId !== ''
+                          ? parseInt(eventId, 10)
+                          : null;
                 const saveBtn = overlay.querySelector('#eventFormSaveBtn');
                 if (saveBtn) {
                     saveBtn.addEventListener('click', () => {
@@ -6617,6 +6907,9 @@ class HolwertAdmin {
                 if (startEl && endEl) {
                     startEl.addEventListener('change', syncEnd);
                     syncEnd();
+                }
+                if (mode === 'duplicate') {
+                    setTimeout(() => startEl?.focus(), 150);
                 }
             }
         } catch (e) {
@@ -6683,7 +6976,6 @@ class HolwertAdmin {
                     return;
                 }
             } else {
-                // Als er geen nieuwe afbeelding is geüpload, behoud de bestaande (bij edit)
                 const existingImage = document.querySelector('#evImagePreviewImg')?.src;
                 if (existingImage && existingImage.startsWith('data:image')) {
                     const uploadRes = await fetch(`${this.apiBaseUrl}/upload/image`, {
@@ -6705,13 +6997,11 @@ class HolwertAdmin {
                     }
                     const uploadJson = await uploadRes.json();
                     imageUrl = uploadJson.imageUrl || null;
-                } else if (actualEventId) {
-                    // Bij bewerken zonder nieuwe afbeelding, haal de bestaande image_url op
+                } else {
                     const existingImageUrl = document.querySelector('[data-existing-image]')?.getAttribute('data-existing-image');
                     if (existingImageUrl) {
                         imageUrl = existingImageUrl;
-                    } else {
-                        // Stuur undefined in plaats van null, zodat backend de bestaande waarde behoudt
+                    } else if (actualEventId) {
                         imageUrl = undefined;
                     }
                 }
@@ -6750,6 +7040,11 @@ class HolwertAdmin {
                 }
             } else if (removePdf) {
                 body.pdf_url = null;
+            } else {
+                const existingPdf = document.getElementById('evExistingPdf')?.value;
+                if (existingPdf) {
+                    body.pdf_url = existingPdf;
+                }
             }
 
             body.ticket_url = (document.getElementById('evTicketUrl')?.value || '').trim() || null;

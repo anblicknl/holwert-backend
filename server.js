@@ -428,6 +428,7 @@ function getMigrationsReady() {
         await ensurePrivacyStatementColumn();
         await ensurePracticalInfoTable();
         await ensureContentPagesTable();
+        await ensureAppSettingsTable();
         await ensureAfvalkalenderTable();
         await initializePushNotificationsTables();
         await ensureOrgPasswordResetsTable();
@@ -5607,6 +5608,67 @@ app.delete('/api/admin/practical-info/:id', authenticateToken, requireAdmin, asy
   }
 });
 
+// ── App-instellingen (admin) ─────────────────────────────────
+const MODERATION_NOTIFICATION_EMAIL_KEY = 'moderation_notification_email';
+
+async function ensureAppSettingsTable() {
+  try {
+    await executeQuery(`CREATE TABLE IF NOT EXISTS app_settings (
+      setting_key VARCHAR(100) PRIMARY KEY,
+      setting_value TEXT,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )`);
+  } catch (e) {
+    console.error('ensureAppSettingsTable error:', e.message);
+  }
+}
+
+async function getAppSetting(key, defaultValue = '') {
+  await ensureAppSettingsTable();
+  const result = await executeQuery('SELECT setting_value FROM app_settings WHERE setting_key = ? LIMIT 1', [key]);
+  const value = result.rows?.[0]?.setting_value;
+  return value != null && String(value).trim() !== '' ? String(value).trim() : defaultValue;
+}
+
+async function setAppSetting(key, value) {
+  await ensureAppSettingsTable();
+  await executeQuery(
+    `INSERT INTO app_settings (setting_key, setting_value) VALUES (?, ?)
+     ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)`,
+    [key, value],
+  );
+}
+
+async function getModerationNotificationEmail() {
+  const fromDb = await getAppSetting(MODERATION_NOTIFICATION_EMAIL_KEY, '');
+  const fromEnv = (process.env.MODERATION_NOTIFICATION_EMAIL || process.env.ADMIN_NOTIFICATION_EMAIL || '').trim();
+  return fromDb || fromEnv || null;
+}
+
+app.get('/api/admin/settings/moderation-notification', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const email = await getAppSetting(MODERATION_NOTIFICATION_EMAIL_KEY, '');
+    res.json({ email });
+  } catch (error) {
+    console.error('Get moderation notification email error:', error);
+    res.status(500).json({ error: 'Kon instelling niet ophalen', message: error.message });
+  }
+});
+
+app.put('/api/admin/settings/moderation-notification', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const email = req.body?.email != null ? String(req.body.email).trim() : '';
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ error: 'Ongeldig e-mailadres' });
+    }
+    await setAppSetting(MODERATION_NOTIFICATION_EMAIL_KEY, email);
+    res.json({ success: true, email });
+  } catch (error) {
+    console.error('Save moderation notification email error:', error);
+    res.status(500).json({ error: 'Kon instelling niet opslaan', message: error.message });
+  }
+});
+
 // ── Content Pages (admin) ────────────────────────────────────
 app.get('/api/admin/content-pages', authenticateToken, requireAdmin, async (req, res) => {
   try {
@@ -7245,49 +7307,43 @@ app.get('/api/organizations', async (req, res) => {
 // Maakt een organisatie aan met is_approved = false; verschijnt in admin voor moderatie.
 /**
  * Stuur een notificatie-e-mail naar de beheerder wanneer een nieuwe organisatie
- * zich heeft aangemeld. Gebruikt dezelfde Resend-integratie als wachtwoord-reset.
- * Het doeladres staat in de env-variabele ADMIN_NOTIFICATION_EMAIL.
+ * zich heeft aangemeld. Gebruikt de PHP mail-proxy op de hosting (zelfde als overige mails).
+ * Doeladres: admin-panel → Moderatie, of env MODERATION_NOTIFICATION_EMAIL als fallback.
  */
 async function sendNewOrgNotificationEmail({ orgName, orgEmail, orgId }) {
-  const key = process.env.RESEND_API_KEY;
-  const from = process.env.RESEND_FROM || 'Holwert Dorpsapp <onboarding@resend.dev>';
-  const to = process.env.ADMIN_NOTIFICATION_EMAIL;
-  if (!key || !to) {
-    console.log('[register] Notificatie-mail overgeslagen (RESEND_API_KEY of ADMIN_NOTIFICATION_EMAIL ontbreekt).');
-    return;
+  const toEmail = await getModerationNotificationEmail();
+  if (!toEmail) {
+    console.log('[register] Notificatie-mail overgeslagen (geen moderation_notification_email ingesteld).');
+    return { ok: false, reason: 'no_recipient' };
   }
-  const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  const esc = (s) =>
+    String(s ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+
   const adminUrl = 'https://holwert.appenvloed.com/admin/#organizations';
-  const res = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      from,
-      to: [to],
-      subject: `🔔 Nieuwe aanmelding: ${orgName}`,
-      html: `
-        <h2 style="color:#1a1a2e">Nieuwe organisatie aangemeld</h2>
-        <p>Er heeft zich zojuist een nieuwe organisatie aangemeld voor de <strong>Holwert Dorpsapp</strong>.</p>
-        <table style="border-collapse:collapse;margin:1rem 0">
-          <tr><td style="padding:4px 12px 4px 0;color:#555">Naam</td><td><strong>${esc(orgName)}</strong></td></tr>
-          <tr><td style="padding:4px 12px 4px 0;color:#555">E-mail</td><td>${esc(orgEmail)}</td></tr>
-          <tr><td style="padding:4px 12px 4px 0;color:#555">ID</td><td>${esc(orgId)}</td></tr>
-        </table>
-        <p>
-          <a href="${adminUrl}" style="background:#1a1a2e;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block">
-            Bekijk in admin-panel →
-          </a>
-        </p>
-        <p style="color:#999;font-size:0.85em">Holwert Dorpsapp · automatische melding</p>
-      `,
-    }),
-  });
-  if (!res.ok) {
-    const t = await res.text();
-    console.error('[register] Resend-fout:', res.status, t);
-  } else {
-    console.log('[register] Notificatie-mail verstuurd naar', to);
-  }
+  const subject = `Nieuwe aanmelding: ${orgName}`;
+  const html = `<h2 style="color:#1a1a2e">Nieuwe organisatie aangemeld</h2>
+<p>Er heeft zich zojuist een nieuwe organisatie aangemeld voor de <strong>Holwert Dorpsapp</strong>.</p>
+<table style="border-collapse:collapse;margin:1rem 0">
+  <tr><td style="padding:4px 12px 4px 0;color:#555">Naam</td><td><strong>${esc(orgName)}</strong></td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#555">E-mail</td><td>${esc(orgEmail || '—')}</td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#555">ID</td><td>${esc(orgId)}</td></tr>
+</table>
+<p><a href="${esc(adminUrl)}" style="background:#1a1a2e;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block">Bekijk in admin-panel</a></p>
+<p style="color:#999;font-size:0.85em">Holwert Dorpsapp · automatische melding</p>`;
+  const text = `Nieuwe organisatie aangemeld voor de Holwert Dorpsapp.
+
+Naam: ${orgName}
+E-mail: ${orgEmail || '—'}
+ID: ${orgId}
+
+Admin-panel: ${adminUrl}`;
+
+  return sendMailViaHosting({ toEmail, subject, html, text });
 }
 
 app.post('/api/organizations/register', orgRegisterRateLimiter, async (req, res) => {
@@ -7368,9 +7424,15 @@ app.post('/api/organizations/register', orgRegisterRateLimiter, async (req, res)
     console.log('[POST /api/organizations/register] New organization registered:', { id, name: name.trim() });
 
     // Stuur notificatie-e-mail naar de beheerder (fire-and-forget, nooit blocking)
-    sendNewOrgNotificationEmail({ orgName: name.trim(), orgEmail: email?.trim() ?? '', orgId: id }).catch(
-      (err) => console.error('[register] notificatie-mail mislukt:', err.message)
-    );
+    sendNewOrgNotificationEmail({ orgName: name.trim(), orgEmail: email?.trim() ?? '', orgId: id })
+      .then((result) => {
+        if (result?.ok) {
+          console.log('[register] Notificatie-mail verstuurd via mail-proxy');
+        } else if (result?.reason !== 'no_recipient') {
+          console.warn('[register] Notificatie-mail mislukt:', result?.reason || 'onbekend');
+        }
+      })
+      .catch((err) => console.error('[register] notificatie-mail mislukt:', err.message));
 
     res.status(201).json({
       success: true,

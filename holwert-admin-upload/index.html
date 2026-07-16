@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Holwert Dorpsapp - Admin Panel</title>
-    <link rel="stylesheet" href="styles.css?v=20260705-org-column">
+    <link rel="stylesheet" href="styles.css?v=20260716-admin-mobile1">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
 <body>
@@ -46,6 +46,9 @@
         <!-- Header -->
         <header class="header">
             <div class="header-left">
+                <button type="button" id="sidebarToggle" class="sidebar-toggle" aria-label="Menu openen" aria-expanded="false" aria-controls="sidebarNav">
+                    <i class="fas fa-bars" aria-hidden="true"></i>
+                </button>
                 <img src="logo.svg" alt="Holwert Logo">
                 <h1 style="display: inline-block; vertical-align: middle;">Holwert Dorpsapp</h1>
                 <span id="demoModeIndicator" class="demo-indicator" style="display: none;">DEMO MODE</span>
@@ -59,7 +62,7 @@
         </header>
 
         <!-- Sidebar -->
-        <nav class="sidebar">
+        <nav id="sidebarNav" class="sidebar">
             <ul class="nav-menu">
                 <li class="nav-item active" data-section="dashboard">
                     <i class="fas fa-tachometer-alt"></i>
@@ -96,6 +99,8 @@
             </ul>
         </nav>
 
+        <div id="sidebarBackdrop" class="sidebar-backdrop" aria-hidden="true"></div>
+
         <!-- Main Content -->
         <main class="main-content">
             <!-- Dashboard Section -->
@@ -110,7 +115,7 @@
                         </div>
                         <div class="stat-content">
                             <h3 id="totalUsers">-</h3>
-                            <p>Totaal Gebruikers</p>
+                            <p>App-gebruikers</p>
                         </div>
                     </div>
                     <div class="stat-card">
@@ -191,7 +196,8 @@
                         <option value="">Alle categorieën</option>
                     </select>
                 </div>
-                <div class="table-container">
+                <div id="organizationsListWrap">
+                <div class="desktop-view table-container">
                     <table class="data-table">
                         <thead>
                             <tr>
@@ -207,6 +213,8 @@
                             <!-- Organizations will be loaded here -->
                         </tbody>
                     </table>
+                </div>
+                <div id="organizationsMobileList" class="mobile-cards-container mobile-view"></div>
                 </div>
             </section>
 
@@ -254,10 +262,7 @@
                         <i class="fas fa-plus"></i> Nieuw item
                     </button>
                 </div>
-                <div id="practicalContent">
-                    <!-- Practical info items will be loaded here by JavaScript -->
-                </div>
-                <div class="table-container">
+                <div class="desktop-view table-container">
                     <table class="data-table">
                         <thead>
                             <tr>
@@ -273,6 +278,7 @@
                         </tbody>
                     </table>
                 </div>
+                <div id="practicalMobileList" class="mobile-cards-container mobile-view"></div>
 
                 <hr style="margin: 2rem 0; border: 0; border-top: 1px solid #e0e0e0;">
 
@@ -355,6 +361,21 @@
                 <div class="section-header">
                     <h2><i class="fas fa-check-circle"></i> Moderatie</h2>
                 </div>
+                <div class="card moderation-settings-card" style="margin-bottom: 24px; padding: 20px;">
+                    <h3 style="margin: 0 0 8px; font-size: 1.05rem;">E-mail bij nieuwe aanmelding</h3>
+                    <p class="section-description" style="margin-bottom: 16px;">
+                        Ontvang een melding wanneer een organisatie zich aanmeldt en op goedkeuring wacht.
+                        Laat leeg om geen mails te versturen.
+                    </p>
+                    <div class="form-group" style="max-width: 420px;">
+                        <label for="moderationNotificationEmail">Notificatie-adres</label>
+                        <input type="email" id="moderationNotificationEmail" class="form-control" placeholder="bijv. beheer@jouwdomein.nl" autocomplete="email">
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px;">
+                        <button type="button" id="saveModerationNotificationEmailBtn" class="btn btn-primary">Opslaan</button>
+                        <span id="moderationNotificationEmailMsg" class="form-message" style="margin: 0;"></span>
+                    </div>
+                </div>
                 <div class="moderation-tabs">
                     <button class="tab-btn active" data-type="all">Alle Pending</button>
                     <button class="tab-btn" data-type="news">Nieuws</button>
@@ -395,6 +416,6 @@
         console.log('🔧 VERSION: ADMIN-ORG-EVENTS-20260225-1');
     </script>
     <!-- Cache-busting query parameter zodat nieuwe app.js altijd wordt opgehaald -->
-    <script src="app.js?v=20260711-orgsort1"></script>
+    <script src="app.js?v=20260716-moderation-mail1"></script>
 </body>
 </html>
