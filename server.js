@@ -346,46 +346,71 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' })); // Verhoogd voor afbeelding uploads
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-/** App-versie uit mobiele client (X-App-Version: 1.0.3+2). */
+/** App-versie en platform uit mobiele client. */
 app.use((req, res, next) => {
   const raw = req.headers['x-app-version'];
   req.appVersion = typeof raw === 'string' ? raw.trim().slice(0, 32) : null;
+  const platRaw = req.headers['x-app-platform'];
+  req.appPlatform =
+    typeof platRaw === 'string' ? normalizeAppPlatform(platRaw) : null;
   next();
 });
 
+function normalizeAppPlatform(raw) {
+  const p = String(raw || '').trim().toLowerCase().slice(0, 16);
+  if (p === 'ios' || p === 'android' || p === 'web') return p;
+  return p || null;
+}
+
 const appVersionLastSaved = new Map();
 
-async function ensureUserAppVersionColumns() {
-  for (const col of [
-    { name: 'last_app_version', type: 'VARCHAR(32) NULL' },
-    { name: 'last_app_version_at', type: 'DATETIME NULL' },
-  ]) {
-    try {
-      const result = await executeQuery(
-        "SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = ?",
-        [col.name]
-      );
-      if (result.rows?.length) continue;
-      await executeQuery(`ALTER TABLE users ADD COLUMN ${col.name} ${col.type}`);
-      console.log(`✅ users.${col.name} toegevoegd`);
-    } catch (e) {
-      if (e.code === 'ER_DUP_FIELDNAME' || String(e.message || '').includes('Duplicate')) continue;
-      console.warn(`ensureUserAppVersionColumns ${col.name}:`, e.message);
+async function ensureUserAppClientColumn(name, type) {
+  try {
+    await executeQuery(`SELECT ${name} FROM users LIMIT 1`);
+    return;
+  } catch (probeErr) {
+    const msg = String(probeErr.message || probeErr.sqlMessage || '').toLowerCase();
+    if (!msg.includes('unknown column') || !msg.includes(name.toLowerCase())) {
+      console.warn(`ensureUserAppClientColumn ${name} probe:`, probeErr.message || probeErr);
+      return;
     }
+  }
+  try {
+    await executeQuery(`ALTER TABLE users ADD COLUMN ${name} ${type}`);
+    console.log(`✅ users.${name} toegevoegd`);
+  } catch (e) {
+    if (e.code === 'ER_DUP_FIELDNAME' || String(e.message || '').includes('Duplicate')) return;
+    console.warn(`ensureUserAppClientColumn ${name} alter:`, e.message);
   }
 }
 
-async function recordUserAppVersionIfNeeded(userId, version) {
-  if (!userId || !version) return;
+async function ensureUserAppVersionColumns() {
+  await ensureUserAppClientColumn('last_app_version', 'VARCHAR(32) NULL');
+  await ensureUserAppClientColumn('last_app_version_at', 'DATETIME NULL');
+  await ensureUserAppClientColumn('last_app_platform', 'VARCHAR(16) NULL');
+}
+
+async function recordUserAppClientIfNeeded(userId, version, platform) {
+  if (!userId || (!version && !platform)) return;
   const now = Date.now();
   const last = appVersionLastSaved.get(userId) || 0;
   if (now - last < 60 * 60 * 1000) return;
   appVersionLastSaved.set(userId, now);
   await ensureUserAppVersionColumns();
-  await executeQuery(
-    'UPDATE users SET last_app_version = ?, last_app_version_at = NOW() WHERE id = ?',
-    [String(version).slice(0, 32), userId]
-  );
+  const sets = [];
+  const params = [];
+  if (version) {
+    sets.push('last_app_version = ?');
+    params.push(String(version).slice(0, 32));
+    sets.push('last_app_version_at = NOW()');
+  }
+  if (platform) {
+    sets.push('last_app_platform = ?');
+    params.push(platform);
+  }
+  if (!sets.length) return;
+  params.push(userId);
+  await executeQuery(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`, params);
 }
 
 // Wacht op database-migraties voor elke request (Vercel serverless cold start)
@@ -685,6 +710,51 @@ function isMysqlDataTooLongError(err) {
   if (err.code === 'ER_DATA_TOO_LONG' || err.errno === 1406) return true;
   const m = err.message || err.sqlMessage || '';
   return typeof m === 'string' && (m.includes('Data too long') || m.includes('too long for column'));
+}
+
+function isMysqlForeignKeyError(err) {
+  if (!err) return false;
+  if (err.code === 'ER_ROW_IS_REFERENCED_2' || err.errno === 1451) return true;
+  if (err.code === '23503') return true;
+  const m = String(err.message || err.sqlMessage || '').toLowerCase();
+  return m.includes('foreign key') || m.includes('a foreign key constraint fails');
+}
+
+async function deleteOrganizationAndRelated(orgId) {
+  const orgCheck = await executeQuery('SELECT id, name FROM organizations WHERE id = ? LIMIT 1', [orgId]);
+  if (!orgCheck.rows?.length) return { ok: false, status: 404, error: 'Organization not found' };
+
+  const userRows = await executeQuery('SELECT id FROM users WHERE organization_id = ?', [orgId]);
+  const userIds = (userRows.rows || []).map((r) => r.id).filter((id) => id != null);
+
+  for (const uid of userIds) {
+    try {
+      await executeQuery('DELETE FROM org_password_resets WHERE user_id = ?', [uid]);
+    } catch (e) {
+      if (!isMysqlMissingTableError(e)) throw e;
+    }
+  }
+
+  const safeDelete = async (sql, params) => {
+    try {
+      await executeQuery(sql, params);
+    } catch (e) {
+      if (!isMysqlMissingTableError(e)) throw e;
+    }
+  };
+
+  await safeDelete('DELETE FROM push_notification_mutes WHERE organization_id = ?', [orgId]);
+  await executeQuery('DELETE FROM follows WHERE organization_id = ?', [orgId]);
+  await executeQuery('DELETE FROM news WHERE organization_id = ?', [orgId]);
+  await executeQuery('DELETE FROM events WHERE organization_id = ?', [orgId]);
+  if (userIds.length) {
+    await executeQuery('DELETE FROM users WHERE organization_id = ?', [orgId]);
+  }
+
+  const result = await executeQuery('DELETE FROM organizations WHERE id = ?', [orgId]);
+  if (!result.rowCount) return { ok: false, status: 404, error: 'Organization not found' };
+
+  return { ok: true, name: orgCheck.rows[0].name };
 }
 
 /**
@@ -1083,8 +1153,8 @@ const authenticateToken = (req, res, next) => {
       });
     }
     req.user = user;
-    if (req.appVersion && user?.userId) {
-      recordUserAppVersionIfNeeded(user.userId, req.appVersion).catch(() => {});
+    if ((req.appVersion || req.appPlatform) && user?.userId) {
+      recordUserAppClientIfNeeded(user.userId, req.appVersion, req.appPlatform).catch(() => {});
     }
     next();
   });
@@ -2153,7 +2223,6 @@ app.post('/api/push/token', authenticateToken, async (req, res) => {
       );
       
       console.log(`✅ Updated push token for user ${userId}`);
-      res.json({ success: true, message: 'Push token updated' });
     } else {
       // Insert new token
       await executeQuery(
@@ -2163,8 +2232,17 @@ app.post('/api/push/token', authenticateToken, async (req, res) => {
       );
       
       console.log(`✅ Registered new push token for user ${userId}`);
-      res.json({ success: true, message: 'Push token registered' });
     }
+
+    // Eén actief token per apparaattype — voorkomt dubbele pushes (vooral iOS na herinstallatie/update)
+    await executeQuery(
+      `UPDATE push_tokens
+       SET is_active = false, updated_at = CURRENT_TIMESTAMP
+       WHERE user_id = ? AND token != ? AND (device_type <=> ? OR (? IS NULL AND device_type IS NULL))`,
+      [userId, token, device_type ?? null, device_type ?? null]
+    );
+
+    res.json({ success: true, message: existingToken.rows.length > 0 ? 'Push token updated' : 'Push token registered' });
   } catch (error) {
     console.error('Register push token error:', error);
     res.status(500).json({ error: 'Failed to register push token', message: error.message });
@@ -2434,17 +2512,38 @@ app.post('/api/push/deactivate', authenticateToken, async (req, res) => {
   }
 });
 
+// Heractiveer hooguit het meest recente token per apparaattype (niet alle oude tokens).
+async function reactivateLatestPushTokensForUser(userId) {
+  const rows = await executeQuery(
+    `SELECT id, device_type FROM push_tokens
+     WHERE user_id = ?
+     ORDER BY last_used_at DESC, updated_at DESC, id DESC`,
+    [userId]
+  );
+  await executeQuery(
+    'UPDATE push_tokens SET is_active = false, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?',
+    [userId]
+  );
+  const seenTypes = new Set();
+  for (const row of rows.rows || []) {
+    const dt = row.device_type || 'unknown';
+    if (seenTypes.has(dt)) continue;
+    seenTypes.add(dt);
+    await executeQuery(
+      'UPDATE push_tokens SET is_active = true, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [row.id]
+    );
+  }
+}
+
 // Reactivate all push tokens for current user (bijv. na hoofdschakelaar weer aan)
 app.post('/api/push/reactivate', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.userId;
 
-    await executeQuery(
-      'UPDATE push_tokens SET is_active = true, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?',
-      [userId]
-    );
+    await reactivateLatestPushTokensForUser(userId);
 
-    console.log(`✅ Reactivated push tokens for user ${userId}`);
+    console.log(`✅ Reactivated latest push token(s) per device for user ${userId}`);
     res.json({ success: true, message: 'Push tokens reactivated' });
   } catch (error) {
     console.error('Reactivate push tokens error:', error);
@@ -3094,8 +3193,8 @@ app.post('/api/auth/login', loginRateLimiter, async (req, res) => {
 
     const organizationId = user.organization_id != null ? parseInt(user.organization_id, 10) : null;
 
-    if (req.appVersion) {
-      recordUserAppVersionIfNeeded(user.id, req.appVersion).catch(() => {});
+    if (req.appVersion || req.appPlatform) {
+      recordUserAppClientIfNeeded(user.id, req.appVersion, req.appPlatform).catch(() => {});
     }
 
     // Generate JWT token (organization_id voor dashboard /api/org/*)
@@ -3446,6 +3545,10 @@ const handleRegister = async (req, res) => {
       { expiresIn: '30d' }
     );
 
+    if (req.appVersion || req.appPlatform) {
+      recordUserAppClientIfNeeded(userId, req.appVersion, req.appPlatform).catch(() => {});
+    }
+
     res.status(201).json({
       message: 'Account aangemaakt',
       token,
@@ -3661,6 +3764,56 @@ app.put('/api/auth/profile', authenticateToken, async (req, res) => {
 
 // ===== ADMIN ENDPOINTS =====
 
+async function fetchAdminStatsCounts() {
+  const baseQuery = `
+    SELECT 
+      (SELECT COUNT(*) FROM users) as users_count,
+      (SELECT COUNT(*) FROM users
+        WHERE LOWER(TRIM(COALESCE(role, ''))) = 'user'
+          AND relationship_with_holwert IS NOT NULL
+          AND TRIM(relationship_with_holwert) != '') as app_users_count,
+      (SELECT COUNT(*) FROM users
+        WHERE organization_id IS NOT NULL AND organization_id > 0
+          AND LOWER(TRIM(COALESCE(role, ''))) = 'user'
+          AND (relationship_with_holwert IS NULL OR TRIM(relationship_with_holwert) = '')) as org_dashboard_users_count,
+      (SELECT COUNT(*) FROM organizations) as organizations_count,
+      (SELECT COUNT(*) FROM news) as news_count,
+      (SELECT COUNT(*) FROM events) as events_count
+  `;
+  try {
+    const result = await executeQuery(baseQuery);
+    return result.rows[0] || {};
+  } catch (err) {
+    if (!isMysqlMissingColumnError(err)) throw err;
+    const fallback = await executeQuery(`
+      SELECT 
+        (SELECT COUNT(*) FROM users) as users_count,
+        (SELECT COUNT(*) FROM users WHERE LOWER(TRIM(COALESCE(role, ''))) = 'user') as app_users_count,
+        (SELECT COUNT(*) FROM users
+          WHERE organization_id IS NOT NULL AND organization_id > 0
+            AND LOWER(TRIM(COALESCE(role, ''))) = 'user') as org_dashboard_users_count,
+        (SELECT COUNT(*) FROM organizations) as organizations_count,
+        (SELECT COUNT(*) FROM news) as news_count,
+        (SELECT COUNT(*) FROM events) as events_count
+    `);
+    return fallback.rows[0] || {};
+  }
+}
+
+function mapAdminStatsRow(row) {
+  const totalUsers = parseInt(row.users_count, 10) || 0;
+  const appUsers = parseInt(row.app_users_count, 10) || 0;
+  const orgDashboardUsers = parseInt(row.org_dashboard_users_count, 10) || 0;
+  return {
+    users: totalUsers,
+    app_users: appUsers,
+    org_dashboard_users: orgDashboardUsers,
+    organizations: parseInt(row.organizations_count, 10) || 0,
+    news: parseInt(row.news_count, 10) || 0,
+    events: parseInt(row.events_count, 10) || 0,
+  };
+}
+
 // Get admin dashboard in one request (stats + moderation counts) - fastest admin load
 app.get('/api/admin/dashboard', authenticateToken, async (req, res) => {
   try {
@@ -3671,25 +3824,17 @@ app.get('/api/admin/dashboard', authenticateToken, async (req, res) => {
       return res.json(cached);
     }
     console.log('[Dashboard] Fetching fresh data from database');
-    const result = await executeQuery(`
-      SELECT 
-        (SELECT COUNT(*) FROM users) as users_count,
-        (SELECT COUNT(*) FROM organizations) as organizations_count,
-        (SELECT COUNT(*) FROM news) as news_count,
-        (SELECT COUNT(*) FROM events) as events_count,
+    const statsRow = await fetchAdminStatsCounts();
+    const pendingResult = await executeQuery(`
+      SELECT
         (SELECT COUNT(*) FROM organizations WHERE is_approved = false) as pending_orgs,
         (SELECT COUNT(*) FROM events WHERE is_published = false) as pending_events
     `);
-    const row = result.rows[0] || {};
-    const pendingOrgs = parseInt(row.pending_orgs) || 0;
-    const pendingEvents = parseInt(row.pending_events) || 0;
+    const pendingRow = pendingResult.rows[0] || {};
+    const pendingOrgs = parseInt(pendingRow.pending_orgs, 10) || 0;
+    const pendingEvents = parseInt(pendingRow.pending_events, 10) || 0;
     const payload = {
-      stats: {
-        users: parseInt(row.users_count) || 0,
-        organizations: parseInt(row.organizations_count) || 0,
-        news: parseInt(row.news_count) || 0,
-        events: parseInt(row.events_count) || 0
-      },
+      stats: mapAdminStatsRow(statsRow),
       moderation: {
         count: pendingOrgs + pendingEvents,
         organizations: pendingOrgs,
@@ -3701,23 +3846,13 @@ app.get('/api/admin/dashboard', authenticateToken, async (req, res) => {
     res.json(payload);
   } catch (error) {
     try {
-      const result = await executeQuery(`
-        SELECT 
-          (SELECT COUNT(*) FROM users) as users_count,
-          (SELECT COUNT(*) FROM organizations) as organizations_count,
-          (SELECT COUNT(*) FROM news) as news_count,
-          (SELECT COUNT(*) FROM events) as events_count,
-          (SELECT COUNT(*) FROM organizations WHERE is_approved = false) as pending_orgs
+      const statsRow = await fetchAdminStatsCounts();
+      const pendingResult = await executeQuery(`
+        SELECT (SELECT COUNT(*) FROM organizations WHERE is_approved = false) as pending_orgs
       `);
-      const row = result.rows[0] || {};
-      const pendingOrgs = parseInt(row.pending_orgs) || 0;
+      const pendingOrgs = parseInt(pendingResult.rows[0]?.pending_orgs, 10) || 0;
       const payload = {
-        stats: {
-          users: parseInt(row.users_count) || 0,
-          organizations: parseInt(row.organizations_count) || 0,
-          news: parseInt(row.news_count) || 0,
-          events: parseInt(row.events_count) || 0
-        },
+        stats: mapAdminStatsRow(statsRow),
         moderation: {
           count: pendingOrgs,
           organizations: pendingOrgs,
@@ -3746,22 +3881,8 @@ app.get('/api/admin/stats', authenticateToken, async (req, res) => {
     }
     
     console.log('[Stats] Fetching fresh data from database');
-    // Single query to get all counts at once - MUCH faster!
-    const result = await executeQuery(`
-      SELECT 
-        (SELECT COUNT(*) FROM users) as users_count,
-        (SELECT COUNT(*) FROM organizations) as organizations_count,
-        (SELECT COUNT(*) FROM news) as news_count,
-        (SELECT COUNT(*) FROM events) as events_count
-    `);
-    
-    const row = result.rows[0] || {};
-    const stats = {
-      users: parseInt(row.users_count) || 0,
-      organizations: parseInt(row.organizations_count) || 0,
-      news: parseInt(row.news_count) || 0,
-      events: parseInt(row.events_count) || 0
-    };
+    const row = await fetchAdminStatsCounts();
+    const stats = mapAdminStatsRow(row);
     
     // Cache for 30 seconds
     setCache(cacheKey, stats, CACHE_TTL.stats);
@@ -4832,20 +4953,38 @@ app.post('/api/admin/organizations/:id/reject', authenticateToken, requireAdmin,
 // Delete organization (admin)
 app.delete('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const { id } = req.params;
-    const result = await executeQuery('DELETE FROM organizations WHERE id = ?', [id]);
-    if (!result.rowCount) return res.status(404).json({ error: 'Organization not found' });
-    
-    // Invalidate cache
+    const orgId = parseInt(req.params.id, 10);
+    if (Number.isNaN(orgId) || orgId < 1) {
+      return res.status(400).json({ error: 'Ongeldig organisatie-ID' });
+    }
+
+    const deleted = await deleteOrganizationAndRelated(orgId);
+    if (!deleted.ok) {
+      return res.status(deleted.status || 500).json({ error: deleted.error || 'Failed to delete organization' });
+    }
+
     invalidateCache('/api/admin/organizations');
     invalidateCache('/api/admin/stats');
     invalidateCache('/api/admin/moderation/count');
     invalidateCache('/api/admin/dashboard');
     invalidateCache('/api/admin/pending');
+    invalidateCache('/api/admin/users');
+    invalidateCache('/api/organizations');
+    invalidateCache('/api/news');
+    invalidateCache('/api/events');
+    invalidateCache('/api/app/bootstrap');
 
-    res.json({ success: true });
+    res.json({
+      success: true,
+      message: deleted.name ? `Organisatie "${deleted.name}" verwijderd` : 'Organisatie verwijderd',
+    });
   } catch (error) {
-    if (error.code === '23503') return res.status(409).json({ error: 'Cannot delete organization in use' });
+    if (isMysqlForeignKeyError(error)) {
+      return res.status(409).json({
+        error: 'Cannot delete organization in use',
+        message: 'Deze organisatie kan niet worden verwijderd omdat er nog gekoppelde gegevens zijn.',
+      });
+    }
     console.error('Delete organization error:', error);
     res.status(500).json({ error: 'Failed to delete organization', message: error.message });
   }
@@ -5647,6 +5786,8 @@ function isMysqlDuplicateError(error) {
 
 app.post('/api/admin/users', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    await ensureUsersPhoneColumn();
+    await ensureUsersOrganizationIdColumn();
     const {
       first_name,
       last_name,
@@ -5798,6 +5939,8 @@ app.post('/api/admin/users', authenticateToken, requireAdmin, async (req, res) =
 // Update user (admin)
 app.put('/api/admin/users/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    await ensureUsersPhoneColumn();
+    await ensureUsersOrganizationIdColumn();
     const { id } = req.params;
     const { first_name, last_name, email, password, role, is_active, profile_image_url, relationship_with_holwert, profile_number, organization_id, phone } = req.body;
     const sets = [];
@@ -5826,12 +5969,8 @@ app.put('/api/admin/users/:id', authenticateToken, requireAdmin, async (req, res
       params
     );
 
-    const fetchResult = await executeQuery(
-      'SELECT id, first_name, last_name, email, phone, profile_image_url, profile_number, relationship_with_holwert, role, is_active, organization_id, created_at, updated_at FROM users WHERE id = ?',
-      [id]
-    );
-    if (!fetchResult.rows.length) return res.status(404).json({ error: 'User not found' });
-    const user = fetchResult.rows[0];
+    const user = await fetchAdminUserById(id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
     res.json({
       user: {
         ...user,
@@ -6730,6 +6869,16 @@ function buildTomorrowAfvalReminder(config) {
   };
 }
 
+function pickLatestPushTokenPerUser(tokenRows) {
+  const byUser = new Map();
+  for (const row of tokenRows || []) {
+    if (!byUser.has(row.user_id)) {
+      byUser.set(row.user_id, row);
+    }
+  }
+  return Array.from(byUser.values());
+}
+
 async function alreadySentPracticalReminderToday() {
   try {
     const result = await executeQuery(
@@ -6755,11 +6904,13 @@ async function sendPracticalReminderToSubscribers(config) {
   const result = await executeQuery(
     `SELECT pt.id, pt.user_id, pt.token, pt.notification_preferences
      FROM push_tokens pt
-     WHERE pt.is_active = true`
+     WHERE pt.is_active = true
+     ORDER BY pt.last_used_at DESC, pt.updated_at DESC, pt.id DESC`
   );
 
+  const tokenRows = pickLatestPushTokenPerUser(result.rows || []);
   let sent = 0;
-  for (const row of result.rows || []) {
+  for (const row of tokenRows) {
     const prefs = parseNotificationPreferences(row.notification_preferences);
     const parts = [];
     if (hasOud && prefs.practical_oud_papier) parts.push('oud papier');
@@ -7872,23 +8023,25 @@ async function sendNotificationToUsers(userIds, notification, notificationType) 
        FROM push_tokens pt
        WHERE pt.user_id IN (${placeholders})
        AND pt.is_active = true
-       AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(pt.notification_preferences, CONCAT('$.', ?))), 'true') = 'true'`,
+       AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(pt.notification_preferences, CONCAT('$.', ?))), 'true') = 'true'
+       ORDER BY pt.last_used_at DESC, pt.updated_at DESC, pt.id DESC`,
       [...userIds, notificationType]
     );
     
-    if (result.rows.length === 0) {
+    const uniqueRows = pickLatestPushTokenPerUser(result.rows || []);
+    if (uniqueRows.length === 0) {
       console.log(`⚠️ No active tokens found for users with ${notificationType} notifications enabled`);
       return;
     }
     
-    console.log(`📤 Sending ${notificationType} notification to ${result.rows.length} device(s)`);
+    console.log(`📤 Sending ${notificationType} notification to ${uniqueRows.length} device(s)`);
     
-    const tokens = result.rows.map(row => row.token);
+    const tokens = uniqueRows.map(row => row.token);
     const sendResult = await sendPushNotification(tokens, notification);
     
     // Log to notification history
     if (sendResult.success) {
-      for (const row of result.rows) {
+      for (const row of uniqueRows) {
         await executeQuery(
           `INSERT INTO notification_history 
            (user_id, push_token_id, notification_type, title, body, data, status)
@@ -8085,17 +8238,21 @@ async function ensureHolwertRelationshipColumn() {
 
 async function ensureUsersPhoneColumn() {
   try {
-    const result = await executeQuery(
-      "SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'phone'"
-    );
-    if (result.rows && result.rows.length > 0) {
+    await executeQuery('SELECT phone FROM users LIMIT 1');
+    return;
+  } catch (probeErr) {
+    const msg = String(probeErr.message || probeErr.sqlMessage || '').toLowerCase();
+    if (!msg.includes('unknown column') || !msg.includes('phone')) {
+      console.warn('ensureUsersPhoneColumn probe:', probeErr.message || probeErr);
       return;
     }
+  }
+  try {
     await executeQuery('ALTER TABLE users ADD COLUMN phone VARCHAR(20) NULL');
     console.log('✅ phone kolom toegevoegd aan users');
   } catch (e) {
-    if (e.code === 'ER_DUP_FIELDNAME' || (e.message && e.message.includes('Duplicate'))) return;
-    console.error('ensureUsersPhoneColumn error:', e.message);
+    if (e.code === 'ER_DUP_FIELDNAME' || String(e.message || '').includes('Duplicate')) return;
+    console.error('ensureUsersPhoneColumn alter:', e.message);
   }
 }
 
