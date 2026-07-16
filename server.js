@@ -428,7 +428,6 @@ function getMigrationsReady() {
         await ensurePrivacyStatementColumn();
         await ensurePracticalInfoTable();
         await ensureContentPagesTable();
-        await ensureAppSettingsTable();
         await ensureAfvalkalenderTable();
         await initializePushNotificationsTables();
         await ensureOrgPasswordResetsTable();
@@ -5609,45 +5608,49 @@ app.delete('/api/admin/practical-info/:id', authenticateToken, requireAdmin, asy
 });
 
 // ── App-instellingen (admin) ─────────────────────────────────
-const MODERATION_NOTIFICATION_EMAIL_KEY = 'moderation_notification_email';
+// Opgeslagen in content_pages (slug _setting_*) — werkt via db-proxy zonder extra tabel/whitelist.
+const MODERATION_NOTIFICATION_EMAIL_SLUG = '_setting_moderation_notification_email';
 
-async function ensureAppSettingsTable() {
-  try {
-    await executeQuery(`CREATE TABLE IF NOT EXISTS app_settings (
-      setting_key VARCHAR(100) PRIMARY KEY,
-      setting_value TEXT,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-    )`);
-  } catch (e) {
-    console.error('ensureAppSettingsTable error:', e.message);
+function isInternalSettingSlug(slug) {
+  return String(slug || '').startsWith('_setting_');
+}
+
+async function getModerationNotificationEmailFromDb() {
+  const result = await executeQuery(
+    'SELECT content FROM content_pages WHERE slug = ? LIMIT 1',
+    [MODERATION_NOTIFICATION_EMAIL_SLUG],
+  );
+  const value = result.rows?.[0]?.content;
+  return value != null && String(value).trim() !== '' ? String(value).trim() : '';
+}
+
+async function setModerationNotificationEmailInDb(email) {
+  const existing = await executeQuery(
+    'SELECT id FROM content_pages WHERE slug = ? LIMIT 1',
+    [MODERATION_NOTIFICATION_EMAIL_SLUG],
+  );
+  if (existing.rows?.length > 0) {
+    await executeQuery(
+      'UPDATE content_pages SET title = ?, content = ? WHERE slug = ?',
+      ['Moderatie notificatie e-mail', email, MODERATION_NOTIFICATION_EMAIL_SLUG],
+    );
+  } else {
+    await executeInsert(
+      'INSERT INTO content_pages (slug, title, content) VALUES (?, ?, ?)',
+      [MODERATION_NOTIFICATION_EMAIL_SLUG, 'Moderatie notificatie e-mail', email],
+    );
   }
 }
 
-async function getAppSetting(key, defaultValue = '') {
-  await ensureAppSettingsTable();
-  const result = await executeQuery('SELECT setting_value FROM app_settings WHERE setting_key = ? LIMIT 1', [key]);
-  const value = result.rows?.[0]?.setting_value;
-  return value != null && String(value).trim() !== '' ? String(value).trim() : defaultValue;
-}
-
-async function setAppSetting(key, value) {
-  await ensureAppSettingsTable();
-  await executeQuery(
-    `INSERT INTO app_settings (setting_key, setting_value) VALUES (?, ?)
-     ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)`,
-    [key, value],
-  );
-}
-
 async function getModerationNotificationEmail() {
-  const fromDb = await getAppSetting(MODERATION_NOTIFICATION_EMAIL_KEY, '');
+  const fromDb = await getModerationNotificationEmailFromDb();
   const fromEnv = (process.env.MODERATION_NOTIFICATION_EMAIL || process.env.ADMIN_NOTIFICATION_EMAIL || '').trim();
   return fromDb || fromEnv || null;
 }
 
 app.get('/api/admin/settings/moderation-notification', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const email = await getAppSetting(MODERATION_NOTIFICATION_EMAIL_KEY, '');
+    const email = await getModerationNotificationEmailFromDb();
     res.json({ email });
   } catch (error) {
     console.error('Get moderation notification email error:', error);
@@ -5661,7 +5664,7 @@ app.put('/api/admin/settings/moderation-notification', authenticateToken, requir
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return res.status(400).json({ error: 'Ongeldig e-mailadres' });
     }
-    await setAppSetting(MODERATION_NOTIFICATION_EMAIL_KEY, email);
+    await setModerationNotificationEmailInDb(email);
     res.json({ success: true, email });
   } catch (error) {
     console.error('Save moderation notification email error:', error);
@@ -5673,7 +5676,7 @@ app.put('/api/admin/settings/moderation-notification', authenticateToken, requir
 app.get('/api/admin/content-pages', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const result = await executeQuery('SELECT * FROM content_pages ORDER BY slug ASC');
-    let pages = result.rows || [];
+    let pages = (result.rows || []).filter((p) => !isInternalSettingSlug(p.slug));
 
     // Als er nog geen pagina's zijn, toon in ieder geval de twee standaard-pagina's
     if (!pages || pages.length === 0) {
@@ -5727,6 +5730,9 @@ app.put('/api/admin/content-pages/:slug', authenticateToken, requireAdmin, async
 app.get('/api/app/content-pages/:slug', async (req, res) => {
   try {
     const { slug } = req.params;
+    if (isInternalSettingSlug(slug)) {
+      return res.status(404).json({ error: 'Page not found' });
+    }
     const result = await executeQuery('SELECT slug, title, content, updated_at FROM content_pages WHERE slug = ?', [slug]);
     if (!result.rows || result.rows.length === 0) {
       return res.status(404).json({ error: 'Page not found' });

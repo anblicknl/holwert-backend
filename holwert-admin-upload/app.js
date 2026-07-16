@@ -5502,7 +5502,7 @@ class HolwertAdmin {
             });
             const data = await response.json().catch(() => ({}));
             if (!response.ok) {
-                throw new Error(data.error || data.message || `HTTP ${response.status}`);
+                throw new Error(data.message || data.error || `HTTP ${response.status}`);
             }
             if (msgEl) {
                 msgEl.textContent = email
