@@ -2285,6 +2285,7 @@ const DEFAULT_PUSH_PREFERENCES = {
   news: true,
   agenda: true,
   organizations: true,
+  new_organizations: true,
   practical: true,
   practical_oud_papier: true,
   practical_containers: true,
@@ -2308,6 +2309,7 @@ function parseNotificationPreferences(raw) {
       news: parsed.news !== undefined ? !!parsed.news : true,
       agenda: parsed.agenda !== undefined ? !!parsed.agenda : true,
       organizations: parsed.organizations !== undefined ? !!parsed.organizations : true,
+      new_organizations: parsed.new_organizations !== undefined ? !!parsed.new_organizations : true,
       practical: practical_oud_papier || practical_containers,
       practical_oud_papier,
       practical_containers,
@@ -2358,6 +2360,10 @@ function mergeNotificationPreferencesPayload(existingRaw, incoming) {
     agenda: incoming?.agenda !== undefined ? !!incoming.agenda : existing.agenda,
     organizations:
       incoming?.organizations !== undefined ? !!incoming.organizations : existing.organizations,
+    new_organizations:
+      incoming?.new_organizations !== undefined
+        ? !!incoming.new_organizations
+        : existing.new_organizations,
     practical,
     practical_oud_papier,
     practical_containers,
@@ -4595,6 +4601,10 @@ app.post('/api/admin/organizations', authenticateToken, requireAdmin, async (req
     }
     
     console.log('[POST /api/admin/organizations] Successfully created organization:', orgResult.rows[0].id);
+
+    if (is_approved !== false) {
+      queueNewOrganizationPush(result.insertId, false);
+    }
     
     // Invalidate cache
     invalidateCache('/api/admin/organizations');
@@ -4615,7 +4625,8 @@ app.put('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (
   try {
     await ensureOrgColumns();
     const { id } = req.params;
-    const { name, category, description, bio, is_approved, is_ondernemer, website, email, show_email, phone, whatsapp, address, 
+    const wasApprovedBefore = await wasOrganizationApproved(id);
+    const { name, category, description, bio, is_approved, is_ondernemer, website, email, show_email, phone, whatsapp, address,
             facebook, instagram, twitter, linkedin, brand_color, logo_url, privacy_statement } = req.body;
     const sets = [];
     const params = [];
@@ -4669,6 +4680,11 @@ app.put('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (
     invalidateCache('/api/admin/dashboard');
     invalidateCache('/api/organizations');
     
+    const nowApproved = isOrganizationApprovedValue(result.rows[0]?.is_approved);
+    if (nowApproved && !wasApprovedBefore) {
+      queueNewOrganizationPush(id, wasApprovedBefore);
+    }
+
     res.json({ organization: result.rows[0] });
   } catch (error) {
     console.error('Update organization error:', error);
@@ -4824,6 +4840,8 @@ app.post('/api/admin/organizations/:id/approve', authenticateToken, requireAdmin
       return res.status(400).json({ error: 'Ongeldig organisatie-ID' });
     }
 
+    const wasApprovedBefore = await wasOrganizationApproved(orgId);
+
     const upd = await executeQuery('UPDATE organizations SET is_approved = true WHERE id = ?', [orgId]);
     if (!upd.rowCount) return res.status(404).json({ error: 'Organization not found' });
 
@@ -4912,6 +4930,8 @@ app.post('/api/admin/organizations/:id/approve', authenticateToken, requireAdmin
     invalidateCache('/api/admin/moderation/count');
     invalidateCache('/api/admin/dashboard');
     invalidateCache('/api/admin/pending');
+
+    queueNewOrganizationPush(orgId, wasApprovedBefore);
 
     res.json({
       message: 'Organisatie goedgekeurd',
@@ -6967,6 +6987,111 @@ function pickLatestPushTokenPerUser(tokenRows) {
     }
   }
   return Array.from(byUser.values());
+}
+
+function chunkArray(items, size) {
+  const chunks = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
+function isOrganizationApprovedValue(value) {
+  return value === true || value === 1 || value === '1';
+}
+
+async function wasOrganizationApproved(orgId) {
+  const result = await executeQuery('SELECT is_approved FROM organizations WHERE id = ? LIMIT 1', [orgId]);
+  return isOrganizationApprovedValue(result.rows?.[0]?.is_approved);
+}
+
+/**
+ * Stuur push naar alle app-gebruikers wanneer een organisatie zichtbaar wordt in de app.
+ * Respecteert voorkeur new_organizations (standaard aan).
+ */
+async function notifyAllUsersOfNewOrganization(organizationId) {
+  const orgId = parseInt(organizationId, 10);
+  if (!Number.isFinite(orgId) || orgId < 1) return { success: false, sent: 0 };
+
+  const orgResult = await executeQuery(
+    'SELECT id, name, logo_url FROM organizations WHERE id = ? AND is_approved = true LIMIT 1',
+    [orgId],
+  );
+  if (!orgResult.rows?.length) {
+    console.log(`[new org push] org ${orgId} niet gevonden of niet goedgekeurd`);
+    return { success: false, sent: 0 };
+  }
+  const org = orgResult.rows[0];
+  const orgName = String(org.name || 'Organisatie').trim();
+
+  const result = await executeQuery(
+    `SELECT pt.id, pt.user_id, pt.token, pt.notification_preferences
+     FROM push_tokens pt
+     WHERE pt.is_active = true
+     ORDER BY pt.last_used_at DESC, pt.updated_at DESC, pt.id DESC`,
+  );
+
+  const eligibleRows = pickLatestPushTokenPerUser(result.rows || []).filter((row) => {
+    const prefs = parseNotificationPreferences(row.notification_preferences);
+    return prefs.new_organizations !== false;
+  });
+
+  if (!eligibleRows.length) {
+    console.log('[new org push] geen actieve tokens met new_organizations aan');
+    return { success: true, sent: 0 };
+  }
+
+  const imageUrl = pushRichImageUrl(org.logo_url, null);
+  const notification = {
+    title: 'Nieuwe organisatie',
+    body: `${orgName} is toegevoegd aan Holwert`,
+    data: {
+      type: 'organization',
+      organizationId: orgId,
+    },
+    ...(imageUrl ? { imageUrl } : {}),
+  };
+
+  let sent = 0;
+  for (const batch of chunkArray(eligibleRows, 100)) {
+    const tokens = batch.map((row) => row.token).filter(Boolean);
+    if (!tokens.length) continue;
+    const sendResult = await sendPushNotification(tokens, notification);
+    if (!sendResult.success) continue;
+    sent += sendResult.sent ?? tokens.length;
+
+    for (const row of batch) {
+      try {
+        await executeQuery(
+          `INSERT INTO notification_history
+           (user_id, push_token_id, notification_type, title, body, data, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [
+            row.user_id,
+            row.id,
+            'new_organizations',
+            notification.title,
+            notification.body,
+            JSON.stringify(notification.data || {}),
+            'sent',
+          ],
+        );
+      } catch {
+        /* history optioneel */
+      }
+    }
+  }
+
+  console.log(`📢 Nieuwe-organisatie push verstuurd voor org ${orgId} (${orgName}) naar ${sent} apparaat(en)`);
+  return { success: true, sent };
+}
+
+function queueNewOrganizationPush(organizationId, wasApprovedBefore = false) {
+  if (wasApprovedBefore) return;
+  void notifyAllUsersOfNewOrganization(organizationId).catch((err) => {
+    console.error('[new org push] mislukt:', err.message);
+  });
 }
 
 async function alreadySentPracticalReminderToday() {
