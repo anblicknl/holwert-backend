@@ -459,45 +459,40 @@ class HolwertAdmin {
     showLoginScreen() {
         const loginScreen = document.getElementById('loginScreen');
         const mainScreen = document.getElementById('mainScreen');
-        
+
+        document.body.classList.add('admin-login-open');
         if (loginScreen) {
             loginScreen.classList.add('active');
-            loginScreen.style.display = 'block';
+            loginScreen.style.display = '';
         }
         if (mainScreen) {
             mainScreen.classList.remove('active');
-            mainScreen.style.display = 'none';
+            mainScreen.style.display = '';
+            mainScreen.classList.remove('sidebar-open');
         }
+        document.body.style.overflow = '';
     }
 
     showMainScreen() {
         console.log('=== SHOW MAIN SCREEN ===');
         const loginScreen = document.getElementById('loginScreen');
         const mainScreen = document.getElementById('mainScreen');
-        
-        console.log('Login screen element:', loginScreen);
-        console.log('Main screen element:', mainScreen);
-        console.log('All elements with id containing "dashboard":', document.querySelectorAll('[id*="dashboard"]'));
-        console.log('All elements with class "screen":', document.querySelectorAll('.screen'));
-        
+
+        document.body.classList.remove('admin-login-open');
         if (loginScreen) {
             loginScreen.classList.remove('active');
-            loginScreen.style.display = 'none';
-            console.log('Login screen hidden');
+            loginScreen.style.display = '';
         }
         if (mainScreen) {
             mainScreen.classList.add('active');
-            mainScreen.style.display = 'block';
-            console.log('Main screen shown');
-            console.log('Main screen classes:', mainScreen.className);
-            console.log('Main screen style:', mainScreen.style.display);
+            mainScreen.style.display = '';
         } else {
             console.error('Main screen element not found!');
         }
 
         // Start automatische polling van notificatie-badges (elke 30 seconden)
         this.startBadgePolling();
-        
+
         console.log('=== END SHOW MAIN SCREEN ===');
     }
 
@@ -632,7 +627,7 @@ class HolwertAdmin {
                     if (loginSpan) loginSpan.textContent = 'Inloggen';
                     this.showMainScreen();
                     this.showSection('dashboard');
-                }, 1000);
+                }, 400);
             } else {
                 console.log('Login failed:', data);
                 if (errorDiv) {
