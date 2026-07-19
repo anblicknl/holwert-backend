@@ -1612,7 +1612,8 @@ class HolwertAdmin {
                                     </div>
                                 </td>
                             </tr>
-                        `).join('')}
+                        `;
+                        }).join('')}
                     </tbody>
                 </table>
             </div>
@@ -2982,12 +2983,14 @@ class HolwertAdmin {
                         </tr>
                     </thead>
                     <tbody>
-                        ${news.map(article => `
+                        ${news.map(article => {
+                            const preview = this.newsContentPreview(article.content);
+                            return `
                             <tr>
                                 <td>
                                     <div class="news-title">
                                         <strong>${article.title}</strong>
-                                        ${article.excerpt ? `<br><small class="text-muted">${article.excerpt.substring(0, 100)}${article.excerpt.length > 100 ? '...' : ''}</small>` : ''}
+                                        ${preview ? `<br><small class="text-muted">${preview}</small>` : ''}
                                     </div>
                                 </td>
                                 <td>
@@ -3022,7 +3025,8 @@ class HolwertAdmin {
                                     </div>
                                 </td>
                             </tr>
-                        `).join('')}
+                        `;
+                        }).join('')}
                     </tbody>
                 </table>
             </div>
@@ -3136,6 +3140,18 @@ class HolwertAdmin {
         return new Date(when).toLocaleDateString('nl-NL');
     }
 
+    /** Eerste woorden uit artikel-inhoud (voor lijstweergave; geen aparte samenvatting meer). */
+    newsContentPreview(content, maxLen = 100) {
+        if (!content) return '';
+        const text = String(content)
+            .replace(/<[^>]*>/g, ' ')
+            .replace(/&nbsp;/gi, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        if (!text) return '';
+        return text.length > maxLen ? `${text.slice(0, maxLen)}...` : text;
+    }
+
     /** Organisaties voor dropdowns alfabetisch op naam (nl). */
     _sortOrganizationsByName(organizations) {
         if (!Array.isArray(organizations)) return [];
@@ -3240,12 +3256,6 @@ class HolwertAdmin {
                                     placeholder="Titel van het artikel" required>
                             </div>
                             
-                            <div class="form-group">
-                                <label for="newsExcerpt">Samenvatting</label>
-                                <textarea id="newsExcerpt" name="excerpt" rows="2" 
-                                    placeholder="Korte samenvatting...">${article?.excerpt || ''}</textarea>
-                            </div>
-                            
                             <div class="form-row">
                                 <div class="form-group">
                                     <label for="newsCategory">Onderwerp / categorie</label>
@@ -3335,7 +3345,7 @@ class HolwertAdmin {
                                 </div>
                                 <textarea id="newsArticleContent" name="content" rows="10" 
                                     placeholder="De volledige inhoud van het artikel..." required>${article?.content || ''}</textarea>
-                                <small class="form-hint">Selecteer tekst en klik een knop om op te maken. HTML-tags worden opgeslagen en getoond in de app.</small>
+                                <small class="form-hint">Selecteer tekst en klik een knop om op te maken. HTML-tags worden opgeslagen en getoond in de app. De eerste regels verschijnen automatisch in het nieuwsoverzicht.</small>
                             </div>
 
                             <div class="form-group">
@@ -3497,7 +3507,6 @@ class HolwertAdmin {
             const actualNewsId = newsId && newsId !== 'null' && newsId !== null ? parseInt(newsId) : null;
             
             const title = (document.getElementById('newsTitle').value || '').trim();
-            const excerpt = (document.getElementById('newsExcerpt').value || '').trim();
             const content = (document.getElementById('newsArticleContent').value || '').trim();
             const category = document.getElementById('newsCategory')?.value || 'dorpsnieuws';
             const custom_category = category === 'overig'
@@ -3576,7 +3585,6 @@ class HolwertAdmin {
 
             const body = {
                 title,
-                excerpt: excerpt || null,
                 content,
                 category,
                 custom_category,
@@ -3767,13 +3775,6 @@ class HolwertAdmin {
                         </div>
                     ` : ''}
                 </div>
-                
-                <!-- Excerpt -->
-                ${article.excerpt ? `
-                    <div class="news-excerpt">
-                        <p>${article.excerpt}</p>
-                    </div>
-                ` : ''}
                 
                 <!-- Content -->
                 <div class="news-content">

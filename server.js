@@ -63,6 +63,23 @@ function resolveIsOndernemer(category, isOndernemerInput) {
   return cat === 'ondernemer' || cat === 'horeca';
 }
 
+/** Plain-text preview uit nieuws-inhoud (voor lijstweergave in app/admin). */
+function stripHtmlForPreview(input, maxLen = 120) {
+  if (!input) return '';
+  const text = String(input)
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/<[^>]*$/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+  return maxLen > 0 && text.length > maxLen ? text.slice(0, maxLen) : text;
+}
+
 function getCacheKey(endpoint, params = {}) {
   return `${endpoint}:${JSON.stringify(params)}`;
 }
@@ -1518,7 +1535,7 @@ app.get('/api/app/bootstrap', async (req, res) => {
     const newsParams = [];
     let newsQuery = `
       SELECT n.id, n.title, '' as content,
-        COALESCE(n.excerpt, LEFT(COALESCE(n.content, ''), 2000)) as excerpt,
+        LEFT(COALESCE(n.content, ''), 2000) as excerpt,
         n.image_url, n.youtube_url, n.source_name, n.source_url, n.pdf_url, n.created_at, n.updated_at,
         COALESCE(n.published_at, n.created_at) as published_at,
         n.organization_id, n.category, n.custom_category,
@@ -1543,14 +1560,10 @@ app.get('/api/app/bootstrap', async (req, res) => {
       executeQuery(countNewsQuery, [])
     ]);
 
-    const stripHtml = (input) => {
-      if (!input) return '';
-      return String(input).replace(/<[^>]*>/g, ' ').replace(/<[^>]*$/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').trim();
-    };
-    const newsRows = (newsResult.rows || []).map((article) => {
-      const cleanExcerpt = stripHtml(article.excerpt).slice(0, 120);
-      return { ...article, excerpt: cleanExcerpt };
-    });
+    const newsRows = (newsResult.rows || []).map((article) => ({
+      ...article,
+      excerpt: stripHtmlForPreview(article.excerpt, 120),
+    }));
 
     let orgRows = orgResult.rows || [];
     // Laat logo_url ongemoeid; de mobiele app normaliseert zelf base64 -> file:// via ApiService
@@ -1687,7 +1700,7 @@ app.get('/api/news', async (req, res) => {
         n.id, 
         n.title, 
         ${minimalMode ? `'' as content` : `COALESCE(n.content, '') as content`},
-        COALESCE(n.excerpt, LEFT(COALESCE(n.content, ''), 2000)) as excerpt,
+        LEFT(COALESCE(n.content, ''), 2000) as excerpt,
         n.image_url, n.youtube_url, n.source_name, n.source_url, n.pdf_url,
         n.created_at, 
         n.updated_at, 
@@ -1753,25 +1766,11 @@ app.get('/api/news', async (req, res) => {
     ]);
     const total = parseInt(countResult.rows?.[0]?.total || 0);
 
-    const stripHtml = (input) => {
-      if (!input) return '';
-      return String(input)
-        .replace(/<[^>]*>/g, ' ')
-        // Remove any dangling "<tag" fragments without closing ">"
-        .replace(/<[^>]*$/g, ' ')
-        .replace(/&nbsp;/gi, ' ')
-        .replace(/&amp;/gi, '&')
-        .replace(/&lt;/gi, '<')
-        .replace(/&gt;/gi, '>')
-        .replace(/&quot;/gi, '"')
-        .replace(/&#39;/gi, "'")
-        .replace(/\s+/g, ' ')
-        .trim();
-    };
-
     // Lijst licht houden: bij minimal geen image_variants (app gebruikt image_url)
     const processedNews = result.rows.map(article => {
-      const cleanExcerpt = minimalMode ? stripHtml(article.excerpt).slice(0, 120) : article.excerpt;
+      const cleanExcerpt = minimalMode
+        ? stripHtmlForPreview(article.excerpt, 120)
+        : stripHtmlForPreview(article.excerpt, 0);
       const item = { ...article, excerpt: cleanExcerpt };
       if (!minimalMode) {
         item.image_variants = {
@@ -1909,14 +1908,18 @@ app.get('/api/app/bookmarks', authenticateToken, async (req, res) => {
 
     if (with_news === '1' || with_news === 'true') {
       const result = await executeQuery(`
-        SELECT n.id, n.title, n.excerpt, n.image_url, n.created_at, b.created_at as bookmarked_at
+        SELECT n.id, n.title, LEFT(COALESCE(n.content, ''), 500) as excerpt, n.image_url, n.created_at, b.created_at as bookmarked_at
         FROM bookmarks b
         INNER JOIN news n ON n.id = b.news_id AND n.is_published = true
         WHERE b.user_id = ?
         ORDER BY b.created_at DESC
         LIMIT 100
       `, [userId]);
-      return res.json({ bookmarks: result.rows || [] });
+      const bookmarks = (result.rows || []).map((row) => ({
+        ...row,
+        excerpt: stripHtmlForPreview(row.excerpt, 120),
+      }));
+      return res.json({ bookmarks });
     } else {
       const result = await executeQuery(`
         SELECT news_id, created_at FROM bookmarks WHERE user_id = ? ORDER BY created_at DESC LIMIT 500
@@ -2701,7 +2704,7 @@ app.get('/api/news/head', async (req, res) => {
     const newsParams = [];
     const newsQuery = `
       SELECT n.id, n.title,
-        COALESCE(n.excerpt, LEFT(COALESCE(n.content, ''), 500)) as excerpt,
+        LEFT(COALESCE(n.content, ''), 500)) as excerpt,
         n.image_url, n.created_at, n.updated_at,
         COALESCE(n.published_at, n.created_at) as published_at,
         n.organization_id, n.category, n.custom_category,
@@ -2717,14 +2720,10 @@ app.get('/api/news/head', async (req, res) => {
     newsParams.push(limit);
 
     const newsResult = await executeQuery(newsQuery, newsParams);
-    const stripHtml = (input) => {
-      if (!input) return '';
-      return String(input).replace(/<[^>]*>/g, ' ').replace(/<[^>]*$/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').trim();
-    };
-    const newsRows = (newsResult.rows || []).map((article) => {
-      const cleanExcerpt = stripHtml(article.excerpt).slice(0, 120);
-      return { ...article, excerpt: cleanExcerpt };
-    });
+    const newsRows = (newsResult.rows || []).map((article) => ({
+      ...article,
+      excerpt: stripHtmlForPreview(article.excerpt, 120),
+    }));
 
     res.set('Cache-Control', 'public, max-age=30');
     res.json({ news: newsRows });
@@ -2815,9 +2814,7 @@ app.get('/news/:id', async (req, res) => {
     }
     const article = result.rows[0];
     const title = article.title || 'Nieuws uit Holwert';
-    const description =
-      article.excerpt ||
-      (article.content ? String(article.content).replace(/<[^>]+>/g, '').slice(0, 200) : 'Nieuws uit Holwert.');
+    const description = stripHtmlForPreview(article.content, 200) || 'Nieuws uit Holwert.';
     const image = article.image_url || '';
     const url = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
 
@@ -2894,7 +2891,7 @@ app.get('/news/:id', async (req, res) => {
 app.post('/api/news', authenticateToken, async (req, res) => {
   try {
     await ensureNewsColumns();
-    const { title, content, excerpt, category, custom_category, organization_id, image_url, published_at } = req.body;
+    const { title, content, category, custom_category, organization_id, image_url, published_at } = req.body;
     let authorId = req.user?.userId || null;
 
     // Validation
@@ -2965,8 +2962,8 @@ app.post('/api/news', authenticateToken, async (req, res) => {
           ? 'NOW()' 
           : `STR_TO_DATE(?, '%Y-%m-%d %H:%i:%s')`;
         const insertParams = publishedAtValue === 'NOW()' 
-          ? [title, content, excerpt || null, authorId, organization_id || null, image_url || null, finalCategory, finalCustomCategory, isPublished]
-          : [title, content, excerpt || null, authorId, organization_id || null, image_url || null, finalCategory, finalCustomCategory, isPublished, publishedAtValue];
+          ? [title, content, null, authorId, organization_id || null, image_url || null, finalCategory, finalCustomCategory, isPublished]
+          : [title, content, null, authorId, organization_id || null, image_url || null, finalCategory, finalCustomCategory, isPublished, publishedAtValue];
         
         insertResult = await executeInsert(
           `INSERT INTO news (title, content, excerpt, author_id, organization_id, image_url, category, custom_category, is_published, published_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ${publishedAtSQL}, NOW(), NOW())`,
@@ -2976,7 +2973,7 @@ app.post('/api/news', authenticateToken, async (req, res) => {
         // Geen published_at (artikel niet gepubliceerd)
         insertResult = await executeInsert(
           'INSERT INTO news (title, content, excerpt, author_id, organization_id, image_url, category, custom_category, is_published, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())',
-          [title, content, excerpt || null, authorId, organization_id || null, image_url || null, finalCategory, finalCustomCategory, isPublished]
+          [title, content, null, authorId, organization_id || null, image_url || null, finalCategory, finalCustomCategory, isPublished]
         );
       }
     } catch (insertError) {
@@ -2985,7 +2982,7 @@ app.post('/api/news', authenticateToken, async (req, res) => {
         console.log('⚠️ published_at kolom bestaat nog niet, gebruik fallback zonder published_at');
         insertResult = await executeInsert(
           'INSERT INTO news (title, content, excerpt, author_id, organization_id, image_url, category, custom_category, is_published, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())',
-          [title, content, excerpt || null, authorId, organization_id || null, image_url || null, finalCategory, finalCustomCategory, isPublished]
+          [title, content, null, authorId, organization_id || null, image_url || null, finalCategory, finalCustomCategory, isPublished]
         );
       } else {
         throw insertError; // Re-throw als het een andere error is
@@ -3062,7 +3059,7 @@ app.post('/api/news', authenticateToken, async (req, res) => {
 app.put('/api/news/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, content, excerpt, category, custom_category, organization_id, image_url } = req.body;
+    const { title, content, category, custom_category, organization_id, image_url } = req.body;
     const userId = req.user.userId;
 
     // Check if article exists and user has permission
@@ -3104,7 +3101,7 @@ app.put('/api/news/:id', authenticateToken, async (req, res) => {
     // Update article
     await executeQuery(
       'UPDATE news SET title = ?, content = ?, excerpt = ?, organization_id = ?, image_url = ?, category = ?, custom_category = ?, updated_at = NOW() WHERE id = ?',
-      [title, content, excerpt || null, organization_id || null, image_url || null, finalCategory, finalCustomCategory, id]
+      [title, content, null, organization_id || null, image_url || null, finalCategory, finalCustomCategory, id]
     );
 
     const fetchResult = await executeQuery(
@@ -4121,7 +4118,7 @@ app.put('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res)
   try {
     await ensureNewsColumns();
     const { id } = req.params;
-    const { title, content, excerpt, category, custom_category, organization_id, image_url, youtube_url, source_name, source_url, pdf_url, image_data, is_published, published_at } = req.body;
+    const { title, content, category, custom_category, organization_id, image_url, youtube_url, source_name, source_url, pdf_url, image_data, is_published, published_at } = req.body;
 
     const prevNews = await executeQuery(
       'SELECT pdf_url, is_published, organization_id FROM news WHERE id = ? LIMIT 1',
@@ -4156,7 +4153,7 @@ app.put('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res)
     values.push(content);
 
     updateFields.push(`excerpt = ?`);
-    values.push(excerpt || null);
+    values.push(null);
 
     updateFields.push(`category = ?`);
     values.push(finalCategory);
@@ -6278,7 +6275,7 @@ app.get('/api/org/news', authenticateToken, requireOrgPortal, async (req, res) =
     const { page = 1, limit = 20, status } = req.query;
     const offset = (page - 1) * limit;
     const orgId = req.organizationId;
-    let query = `SELECT n.id, n.title, n.excerpt, n.category, n.custom_category, n.image_url, n.is_published, COALESCE(n.published_at, n.created_at) as published_at, n.organization_id, n.created_at, n.updated_at
+    let query = `SELECT n.id, n.title, LEFT(COALESCE(n.content, ''), 500) as excerpt, n.category, n.custom_category, n.image_url, n.is_published, COALESCE(n.published_at, n.created_at) as published_at, n.organization_id, n.created_at, n.updated_at
       FROM news n WHERE n.organization_id = ?`;
     const params = [orgId];
     if (status === 'published') { query += ` AND n.is_published = true`; }
@@ -6291,7 +6288,10 @@ app.get('/api/org/news', authenticateToken, requireOrgPortal, async (req, res) =
       [orgId]
     );
     res.json({
-      news: result.rows,
+      news: (result.rows || []).map((row) => ({
+        ...row,
+        excerpt: stripHtmlForPreview(row.excerpt, 120),
+      })),
       pagination: { page: parseInt(page), limit: parseInt(limit), total: parseInt(countResult.rows[0].total), pages: Math.ceil(countResult.rows[0].total / limit) }
     });
   } catch (error) {
@@ -6321,7 +6321,7 @@ app.post('/api/org/news', authenticateToken, requireOrgPortal, async (req, res) 
     await ensureNewsColumns();
     const orgId = req.organizationId;
     const userId = req.user.userId;
-    const { title, content, excerpt, category, custom_category, image_url, youtube_url, source_name, source_url, pdf_url, is_published, published_at } = req.body || {};
+    const { title, content, category, custom_category, image_url, youtube_url, source_name, source_url, pdf_url, is_published, published_at } = req.body || {};
     if (!title) return res.status(400).json({ error: 'title is required' });
     const finalCategory = category || 'dorpsnieuws';
     const finalCustomCategory = finalCategory === 'overig' && custom_category ? String(custom_category).trim() : null;
@@ -6334,7 +6334,7 @@ app.post('/api/org/news', authenticateToken, requireOrgPortal, async (req, res) 
     let insertParams;
     const baseCols = 'title, content, excerpt, author_id, organization_id, image_url, youtube_url, source_name, source_url, pdf_url, category, custom_category, is_published';
     const baseVals = '?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?';
-    const baseParams = [title || '', content || '', excerpt || null, userId, orgId, image_url || null, youtube_url || null, source_name || null, source_url || null, pdf_url || null, finalCategory, finalCustomCategory, isPublished];
+    const baseParams = [title || '', content || '', null, userId, orgId, image_url || null, youtube_url || null, source_name || null, source_url || null, pdf_url || null, finalCategory, finalCustomCategory, isPublished];
 
     if (pubAt) {
       insertSql = `INSERT INTO news (${baseCols}, published_at, created_at, updated_at) VALUES (${baseVals}, ?, NOW(), NOW())`;
@@ -6368,7 +6368,7 @@ app.put('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req, re
     await ensureNewsColumns();
     const orgId = req.organizationId;
     const id = parseInt(req.params.id);
-    const { title, content, excerpt, category, custom_category, image_url, youtube_url, source_name, source_url, pdf_url, is_published, published_at } = req.body || {};
+    const { title, content, category, custom_category, image_url, youtube_url, source_name, source_url, pdf_url, is_published, published_at } = req.body || {};
     const existing = await executeQuery('SELECT id, pdf_url, is_published FROM news WHERE id = ? AND organization_id = ?', [id, orgId]);
     if (!existing.rows?.length) return res.status(404).json({ error: 'Artikel niet gevonden' });
     const wasPublished = !!existing.rows[0].is_published;
@@ -6388,7 +6388,7 @@ app.put('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req, re
     }
 
     const updateParams = [
-      title ?? '', content ?? '', excerpt ?? null, finalCategory, finalCustomCategory,
+      title ?? '', content ?? '', null, finalCategory, finalCustomCategory,
       image_url ?? null, youtube_url ?? null, source_name ?? null, source_url ?? null, pdf_url ?? null,
       nowPublished,
     ];
