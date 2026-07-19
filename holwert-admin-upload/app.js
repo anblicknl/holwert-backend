@@ -1,4 +1,4 @@
-console.log('=== SCRIPT LOADED - VERSION 2026-03-03-21:PRAKTISCH-ICONS ===');
+console.log('=== SCRIPT LOADED - VERSION 20260719-login-fix ===');
 
 const ORG_CATEGORIES = [
     { id: 'vereniging', label: 'Vereniging' },
@@ -1607,8 +1607,7 @@ class HolwertAdmin {
                                     </div>
                                 </td>
                             </tr>
-                        `;
-                        }).join('')}
+                        `).join('')}
                     </tbody>
                 </table>
             </div>

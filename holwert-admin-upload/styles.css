@@ -125,6 +125,22 @@ body.admin-login-open {
     outline-offset: 2px;
 }
 
+.error-message {
+    display: none;
+    margin-top: 1rem;
+    padding: 0.75rem 1rem;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    line-height: 1.4;
+    background: #fde8e8;
+    border: 1px solid #f5c2c2;
+    color: #b42318;
+}
+
+.error-message:not(:empty) {
+    display: block;
+}
+
 /* Main App Layout */
 #mainScreen.screen:not(.active) {
     display: none !important;
