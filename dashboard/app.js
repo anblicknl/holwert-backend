@@ -93,6 +93,18 @@
         return 'Dorpsnieuws';
     }
 
+    /** Eerste woorden uit artikel-inhoud (geen aparte samenvatting meer). */
+    function newsContentPreview(content, maxLen = 100) {
+        if (!content) return '';
+        const text = String(content)
+            .replace(/<[^>]*>/g, ' ')
+            .replace(/&nbsp;/gi, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        if (!text) return '';
+        return text.length > maxLen ? `${text.slice(0, maxLen)}...` : text;
+    }
+
     function getStoredToken() {
         return localStorage.getItem(TOKEN_KEY) || localStorage.getItem(TOKEN_KEY_LEGACY);
     }
@@ -667,6 +679,47 @@
         });
     });
 
+    function initSidebarToggle() {
+        const toggle = document.getElementById('sidebarToggle');
+        const backdrop = document.getElementById('sidebarBackdrop');
+        if (!mainScreen || !toggle) return;
+
+        const mq = window.matchMedia('(max-width: 768px)');
+
+        const setOpen = (open) => {
+            mainScreen.classList.toggle('sidebar-open', open);
+            toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+            toggle.setAttribute('aria-label', open ? 'Menu sluiten' : 'Menu openen');
+            if (backdrop) backdrop.setAttribute('aria-hidden', open ? 'false' : 'true');
+            document.body.style.overflow = open && mq.matches ? 'hidden' : '';
+        };
+
+        const close = () => setOpen(false);
+
+        toggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setOpen(!mainScreen.classList.contains('sidebar-open'));
+        });
+
+        if (backdrop) backdrop.addEventListener('click', close);
+
+        document.querySelectorAll('.nav-item[data-section]').forEach((el) => {
+            el.addEventListener('click', () => {
+                if (mq.matches) close();
+            });
+        });
+
+        window.addEventListener('resize', () => {
+            if (!mq.matches) close();
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && mainScreen.classList.contains('sidebar-open')) close();
+        });
+    }
+
+    initSidebarToggle();
+
     function followersSeenStorageKey(orgId) {
         return `holwert_followers_seen_${orgId}`;
     }
@@ -775,7 +828,8 @@
             if (!res.ok) throw new Error(data.error || 'Laden mislukt');
             const list = data.news || [];
             container.innerHTML = list.length
-                ? `<table class="data-table"><thead><tr><th>Titel</th><th>Onderwerp</th><th>Status</th><th>Datum</th><th class="cell-actions">Acties</th></tr></thead><tbody>${
+                ? `<div class="desktop-view">
+                    <table class="data-table"><thead><tr><th>Titel</th><th>Onderwerp</th><th>Status</th><th>Datum</th><th class="cell-actions">Acties</th></tr></thead><tbody>${
                     list.map(n => `<tr>
                         <td>${escapeHtml(n.title || '')}</td>
                         <td>${escapeHtml(newsCategoryLabel(n.category, n.custom_category))}</td>
@@ -789,7 +843,33 @@
                             </div>
                         </td>
                     </tr>`).join('')
-                }</tbody></table>`
+                }</tbody></table>
+                </div>
+                <div class="mobile-cards-container mobile-view">${
+                    list.map(n => {
+                        const dateStr = n.published_at
+                            ? new Date(n.published_at).toLocaleDateString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' })
+                            : 'Geen datum';
+                        const statusClass = n.is_published ? 'status-published' : 'status-draft';
+                        const statusLabel = n.is_published ? 'Gepubliceerd' : 'Concept';
+                        const category = escapeHtml(newsCategoryLabel(n.category, n.custom_category));
+                        return `<div class="list-card">
+                            <div class="list-card-title">${escapeHtml(n.title || '')}</div>
+                            <div class="list-card-meta">
+                                <span>${dateStr}</span>
+                                <span class="list-card-meta-sep" aria-hidden="true">·</span>
+                                <span>${category}</span>
+                                <span class="list-card-meta-sep" aria-hidden="true">·</span>
+                                <span class="list-card-status ${statusClass}">${statusLabel}</span>
+                            </div>
+                            <div class="list-card-actions">
+                                <button type="button" class="btn-icon btn-view" data-preview-news="${n.id}" title="Preview" aria-label="Preview"><i class="fas fa-eye"></i></button>
+                                <button type="button" class="btn-icon btn-edit" data-edit-news="${n.id}" title="Bewerken" aria-label="Bewerken"><i class="fas fa-edit"></i></button>
+                                <button type="button" class="btn-icon btn-delete" data-delete-news="${n.id}" data-news-title="${encodeURIComponent(n.title || '')}" title="Verwijderen" aria-label="Verwijderen"><i class="fas fa-trash"></i></button>
+                            </div>
+                        </div>`;
+                    }).join('')
+                }</div>`
                 : '<p class="empty-message">Nog geen nieuwsartikelen.</p>';
             container.querySelectorAll('[data-preview-news]').forEach(b => {
                 b.addEventListener('click', () => openNewsModal(parseInt(b.getAttribute('data-preview-news'), 10), true));
@@ -841,7 +921,7 @@
                 ? `<p style="margin:0 0 8px"><img src="${escapeHtml(article.image_url)}" alt="" style="max-height:120px;border-radius:6px"></p>`
                 : '';
             const titleHtml = isPreview ? 'Artikel bekijken' : (article ? 'Artikel bewerken' : 'Nieuw artikel');
-            const editorToolbar = isPreview ? '' : '<div class="editor-toolbar"><button type="button" class="editor-btn" onclick="adminFormatText(\'newsContent\',\'bold\')" title="Vet"><b>B</b></button><button type="button" class="editor-btn" onclick="adminFormatText(\'newsContent\',\'italic\')" title="Cursief"><i>I</i></button><button type="button" class="editor-btn" onclick="adminFormatText(\'newsContent\',\'link\')" title="Link">&#128279;</button></div><small class="form-hint">Selecteer tekst en klik een knop om op te maken.</small>';
+            const editorToolbar = isPreview ? '' : '<div class="editor-toolbar"><button type="button" class="editor-btn" onclick="adminFormatText(\'newsContent\',\'bold\')" title="Vet"><b>B</b></button><button type="button" class="editor-btn" onclick="adminFormatText(\'newsContent\',\'italic\')" title="Cursief"><i>I</i></button><button type="button" class="editor-btn" onclick="adminFormatText(\'newsContent\',\'link\')" title="Link">&#128279;</button></div><small class="form-hint">Selecteer tekst en klik een knop om op te maken. De eerste regels verschijnen automatisch in het nieuwsoverzicht in de app.</small>';
             const publishedAtValue = article?.published_at
                 ? toDatetimeInputValue(article.published_at)
                 : '';
@@ -880,10 +960,6 @@
                             <label>Titel</label>
                             <input type="text" id="newsTitle" value="${escapeHtml(article?.title || '')}" ${ro}>
                         </div>
-                        <div class="form-group">
-                            <label>Samenvatting</label>
-                            <textarea id="newsExcerpt" rows="2" ${ro}>${escapeHtml(article?.excerpt || '')}</textarea>
-                        </div>
                         ${categoryFieldsHtml}
                         <div class="form-group">
                             <label>Inhoud</label>
@@ -902,10 +978,11 @@
                                            <label style="font-size:0.82rem;color:#555;margin-bottom:3px;display:block;">URL (link naar bron)</label>
                                            <input type="url" id="newsSourceUrl" placeholder="https://…" value="${escapeHtml(article?.source_url || '')}">
                                        </div>
-                                   </div>`
+                                   </div>
+                                   <p class="form-hint">Wordt onder het artikel in de app getoond als &quot;Bron: …&quot; (zelfde als in /admin).</p>`
                                 : (article?.source_name
                                     ? `<p style="margin:0">Bron: <a href="${escapeHtml(article.source_url || '#')}" target="_blank" rel="noopener">${escapeHtml(article.source_name)}</a></p>`
-                                    : '<p class="form-hint">Geen bronvermelding</p>')
+                                    : '<p class="form-hint">Geen bronvermelding ingesteld. Klik op <strong>Bewerken</strong> (potlood) om naam en URL toe te voegen.</p>')
                             }
                         </div>
                         <div class="form-group">
@@ -986,7 +1063,6 @@
                         : null;
                     const payload = {
                         title: document.getElementById('newsTitle').value.trim(),
-                        excerpt: document.getElementById('newsExcerpt').value.trim(),
                         content: document.getElementById('newsContent').value.trim(),
                         category,
                         custom_category,
@@ -1037,7 +1113,8 @@
             if (!res.ok) throw new Error(data.error || 'Laden mislukt');
             const list = data.events || [];
             container.innerHTML = list.length
-                ? `<table class="data-table"><thead><tr><th>Titel</th><th>Datum</th><th>Locatie</th><th class="cell-actions">Acties</th></tr></thead><tbody>${
+                ? `<div class="desktop-view">
+                    <table class="data-table"><thead><tr><th>Titel</th><th>Datum</th><th>Locatie</th><th class="cell-actions">Acties</th></tr></thead><tbody>${
                     list.map(e => `<tr>
                         <td>${escapeHtml(e.title || '')}</td>
                         <td>${e.event_date ? new Date(e.event_date).toLocaleDateString('nl-NL') : '-'}</td>
@@ -1046,17 +1123,44 @@
                             <div class="action-buttons">
                                 <button type="button" class="btn-icon btn-view" data-view-event="${e.id}" title="Bekijken" aria-label="Bekijken"><i class="fas fa-eye"></i></button>
                                 <button type="button" class="btn-icon btn-edit" data-edit-event="${e.id}" title="Bewerken" aria-label="Bewerken"><i class="fas fa-edit"></i></button>
+                                <button type="button" class="btn-icon btn-secondary" data-duplicate-event="${e.id}" title="Dupliceren" aria-label="Dupliceren"><i class="fas fa-copy"></i></button>
                                 <button type="button" class="btn-icon btn-delete" data-delete-event="${e.id}" data-event-title="${encodeURIComponent(e.title || '')}" title="Verwijderen" aria-label="Verwijderen"><i class="fas fa-trash"></i></button>
                             </div>
                         </td>
                     </tr>`).join('')
-                }</tbody></table>`
+                }</tbody></table>
+                </div>
+                <div class="mobile-cards-container mobile-view">${
+                    list.map(e => {
+                        const dateStr = e.event_date
+                            ? new Date(e.event_date).toLocaleDateString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' })
+                            : 'Geen datum';
+                        const location = escapeHtml(e.location || 'Geen locatie');
+                        return `<div class="list-card">
+                            <div class="list-card-title">${escapeHtml(e.title || '')}</div>
+                            <div class="list-card-meta">
+                                <span>${dateStr}</span>
+                                <span class="list-card-meta-sep" aria-hidden="true">·</span>
+                                <span>${location}</span>
+                            </div>
+                            <div class="list-card-actions">
+                                <button type="button" class="btn-icon btn-view" data-view-event="${e.id}" title="Bekijken" aria-label="Bekijken"><i class="fas fa-eye"></i></button>
+                                <button type="button" class="btn-icon btn-edit" data-edit-event="${e.id}" title="Bewerken" aria-label="Bewerken"><i class="fas fa-edit"></i></button>
+                                <button type="button" class="btn-icon btn-secondary" data-duplicate-event="${e.id}" title="Dupliceren" aria-label="Dupliceren"><i class="fas fa-copy"></i></button>
+                                <button type="button" class="btn-icon btn-delete" data-delete-event="${e.id}" data-event-title="${encodeURIComponent(e.title || '')}" title="Verwijderen" aria-label="Verwijderen"><i class="fas fa-trash"></i></button>
+                            </div>
+                        </div>`;
+                    }).join('')
+                }</div>`
                 : '<p class="empty-message">Nog geen evenementen.</p>';
             container.querySelectorAll('[data-view-event]').forEach(b => {
                 b.addEventListener('click', () => openEventModal(parseInt(b.getAttribute('data-view-event'), 10), 'view'));
             });
             container.querySelectorAll('[data-edit-event]').forEach(b => {
                 b.addEventListener('click', () => openEventModal(parseInt(b.getAttribute('data-edit-event'), 10), 'edit'));
+            });
+            container.querySelectorAll('[data-duplicate-event]').forEach(b => {
+                b.addEventListener('click', () => openEventModal(parseInt(b.getAttribute('data-duplicate-event'), 10), 'duplicate'));
             });
             container.querySelectorAll('[data-delete-event]').forEach(b => {
                 b.addEventListener('click', () => {
@@ -1133,10 +1237,26 @@
             '. Je kunt dit evenement gewoon opslaan — kies bewust of je liever een andere dag pakt om meer bezoekers te trekken.';
     }
 
+    function applyEventDuplicateDefaults(event) {
+        if (!event) return event;
+        const baseTitle = String(event.title || '').trim();
+        return {
+            ...event,
+            title:
+                baseTitle && !/\(kopie\)\s*$/i.test(baseTitle)
+                    ? `${baseTitle} (kopie)`
+                    : baseTitle || 'Evenement (kopie)',
+            event_date: null,
+            event_end_date: null,
+        };
+    }
+
     function openEventModal(id, mode = 'edit') {
         const overlay = document.createElement('div');
         overlay.className = 'modal-overlay show';
         const isView = mode === 'view';
+        const isDuplicate = mode === 'duplicate';
+        const saveId = isDuplicate ? null : id;
         const load = async () => {
             let event = null;
             if (id) {
@@ -1144,10 +1264,19 @@
                 const d = await r.json();
                 if (r.ok) event = d.event;
             }
+            if (isDuplicate && event) {
+                event = applyEventDuplicateDefaults(event);
+            }
             const evImg = event?.image_url
                 ? `<p style="margin:0 0 8px"><img src="${escapeHtml(event.image_url)}" alt="" style="max-height:120px;border-radius:6px"></p>`
                 : '';
-            const titleHtml = isView ? 'Evenement bekijken' : event ? 'Evenement bewerken' : 'Nieuw evenement';
+            const titleHtml = isView
+                ? 'Evenement bekijken'
+                : isDuplicate
+                  ? 'Evenement dupliceren'
+                  : event
+                    ? 'Evenement bewerken'
+                    : 'Nieuw evenement';
             const ro = isView ? 'readonly' : '';
             const dis = isView ? 'disabled' : '';
             const imageEditable = !isView
@@ -1177,6 +1306,7 @@
                                 <label>Begindatum &amp; -tijd *</label>
                                 <input type="datetime-local" id="eventDate" value="${event?.event_date ? toDatetimeInputValue(event.event_date) : ''}" ${dis}>
                                 <div id="eventSameDayWarning" class="event-same-day-warning" hidden role="status" aria-live="polite"></div>
+                                ${isDuplicate ? '<p class="form-hint">Vul een nieuwe begindatum in.</p>' : ''}
                             </div>
                             <div class="form-group">
                                 <label>Einddatum &amp; -tijd</label>
@@ -1248,7 +1378,7 @@
 
             const dateInputEl = document.getElementById('eventDate');
             const endDateInputEl = document.getElementById('eventEndDate');
-            const runSameDayCheck = () => refreshEventSameDayWarning(allOrgEvents, id);
+            const runSameDayCheck = () => refreshEventSameDayWarning(allOrgEvents, saveId);
             if (!isView && dateInputEl) {
                 dateInputEl.addEventListener('input', runSameDayCheck);
                 dateInputEl.addEventListener('change', runSameDayCheck);
@@ -1257,6 +1387,9 @@
                     endDateInputEl.addEventListener('change', runSameDayCheck);
                 }
                 runSameDayCheck();
+                if (isDuplicate && dateInputEl) {
+                    setTimeout(() => dateInputEl.focus(), 150);
+                }
             }
 
             if (!isView) {
@@ -1299,8 +1432,8 @@
                         ticket_url: (document.getElementById('eventTicketUrl')?.value || '').trim() || null,
                         ticket_label: (document.getElementById('eventTicketLabel')?.value || '').trim() || null,
                     };
-                    const url = id ? `${apiBase}/org/events/${id}` : `${apiBase}/org/events`;
-                    const method = id ? 'PUT' : 'POST';
+                    const url = saveId ? `${apiBase}/org/events/${saveId}` : `${apiBase}/org/events`;
+                    const method = saveId ? 'PUT' : 'POST';
                     const r = await fetch(url, { method, headers: authHeaders(), body: JSON.stringify(payload) });
                     const evSaveJson = await r.json().catch(() => ({}));
                     if (!r.ok) { alert(evSaveJson.message || evSaveJson.error || 'Opslaan mislukt'); return; }
