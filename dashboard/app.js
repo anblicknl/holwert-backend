@@ -41,7 +41,7 @@
 
     const NEWS_SHARE_BASE_URL = 'https://holwert.appenvloed.com/app-link/';
     /** Publieke pagina met Open Graph op eigen domein — voor Facebook-deelvenster */
-    const NEWS_PUBLIC_SHARE_BASE_URL = 'https://holwert.appenvloed.com/news/';
+    const NEWS_PUBLIC_SHARE_BASE_URL = 'https://holwert.appenvloed.com/nieuws/';
 
     function getNewsShareUrl(newsId) {
         return `${NEWS_SHARE_BASE_URL}?t=news&id=${Number(newsId)}`;

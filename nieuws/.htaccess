@@ -1,5 +1,5 @@
 RewriteEngine On
-RewriteBase /news/
+RewriteBase /nieuws/
 
-# /news/44 → index.php?id=44
+# /nieuws/44 → index.php?id=44
 RewriteRule ^([0-9]+)/?$ index.php?id=$1 [L,QSA]

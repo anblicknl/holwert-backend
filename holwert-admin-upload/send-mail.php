@@ -63,7 +63,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['check'])) {
     };
     echo json_encode([
         'proxy' => 'send-mail',
-        'version' => '2026-07-09-v7',
+        'version' => '2026-07-10-v9',
         'has_credentials_file' => $hasCredFile,
         'smtp' => [
             'host' => $smtpHost,
@@ -83,8 +83,20 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-$apiKey = getenv('PHP_PROXY_API_KEY');
-if (!$apiKey) {
+$apiKey = getenv('PHP_PROXY_API_KEY') ?: getenv('DB_PROXY_API_KEY') ?: '';
+if ($apiKey === '' && is_file(__DIR__ . '/db-proxy-credentials.php')) {
+    require_once __DIR__ . '/db-proxy-credentials.php';
+    if (defined('DB_PROXY_API_KEY') && DB_PROXY_API_KEY !== '') {
+        $apiKey = DB_PROXY_API_KEY;
+    }
+}
+if ($apiKey === '' && is_file(__DIR__ . '/send-mail-credentials.php')) {
+    require_once __DIR__ . '/send-mail-credentials.php';
+    if (defined('PHP_PROXY_API_KEY') && PHP_PROXY_API_KEY !== '') {
+        $apiKey = PHP_PROXY_API_KEY;
+    }
+}
+if ($apiKey === '') {
     $apiKey = 'holwert-db-proxy-2026-secure-key-change-in-production';
 }
 $incomingKey = isset($_SERVER['HTTP_X_API_KEY']) ? trim($_SERVER['HTTP_X_API_KEY']) : '';
@@ -105,6 +117,7 @@ if (!is_array($input)) {
 $to = isset($input['to']) ? trim((string)$input['to']) : '';
 $subject = isset($input['subject']) ? trim((string)$input['subject']) : '';
 $html = isset($input['html']) ? (string)$input['html'] : '';
+$text = isset($input['text']) ? (string)$input['text'] : '';
 $from = isset($input['from']) ? trim((string)$input['from']) : '';
 
 if ($to === '' || $subject === '' || $html === '') {
@@ -135,7 +148,7 @@ $smtpFrom = getenv('SMTP_FROM') ?: '';
 //   define('SMTP_PASS', '...'); // alleen op server
 //   define('SMTP_FROM', 'Holwert <noreply@appenvloed.com>');
 if (is_file(__DIR__ . '/send-mail-credentials.php')) {
-    require __DIR__ . '/send-mail-credentials.php';
+    require_once __DIR__ . '/send-mail-credentials.php';
     if (defined('SMTP_HOST') && $smtpHost === '') $smtpHost = SMTP_HOST;
     if (defined('SMTP_PORT') && $smtpPort === 0) $smtpPort = (int)SMTP_PORT;
     if (defined('SMTP_ENCRYPTION') && $smtpEnc === '') $smtpEnc = SMTP_ENCRYPTION;
@@ -144,7 +157,10 @@ if (is_file(__DIR__ . '/send-mail-credentials.php')) {
     if (defined('SMTP_FROM') && $smtpFrom === '') $smtpFrom = SMTP_FROM;
 }
 
-// Default From: SMTP_FROM of host-domein
+// Default From: SMTP_FROM of host-domein (negeer resend.dev / onboarding uit oude Vercel env)
+if ($from !== '' && preg_match('/(?:@resend\.dev|onboarding@resend)/i', $from)) {
+    $from = '';
+}
 if ($from === '') {
     if ($smtpFrom !== '') {
         $from = $smtpFrom;
@@ -213,7 +229,35 @@ function smtpEhlo($fp) {
     return ['ok' => false, 'message' => 'SMTP EHLO/HELO failed: ' . smtpTrimResp($ehlo)];
 }
 
-function smtpTransmit($fp, $mailFrom, $to, $fromHeader, $subject, $html) {
+function buildEmailMimeParts($html, $textPlain = null) {
+    $textPlain = $textPlain !== null ? trim((string)$textPlain) : '';
+    if ($textPlain === '') {
+        return [
+            'contentType' => 'text/html; charset=UTF-8',
+            'body' => (string)$html,
+        ];
+    }
+    $boundary = 'holwert_' . bin2hex(random_bytes(8));
+    $parts = [];
+    $parts[] = '--' . $boundary;
+    $parts[] = 'Content-Type: text/plain; charset=UTF-8';
+    $parts[] = 'Content-Transfer-Encoding: 8bit';
+    $parts[] = '';
+    $parts[] = $textPlain;
+    $parts[] = '--' . $boundary;
+    $parts[] = 'Content-Type: text/html; charset=UTF-8';
+    $parts[] = 'Content-Transfer-Encoding: 8bit';
+    $parts[] = '';
+    $parts[] = (string)$html;
+    $parts[] = '--' . $boundary . '--';
+    $parts[] = '';
+    return [
+        'contentType' => 'multipart/alternative; boundary="' . $boundary . '"',
+        'body' => implode("\r\n", $parts),
+    ];
+}
+
+function smtpTransmit($fp, $mailFrom, $to, $fromHeader, $subject, $html, $textPlain = null) {
     smtpSend($fp, 'MAIL FROM:<' . $mailFrom . '>');
     $mfrom = smtpReadResponse($fp);
     if (!smtpExpectCode($mfrom, [250])) {
@@ -233,15 +277,20 @@ function smtpTransmit($fp, $mailFrom, $to, $fromHeader, $subject, $html) {
         return ['ok' => false, 'message' => 'SMTP DATA failed: ' . smtpTrimResp($data)];
     }
 
+    $mime = buildEmailMimeParts($html, $textPlain);
     $headers = [];
+    $headers[] = 'Date: ' . gmdate('D, d M Y H:i:s') . ' +0000';
+    $headers[] = 'Message-ID: <' . bin2hex(random_bytes(16)) . '@appenvloed.com>';
     $headers[] = 'MIME-Version: 1.0';
-    $headers[] = 'Content-Type: text/html; charset=UTF-8';
+    $headers[] = 'Content-Type: ' . $mime['contentType'];
     $headers[] = 'From: ' . $fromHeader;
     $headers[] = 'Reply-To: ' . $fromHeader;
     $headers[] = 'Subject: ' . $subject;
     $headers[] = 'To: <' . $to . '>';
+    $headers[] = 'Auto-Submitted: auto-generated';
+    $headers[] = 'X-Auto-Response-Suppress: All';
 
-    $msg = implode("\r\n", $headers) . "\r\n\r\n" . $html . "\r\n";
+    $msg = implode("\r\n", $headers) . "\r\n\r\n" . $mime['body'] . "\r\n";
     $msg = preg_replace("/\r\n\./", "\r\n..", $msg);
     fwrite($fp, $msg);
     smtpSend($fp, '.');
@@ -255,7 +304,7 @@ function smtpTransmit($fp, $mailFrom, $to, $fromHeader, $subject, $html) {
     return ['ok' => true];
 }
 
-function sendViaLocalhostRelay($smtpFrom, $to, $fromHeader, $subject, $html) {
+function sendViaLocalhostRelay($smtpFrom, $to, $fromHeader, $subject, $html, $textPlain = null) {
     $mailFrom = extractMailAddress($smtpFrom !== '' ? $smtpFrom : $fromHeader);
     foreach (['127.0.0.1', 'localhost'] as $host) {
         $fp = smtpOpenPlainSocket($host, 25, 8);
@@ -273,15 +322,16 @@ function sendViaLocalhostRelay($smtpFrom, $to, $fromHeader, $subject, $html) {
             fclose($fp);
             continue;
         }
-        return smtpTransmit($fp, $mailFrom, $to, $fromHeader, $subject, $html);
+        return smtpTransmit($fp, $mailFrom, $to, $fromHeader, $subject, $html, $textPlain);
     }
     return ['ok' => false, 'message' => 'localhost:25 relay niet beschikbaar'];
 }
 
-function sendViaMailFunction($to, $from, $subject, $html) {
+function sendViaMailFunction($to, $from, $subject, $html, $textPlain = null) {
+    $mime = buildEmailMimeParts($html, $textPlain);
     $headers = [];
     $headers[] = 'MIME-Version: 1.0';
-    $headers[] = 'Content-Type: text/html; charset=UTF-8';
+    $headers[] = 'Content-Type: ' . $mime['contentType'];
     $headers[] = 'From: ' . $from;
     $headers[] = 'Reply-To: ' . $from;
     $headers[] = 'X-Mailer: Holwert mail-proxy';
@@ -290,9 +340,10 @@ function sendViaMailFunction($to, $from, $subject, $html) {
     if ($addr !== '' && filter_var($addr, FILTER_VALIDATE_EMAIL)) {
         $envelope = '-f' . $addr;
     }
+    $body = $mime['body'];
     $ok = $envelope !== ''
-        ? @mail($to, $subject, $html, implode("\r\n", $headers), $envelope)
-        : @mail($to, $subject, $html, implode("\r\n", $headers));
+        ? @mail($to, $subject, $body, implode("\r\n", $headers), $envelope)
+        : @mail($to, $subject, $body, implode("\r\n", $headers));
     if (!$ok) {
         return ['ok' => false, 'message' => 'mail() gaf false terug'];
     }
@@ -347,7 +398,7 @@ function smtpAuthenticate($fp, $smtpUser, $smtpPass) {
     return ['ok' => true];
 }
 
-function sendViaSmtp($smtpHost, $smtpPort, $smtpEnc, $smtpUser, $smtpPass, $smtpFrom, $to, $fromHeader, $subject, $html) {
+function sendViaSmtp($smtpHost, $smtpPort, $smtpEnc, $smtpUser, $smtpPass, $smtpFrom, $to, $fromHeader, $subject, $html, $textPlain = null) {
     $host = $smtpHost;
     $port = $smtpPort > 0 ? $smtpPort : 465;
     $timeout = 15;
@@ -418,19 +469,19 @@ function sendViaSmtp($smtpHost, $smtpPort, $smtpEnc, $smtpUser, $smtpPass, $smtp
     $envelopeFrom = $smtpFrom !== '' ? $smtpFrom : $fromHeader;
     $mailFrom = extractMailAddress($envelopeFrom);
 
-    return smtpTransmit($fp, $mailFrom, $to, $fromHeader, $subject, $html);
+    return smtpTransmit($fp, $mailFrom, $to, $fromHeader, $subject, $html, $textPlain);
 }
 
 // Prefer authenticated SMTP; fallback localhost:25 (Plesk) en daarna mail()
 if ($smtpHost !== '') {
-    $smtpResult = sendViaSmtp($smtpHost, $smtpPort, $smtpEnc, $smtpUser, $smtpPass, $smtpFrom, $to, $from, $subject, $html);
+    $smtpResult = sendViaSmtp($smtpHost, $smtpPort, $smtpEnc, $smtpUser, $smtpPass, $smtpFrom, $to, $from, $subject, $html, $text !== '' ? $text : null);
     if ($smtpResult['ok'] !== true) {
-        $relay = sendViaLocalhostRelay($smtpFrom, $to, $from, $subject, $html);
+        $relay = sendViaLocalhostRelay($smtpFrom, $to, $from, $subject, $html, $text !== '' ? $text : null);
         if ($relay['ok'] === true) {
             echo json_encode(['ok' => true, 'via' => 'localhost-relay']);
             exit;
         }
-        $mailFn = sendViaMailFunction($to, $from, $subject, $html);
+        $mailFn = sendViaMailFunction($to, $from, $subject, $html, $text !== '' ? $text : null);
         if ($mailFn['ok'] === true) {
             echo json_encode(['ok' => true, 'via' => 'mail']);
             exit;
@@ -445,14 +496,19 @@ if ($smtpHost !== '') {
         ]);
         exit;
     }
+    $via = 'smtp';
+    if ($smtpEnc !== '') {
+        $via = 'smtp-' . strtolower($smtpEnc);
+    }
 } else {
-    $mailFn = sendViaMailFunction($to, $from, $subject, $html);
+    $mailFn = sendViaMailFunction($to, $from, $subject, $html, $text !== '' ? $text : null);
     if ($mailFn['ok'] !== true) {
         http_response_code(500);
         echo json_encode(['ok' => false, 'error' => 'Send failed', 'message' => $mailFn['message']]);
         exit;
     }
+    $via = 'mail';
 }
 
-echo json_encode(['ok' => true]);
+echo json_encode(['ok' => true, 'via' => $via ?? 'smtp']);
 

@@ -1,9 +1,9 @@
 <?php
 /**
  * Publieke nieuws-deellink voor Facebook/WhatsApp (Open Graph).
- * FTP: upload deze map naar holwert.appenvloed.com/news/
+ * FTP: upload deze map naar holwert.appenvloed.com/nieuws/
  *
- * URL: https://holwert.appenvloed.com/news/44
+ * URL: https://holwert.appenvloed.com/nieuws/44
  */
 
 declare(strict_types=1);
@@ -14,7 +14,7 @@ function newsShareResolveId(): ?int
         return (int) $_GET['id'];
     }
     $path = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
-    if (preg_match('#/news/(\d+)/?$#', $path, $m)) {
+    if (preg_match('#/nieuws/(\d+)/?$#', $path, $m)) {
         return (int) $m[1];
     }
     return null;
@@ -75,7 +75,7 @@ $description = newsShareStripHtml($content, 200) ?: 'Nieuws uit Holwert.';
 $image = trim((string) ($article['image_url'] ?? ''));
 $publishedAt = $article['published_at'] ?? null;
 $host = $_SERVER['HTTP_HOST'] ?? 'holwert.appenvloed.com';
-$canonicalUrl = 'https://' . $host . '/news/' . $id;
+$canonicalUrl = 'https://' . $host . '/nieuws/' . $id;
 $appDeepLink = 'holwert://news/' . $id;
 $appLinkUrl = 'https://' . $host . '/app-link/?t=news&id=' . $id;
 $androidStoreUrl = 'https://play.google.com/store/apps/details?id=com.appenvloed.holwert';
