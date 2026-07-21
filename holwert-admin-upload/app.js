@@ -1,8 +1,8 @@
-console.log('=== SCRIPT LOADED - VERSION 20260721-fb-share-text ===');
+console.log('=== SCRIPT LOADED - VERSION 20260721-fb-holwert-domain ===');
 
 const NEWS_SHARE_BASE_URL = 'https://holwert.appenvloed.com/app-link/';
-/** Publieke pagina met Open Graph (titel, tekst, afbeelding) — voor Facebook-deelvenster */
-const NEWS_PUBLIC_SHARE_BASE_URL = 'https://holwert-backend.vercel.app/news/';
+/** Publieke pagina met Open Graph op eigen domein — voor Facebook-deelvenster */
+const NEWS_PUBLIC_SHARE_BASE_URL = 'https://holwert.appenvloed.com/news/';
 
 function getNewsShareUrl(newsId) {
     return `${NEWS_SHARE_BASE_URL}?t=news&id=${Number(newsId)}`;
@@ -31,11 +31,14 @@ function stripHtmlForShareText(html, maxLen = 300) {
     return text;
 }
 
-function buildFacebookShareMessage(title, content) {
+function buildFacebookShareMessage(title, content, shareUrl) {
+    const parts = [];
     const heading = (title || '').trim();
     const preview = stripHtmlForShareText(content, 300);
-    if (heading && preview) return `${heading}\n\n${preview}`;
-    return heading || preview || '';
+    if (heading) parts.push(heading);
+    if (preview) parts.push(preview);
+    if (shareUrl) parts.push(`Lees meer: ${shareUrl}`);
+    return parts.join('\n\n');
 }
 
 async function openFacebookShareForNews(newsId, title, content) {
@@ -49,7 +52,7 @@ async function openFacebookShareForNews(newsId, title, content) {
         return;
     }
     const shareUrl = getNewsPublicShareUrl(id);
-    const message = buildFacebookShareMessage(title, content);
+    const message = buildFacebookShareMessage(title, content, shareUrl);
     if (message) {
         try {
             if (navigator.clipboard?.writeText) {
