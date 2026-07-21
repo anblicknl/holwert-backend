@@ -1,4 +1,4 @@
-console.log('=== SCRIPT LOADED - VERSION 20260721-fb-share-fix ===');
+console.log('=== SCRIPT LOADED - VERSION 20260721-fb-share-text ===');
 
 const NEWS_SHARE_BASE_URL = 'https://holwert.appenvloed.com/app-link/';
 /** Publieke pagina met Open Graph (titel, tekst, afbeelding) — voor Facebook-deelvenster */
@@ -12,7 +12,33 @@ function getNewsPublicShareUrl(newsId) {
     return `${NEWS_PUBLIC_SHARE_BASE_URL}${Number(newsId)}`;
 }
 
-async function openFacebookShareForNews(newsId, title) {
+function stripHtmlForShareText(html, maxLen = 300) {
+    if (!html) return '';
+    let text = String(html)
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/p>/gi, '\n\n')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+    if (maxLen > 0 && text.length > maxLen) {
+        text = text.slice(0, maxLen).replace(/\s+\S*$/, '').trim();
+        if (text) text += '…';
+    }
+    return text;
+}
+
+function buildFacebookShareMessage(title, content) {
+    const heading = (title || '').trim();
+    const preview = stripHtmlForShareText(content, 300);
+    if (heading && preview) return `${heading}\n\n${preview}`;
+    return heading || preview || '';
+}
+
+async function openFacebookShareForNews(newsId, title, content) {
     const id = Number(newsId);
     if (!Number.isFinite(id) || id <= 0) {
         if (typeof admin !== 'undefined' && admin?.showNotification) {
@@ -23,18 +49,23 @@ async function openFacebookShareForNews(newsId, title) {
         return;
     }
     const shareUrl = getNewsPublicShareUrl(id);
-    const message = (title || '').trim()
-        ? `${title.trim()}\n\nLees meer in de Holwert-app:\n${shareUrl}`
-        : shareUrl;
-    try {
-        if (navigator.clipboard?.writeText) {
-            await navigator.clipboard.writeText(message);
-        }
-    } catch (_) { /* klembord optioneel */ }
+    const message = buildFacebookShareMessage(title, content);
+    if (message) {
+        try {
+            if (navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(message);
+            }
+        } catch (_) { /* klembord optioneel */ }
+    }
     const fbUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`;
     window.open(fbUrl, 'holwert-facebook-share', 'width=580,height=460,noopener,noreferrer');
     if (typeof admin !== 'undefined' && admin?.showNotification) {
-        admin.showNotification('Facebook geopend. Tekst staat op je klembord — plak die in het bericht (Ctrl+V).', 'success');
+        admin.showNotification(
+            message
+                ? 'Facebook geopend. Titel en inhoud staan op je klembord — plak in het bericht (Ctrl+V).'
+                : 'Facebook geopend met linkpreview van dit bericht.',
+            'success'
+        );
     }
 }
 
@@ -3418,7 +3449,7 @@ class HolwertAdmin {
                                     <input type="checkbox" id="newsShareFacebook">
                                     <span>Na opslaan delen op Facebook</span>
                                 </label>
-                                <small class="form-hint">Opent Facebook met link, titel en afbeelding van het bericht. Tekst staat op je klembord om te plakken.</small>
+                                <small class="form-hint">Linkpreview opent automatisch. Titel en begin van de inhoud staan op je klembord om te plakken.</small>
                             </div>
                         </form>
                     </div>
@@ -3713,7 +3744,7 @@ class HolwertAdmin {
             this.loadNews();
 
             if (isPublished && shareOnFacebook && savedId) {
-                openFacebookShareForNews(savedId, body.title);
+                openFacebookShareForNews(savedId, body.title, body.content);
             }
         } catch (e) {
             console.error('saveNews error:', e);
