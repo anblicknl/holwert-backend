@@ -6348,7 +6348,15 @@ app.post('/api/org/news', authenticateToken, requireOrgPortal, async (req, res) 
     }
 
     const result = await executeInsert(insertSql, insertParams);
-    const id = result.insertId || (result.rows && result.rows[0] && result.rows[0].id);
+    let id = result.insertId || (result.rows && result.rows[0] && result.rows[0].id);
+    if (!id) {
+      const fallback = await executeQuery(
+        'SELECT id FROM news WHERE organization_id = ? ORDER BY id DESC LIMIT 1',
+        [orgId]
+      );
+      id = fallback.rows?.[0]?.id;
+      if (id) console.warn('[POST /api/org/news] insertId ontbrak; fallback id=', id);
+    }
     if (isPublished && orgId && id) {
       notifyFollowersOfNewsArticle(orgId, id, title || '').catch(err =>
         console.error('Push notification error:', err)
@@ -6356,6 +6364,9 @@ app.post('/api/org/news', authenticateToken, requireOrgPortal, async (req, res) 
     }
     invalidatePublicNewsCaches(id);
     const row = await executeQuery('SELECT id, title, excerpt, is_published, COALESCE(published_at, created_at) as published_at, organization_id, created_at FROM news WHERE id = ?', [id]);
+    if (!row.rows?.length) {
+      return res.status(500).json({ error: 'Artikel aangemaakt maar kon id niet ophalen' });
+    }
     res.status(201).json({ article: row.rows[0] });
   } catch (error) {
     console.error('POST /api/org/news error:', error);

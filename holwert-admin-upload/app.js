@@ -1,4 +1,52 @@
-console.log('=== SCRIPT LOADED - VERSION 20260719-login-fix ===');
+console.log('=== SCRIPT LOADED - VERSION 20260721-fb-share-fix ===');
+
+const NEWS_SHARE_BASE_URL = 'https://holwert.appenvloed.com/app-link/';
+/** Publieke pagina met Open Graph (titel, tekst, afbeelding) — voor Facebook-deelvenster */
+const NEWS_PUBLIC_SHARE_BASE_URL = 'https://holwert-backend.vercel.app/news/';
+
+function getNewsShareUrl(newsId) {
+    return `${NEWS_SHARE_BASE_URL}?t=news&id=${Number(newsId)}`;
+}
+
+function getNewsPublicShareUrl(newsId) {
+    return `${NEWS_PUBLIC_SHARE_BASE_URL}${Number(newsId)}`;
+}
+
+async function openFacebookShareForNews(newsId, title) {
+    const id = Number(newsId);
+    if (!Number.isFinite(id) || id <= 0) {
+        if (typeof admin !== 'undefined' && admin?.showNotification) {
+            admin.showNotification('Kon geen geldige deellink maken voor dit bericht.', 'error');
+        } else {
+            alert('Kon geen geldige deellink maken voor dit bericht.');
+        }
+        return;
+    }
+    const shareUrl = getNewsPublicShareUrl(id);
+    const message = (title || '').trim()
+        ? `${title.trim()}\n\nLees meer in de Holwert-app:\n${shareUrl}`
+        : shareUrl;
+    try {
+        if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(message);
+        }
+    } catch (_) { /* klembord optioneel */ }
+    const fbUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`;
+    window.open(fbUrl, 'holwert-facebook-share', 'width=580,height=460,noopener,noreferrer');
+    if (typeof admin !== 'undefined' && admin?.showNotification) {
+        admin.showNotification('Facebook geopend. Tekst staat op je klembord — plak die in het bericht (Ctrl+V).', 'success');
+    }
+}
+
+function syncNewsFacebookShareField(root) {
+    const scope = root || document;
+    const pub = scope.querySelector('#newsPublished');
+    const fb = scope.querySelector('#newsShareFacebook');
+    if (!pub || !fb) return;
+    const enabled = pub.checked;
+    fb.disabled = !enabled;
+    if (!enabled) fb.checked = false;
+}
 
 const ORG_CATEGORIES = [
     { id: 'vereniging', label: 'Vereniging' },
@@ -3364,6 +3412,14 @@ class HolwertAdmin {
                                 </label>
                                 <small class="form-hint">Uitvinken om als concept op te slaan</small>
                             </div>
+
+                            <div class="form-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="newsShareFacebook">
+                                    <span>Na opslaan delen op Facebook</span>
+                                </label>
+                                <small class="form-hint">Opent Facebook met link, titel en afbeelding van het bericht. Tekst staat op je klembord om te plakken.</small>
+                            </div>
                         </form>
                     </div>
                     <div class="modal-footer">
@@ -3392,6 +3448,11 @@ class HolwertAdmin {
             console.log('🔧 Forced modal display to flex');
             this.wirePdfRemoveControl(overlay);
             this.syncNewsCustomCategoryField();
+            const pubCheckbox = overlay.querySelector('#newsPublished');
+            if (pubCheckbox) {
+                pubCheckbox.addEventListener('change', () => syncNewsFacebookShareField(overlay));
+                syncNewsFacebookShareField(overlay);
+            }
         } catch (e) {
             console.error('openNewsModal error:', e);
             console.error('💥 Stack:', e.stack);
@@ -3642,9 +3703,18 @@ class HolwertAdmin {
                 return;
             }
 
+            const savedJson = await res.json().catch(() => ({}));
+            const shareOnFacebook = document.getElementById('newsShareFacebook')?.checked;
+            const isPublished = document.getElementById('newsPublished')?.checked;
+            const savedId = savedJson.article?.id || savedJson.articleId || actualNewsId;
+
             this.showNotification('Nieuws artikel opgeslagen', 'success');
             document.getElementById('newsTitle')?.closest('.modal-overlay')?.remove();
             this.loadNews();
+
+            if (isPublished && shareOnFacebook && savedId) {
+                openFacebookShareForNews(savedId, body.title);
+            }
         } catch (e) {
             console.error('saveNews error:', e);
             this.showNotification(`Fout bij opslaan nieuws: ${e?.message || 'Onbekende fout'}`, 'error');
