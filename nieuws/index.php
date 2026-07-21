@@ -48,24 +48,124 @@ if (!$id) {
     newsShareRenderError(400, 'Ongeldige link', 'Geen nieuwsbericht opgegeven.');
 }
 
-$apiUrl = 'https://holwert-backend.vercel.app/api/news/' . $id;
-$ctx = stream_context_create([
-    'http' => [
-        'method' => 'GET',
-        'timeout' => 8,
-        'header' => "Accept: application/json\r\nUser-Agent: HolwertNewsShare/1.0\r\n",
-    ],
-    'ssl' => ['verify_peer' => true, 'verify_peer_name' => true],
-]);
-
-$raw = @file_get_contents($apiUrl, false, $ctx);
-if ($raw === false) {
-    newsShareRenderError(502, 'Tijdelijk niet beschikbaar', 'Het bericht kon nu niet worden geladen. Probeer het later opnieuw.');
+/** @return array<string, mixed>|null|false null=niet gevonden, false=fetch mislukt */
+function newsShareLoadDbConfig(): ?array
+{
+    $credFile = __DIR__ . '/../admin/db-proxy-credentials.php';
+    if (is_file($credFile)) {
+        require $credFile;
+    }
+    $host = defined('DB_PROXY_HOST') ? DB_PROXY_HOST : (getenv('DB_PROXY_HOST') ?: getenv('DB_HOST') ?: 'localhost');
+    $port = (int) (defined('DB_PROXY_PORT') ? DB_PROXY_PORT : (getenv('DB_PROXY_PORT') ?: 3306));
+    $user = defined('DB_PROXY_USER') ? DB_PROXY_USER : (getenv('DB_PROXY_USER') ?: getenv('DB_USER') ?: '');
+    $pass = defined('DB_PROXY_PASS') ? DB_PROXY_PASS : (getenv('DB_PROXY_PASS') ?: getenv('DB_PASS') ?: '');
+    $name = defined('DB_PROXY_NAME') ? DB_PROXY_NAME : (getenv('DB_PROXY_NAME') ?: getenv('DB_NAME') ?: '');
+    if ($user === '' || $name === '') {
+        return null;
+    }
+    return compact('host', 'port', 'user', 'pass', 'name');
 }
 
-$data = json_decode($raw, true);
-$article = is_array($data) ? ($data['article'] ?? null) : null;
-if (!is_array($article)) {
+/** @return array<string, mixed>|null|false */
+function newsShareFetchArticleFromDb(int $id)
+{
+    $cfg = newsShareLoadDbConfig();
+    if (!$cfg) {
+        return false;
+    }
+    mysqli_report(MYSQLI_REPORT_OFF);
+    $db = @new mysqli($cfg['host'], $cfg['user'], $cfg['pass'], $cfg['name'], $cfg['port']);
+    if ($db->connect_errno) {
+        return false;
+    }
+    $db->set_charset('utf8mb4');
+    $sql = "SELECT n.id, n.title, COALESCE(n.content, '') AS content, n.image_url,
+                   COALESCE(n.published_at, n.created_at) AS published_at
+            FROM news n
+            WHERE n.id = ? AND n.is_published = 1
+            LIMIT 1";
+    $stmt = $db->prepare($sql);
+    if (!$stmt) {
+        $db->close();
+        return false;
+    }
+    $stmt->bind_param('i', $id);
+    if (!$stmt->execute()) {
+        $stmt->close();
+        $db->close();
+        return false;
+    }
+    $result = $stmt->get_result();
+    $row = $result ? $result->fetch_assoc() : null;
+    $stmt->close();
+    $db->close();
+    if (!$row) {
+        return null;
+    }
+    return $row;
+}
+
+/** @return array<string, mixed>|null|false */
+function newsShareFetchArticleFromApi(int $id)
+{
+    $apiUrl = 'https://holwert-backend.vercel.app/api/news/' . $id;
+    $raw = false;
+    $httpCode = 0;
+
+    if (function_exists('curl_init')) {
+        $ch = curl_init($apiUrl);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 12,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_HTTPHEADER => ['Accept: application/json', 'User-Agent: HolwertNewsShare/1.2'],
+        ]);
+        $raw = curl_exec($ch);
+        $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+    } elseif (ini_get('allow_url_fopen')) {
+        $ctx = stream_context_create([
+            'http' => [
+                'method' => 'GET',
+                'timeout' => 12,
+                'header' => "Accept: application/json\r\nUser-Agent: HolwertNewsShare/1.2\r\n",
+            ],
+        ]);
+        $raw = @file_get_contents($apiUrl, false, $ctx);
+        if (isset($http_response_header[0]) && preg_match('/\s(\d{3})\s/', $http_response_header[0], $m)) {
+            $httpCode = (int) $m[1];
+        }
+    }
+
+    if ($raw === false) {
+        return false;
+    }
+    if ($httpCode === 404) {
+        return null;
+    }
+    if ($httpCode >= 400) {
+        return false;
+    }
+    $data = json_decode((string) $raw, true);
+    $article = is_array($data) ? ($data['article'] ?? null) : null;
+    return is_array($article) ? $article : null;
+}
+
+/** @return array<string, mixed>|null|false */
+function newsShareFetchArticle(int $id)
+{
+    $fromDb = newsShareFetchArticleFromDb($id);
+    if ($fromDb !== false) {
+        return $fromDb;
+    }
+    return newsShareFetchArticleFromApi($id);
+}
+
+$article = newsShareFetchArticle($id);
+if ($article === false) {
+    newsShareRenderError(502, 'Tijdelijk niet beschikbaar', 'Het bericht kon nu niet worden geladen. Probeer het later opnieuw.');
+}
+if ($article === null || !is_array($article)) {
     newsShareRenderError(404, 'Bericht niet gevonden', 'Dit nieuwsbericht bestaat niet (meer) of is niet gepubliceerd.');
 }
 
