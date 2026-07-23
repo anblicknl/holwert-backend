@@ -39,7 +39,7 @@ const ORG_CATEGORY_LABELS = {
   welzijn: 'Welzijn',
   natuur: 'Natuur',
   kerk: 'Kerk',
-  ondernemer: 'Ondernemer',
+  ondernemer: 'Onderneming',
   horeca: 'Horeca',
   overig: 'Overig',
 };

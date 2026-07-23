@@ -34,7 +34,7 @@
         { id: 'welzijn', label: 'Welzijn' },
         { id: 'natuur', label: 'Natuur' },
         { id: 'kerk', label: 'Kerk' },
-        { id: 'ondernemer', label: 'Ondernemer' },
+        { id: 'ondernemer', label: 'Onderneming' },
         { id: 'horeca', label: 'Horeca' },
         { id: 'overig', label: 'Overig' },
     ].sort((a, b) => a.label.localeCompare(b.label, 'nl'));
