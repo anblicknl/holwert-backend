@@ -1870,6 +1870,19 @@ function isBookmarksTableDisallowed(error) {
   return /disallowed table/i.test(msg);
 }
 
+function isProfileBlocksTableDisallowed(error) {
+  const msg = (error?.message || '') + (error?.response?.data?.message || '');
+  return /disallowed table/i.test(msg) && /organization_profile_blocks/i.test(msg);
+}
+
+function profileBlocksSetupErrorResponse(res) {
+  return res.status(503).json({
+    error: 'Profielblokken nog niet geconfigureerd',
+    message: 'Voeg tabel organization_profile_blocks toe aan db-proxy.php op de hosting en upload het bestand opnieuw via FTP (zie docs/DB_PROXY_PUSH_MUTES.md).',
+    blocks: [],
+  });
+}
+
 /** Verwijder bookmarks naar niet-gepubliceerd of verwijderd nieuws. */
 async function pruneStaleBookmarks(userId) {
   await executeQuery(`
@@ -4443,6 +4456,9 @@ app.get('/api/admin/organizations/:id/profile-blocks', authenticateToken, requir
     res.json({ blocks });
   } catch (error) {
     console.error('GET /api/admin/organizations/:id/profile-blocks error:', error);
+    if (isProfileBlocksTableDisallowed(error)) {
+      return profileBlocksSetupErrorResponse(res);
+    }
     res.status(500).json({ error: 'Kon profielblokken niet laden', message: error.message });
   }
 });
@@ -7678,7 +7694,10 @@ app.get('/api/organizations/:id/profile-blocks', async (req, res) => {
     res.json(response);
   } catch (error) {
     console.error('GET /api/organizations/:id/profile-blocks error:', error);
-    res.status(500).json({ error: 'Kon profielblokken niet ophalen', blocks: [] });
+    if (isProfileBlocksTableDisallowed(error)) {
+      return profileBlocksSetupErrorResponse(res);
+    }
+    res.status(500).json({ error: 'Kon profielblokken niet ophalen', message: error.message, blocks: [] });
   }
 });
 
@@ -8736,9 +8755,9 @@ async function ensureOrganizationProfileBlocksTable() {
       organization_id INT NOT NULL,
       block_type VARCHAR(50) NOT NULL,
       title VARCHAR(255) NOT NULL,
-      data_json JSON NOT NULL,
+      data_json LONGTEXT NOT NULL,
       sort_order INT DEFAULT 0,
-      is_visible BOOLEAN DEFAULT true,
+      is_visible TINYINT(1) DEFAULT 1,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       INDEX idx_org_profile_blocks (organization_id, is_visible, sort_order)

@@ -2780,8 +2780,8 @@ class HolwertAdmin {
                 ]);
                 const metaData = await metaRes.json().catch(() => ({}));
                 const blocksData = await blocksRes.json().catch(() => ({}));
-                if (!metaRes.ok) throw new Error(metaData.error || metaData.message || 'Meta laden mislukt');
-                if (!blocksRes.ok) throw new Error(blocksData.error || blocksData.message || 'Blokken laden mislukt');
+                if (!metaRes.ok) throw new Error(metaData.message || metaData.error || 'Meta laden mislukt');
+                if (!blocksRes.ok) throw new Error(blocksData.message || blocksData.error || 'Blokken laden mislukt');
                 meta = metaData;
                 blocks = Array.isArray(blocksData.blocks) ? blocksData.blocks : [];
                 const typeLabel = (id) => meta.block_types?.find((b) => b.id === id)?.label || id;
