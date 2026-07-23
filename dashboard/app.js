@@ -2174,13 +2174,15 @@
                         <label>Weekschema</label>
                         ${(weekdayLabels || []).map((label, day) => {
                             const d = days.find((x) => Number(x.day) === day) || { day, closed: true };
-                            return `<div class="form-row" style="align-items:center;margin-bottom:8px;">
-                                <label class="checkbox-label" style="min-width:110px;margin:0;">
-                                    <input type="checkbox" class="pb-day-closed" data-day="${day}" ${d.closed ? 'checked' : ''}> ${escapeHtml(label)}
+                            const isOpen = !d.closed;
+                            return `<div class="form-row" style="align-items:center;margin-bottom:8px;gap:8px;">
+                                <span style="min-width:100px;font-weight:500;">${escapeHtml(label)}</span>
+                                <label class="checkbox-label" style="margin:0;white-space:nowrap;">
+                                    <input type="checkbox" class="pb-day-open" data-day="${day}" ${isOpen ? 'checked' : ''}> Open
                                 </label>
-                                <input type="time" class="pb-day-open" data-day="${day}" value="${escapeHtml(d.open || '09:00')}" ${d.closed ? 'disabled' : ''} style="flex:1;">
-                                <span style="padding:0 6px;">–</span>
-                                <input type="time" class="pb-day-close" data-day="${day}" value="${escapeHtml(d.close || '17:00')}" ${d.closed ? 'disabled' : ''} style="flex:1;">
+                                <input type="time" class="pb-day-start" data-day="${day}" value="${escapeHtml(d.open || '09:00')}" ${isOpen ? '' : 'disabled'} style="flex:1;">
+                                <span style="padding:0 2px;">–</span>
+                                <input type="time" class="pb-day-end" data-day="${day}" value="${escapeHtml(d.close || '17:00')}" ${isOpen ? '' : 'disabled'} style="flex:1;">
                             </div>`;
                         }).join('')}
                     </div>`;
@@ -2297,13 +2299,14 @@
     }
 
     function wireProfileBlockForm(overlay, blockType) {
-        overlay.querySelectorAll('.pb-day-closed').forEach((cb) => {
+        overlay.querySelectorAll('.pb-day-open').forEach((cb) => {
             cb.addEventListener('change', () => {
                 const day = cb.getAttribute('data-day');
-                const open = overlay.querySelector(`.pb-day-open[data-day="${day}"]`);
-                const close = overlay.querySelector(`.pb-day-close[data-day="${day}"]`);
-                if (open) open.disabled = cb.checked;
-                if (close) close.disabled = cb.checked;
+                const start = overlay.querySelector(`.pb-day-start[data-day="${day}"]`);
+                const end = overlay.querySelector(`.pb-day-end[data-day="${day}"]`);
+                const enabled = cb.checked;
+                if (start) start.disabled = !enabled;
+                if (end) end.disabled = !enabled;
             });
         });
         overlay.querySelector('#pb_add_item')?.addEventListener('click', () => {
@@ -2334,12 +2337,12 @@
             case 'opening_hours': {
                 const days = [];
                 for (let day = 0; day <= 6; day++) {
-                    const closed = overlay.querySelector(`.pb-day-closed[data-day="${day}"]`)?.checked;
+                    const isOpen = overlay.querySelector(`.pb-day-open[data-day="${day}"]`)?.checked;
                     days.push({
                         day,
-                        closed: !!closed,
-                        open: overlay.querySelector(`.pb-day-open[data-day="${day}"]`)?.value || '09:00',
-                        close: overlay.querySelector(`.pb-day-close[data-day="${day}"]`)?.value || '17:00',
+                        closed: !isOpen,
+                        open: overlay.querySelector(`.pb-day-start[data-day="${day}"]`)?.value || '09:00',
+                        close: overlay.querySelector(`.pb-day-end[data-day="${day}"]`)?.value || '17:00',
                     });
                 }
                 return { note: overlay.querySelector('#pb_note')?.value?.trim() || '', days, exceptions: [] };
