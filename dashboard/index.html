@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard - Holwert Dorpsapp</title>
-    <link rel="stylesheet" href="styles.css?v=20260716-responsive5">
+    <link rel="stylesheet" href="styles.css?v=20260723-profile-blocks">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
 <body>
@@ -220,6 +220,7 @@
                 <li class="nav-item" data-section="news"><i class="fas fa-newspaper"></i><span>Nieuws</span></li>
                 <li class="nav-item" data-section="events"><i class="fas fa-calendar"></i><span>Agenda</span></li>
                 <li class="nav-item" data-section="profile"><i class="fas fa-building"></i><span>Organisatie profiel</span></li>
+                <li class="nav-item" data-section="profile-blocks"><i class="fas fa-th-large"></i><span>Profielblokken</span></li>
             </ul>
             <div class="sidebar-stats" id="sidebarStats"></div>
         </nav>
@@ -266,9 +267,21 @@
                 </div>
                 <div id="profileForm" class="profile-form"></div>
             </section>
+
+            <section id="profile-blocks" class="content-section">
+                <div class="section-header">
+                    <h2><i class="fas fa-th-large"></i> Profielblokken</h2>
+                    <button type="button" id="addProfileBlockBtn" class="btn btn-primary"><i class="fas fa-plus"></i> Nieuw blok</button>
+                </div>
+                <p class="form-hint" style="margin:0 0 1rem 1rem;max-width:720px;">
+                    Extra informatie op jullie profiel in de app: openingstijden, diensten, speelschema, lidmaatschap, enz.
+                    Bezoekers zien bij openingstijden direct of jullie nu open of gesloten zijn.
+                </p>
+                <div id="profileBlocksList" class="profile-form"></div>
+            </section>
         </main>
     </div>
 
-    <script src="app.js?v=20260721-nieuws-share"></script>
+    <script src="app.js?v=20260723-profile-blocks"></script>
 </body>
 </html>

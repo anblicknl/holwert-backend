@@ -1,4 +1,4 @@
-console.log('=== SCRIPT LOADED - VERSION 20260721-fb-holwert-domain ===');
+console.log('=== SCRIPT LOADED - VERSION 20260723-admin-orgs ===');
 
 const NEWS_SHARE_BASE_URL = 'https://holwert.appenvloed.com/app-link/';
 /** Publieke pagina met Open Graph op eigen domein — voor Facebook-deelvenster */
@@ -2080,10 +2080,10 @@ class HolwertAdmin {
 
     async loadOrganizations() {
         try {
-            console.log('Loading organizations from:', `${this.apiBaseUrl}/admin/organizations`);
+            console.log('Loading organizations from:', this._adminOrganizationsUrl());
             console.log('Token exists:', !!this.token);
             
-            const response = await fetch(`${this.apiBaseUrl}/admin/organizations`, {
+            const response = await fetch(this._adminOrganizationsUrl(), {
                 headers: {
                     'Authorization': `Bearer ${this.token}`
                 }
@@ -2098,14 +2098,7 @@ class HolwertAdmin {
                 console.log('Organizations count:', data.organizations ? data.organizations.length : 0);
                 
                 if (data.organizations && data.organizations.length > 0) {
-                    // Sorteer alfabetisch op naam, zoals gewenst in de admin
-                    const sorted = [...data.organizations].sort((a, b) => {
-                        const nameA = (a.name || '').toLowerCase();
-                        const nameB = (b.name || '').toLowerCase();
-                        if (nameA < nameB) return -1;
-                        if (nameA > nameB) return 1;
-                        return 0;
-                    });
+                    const sorted = this._sortOrganizationsByName(data.organizations);
                     this.organizationsList = sorted;
                     this.displayOrganizations(sorted);
                 } else {
@@ -2150,19 +2143,7 @@ class HolwertAdmin {
         if (this.organizationsList && this.organizationsList.length) return;
         if (!this.token) return;
         try {
-            const response = await fetch(`${this.apiBaseUrl}/admin/organizations`, {
-                headers: { 'Authorization': `Bearer ${this.token}` }
-            });
-            if (!response.ok) return;
-            const data = await response.json();
-            const list = data.organizations || [];
-            this.organizationsList = [...list].sort((a, b) => {
-                const nameA = (a.name || '').toLowerCase();
-                const nameB = (b.name || '').toLowerCase();
-                if (nameA < nameB) return -1;
-                if (nameA > nameB) return 1;
-                return 0;
-            });
+            this.organizationsList = await this._fetchAdminOrganizationsList();
         } catch (e) {
             console.warn('ensureOrganizationsListForUsers:', e);
         }
@@ -3236,6 +3217,27 @@ class HolwertAdmin {
         );
     }
 
+    /** Admin-orglijst: API default is limit=20 — te weinig voor alle dropdowns. */
+    _adminOrganizationsUrl(extraParams = {}) {
+        const q = new URLSearchParams({ limit: '200', ...extraParams });
+        return `${this.apiBaseUrl}/admin/organizations?${q.toString()}`;
+    }
+
+    async _fetchAdminOrganizationsList(extraParams = {}) {
+        if (!this.token) return [];
+        try {
+            const response = await fetch(this._adminOrganizationsUrl(extraParams), {
+                headers: { Authorization: `Bearer ${this.token}` },
+            });
+            if (!response.ok) return [];
+            const data = await response.json();
+            return this._sortOrganizationsByName(data.organizations || []);
+        } catch (e) {
+            console.warn('_fetchAdminOrganizationsList:', e);
+            return [];
+        }
+    }
+
     // Nieuwe uniforme functie voor nieuws modal (net als events)
     async openNewsModal(newsId = null, mode = 'create') {
         try {
@@ -3247,17 +3249,9 @@ class HolwertAdmin {
             let organizations = [];
             try {
                 console.log('Fetching organizations for news modal...');
-                const response = await fetch(`${this.apiBaseUrl}/admin/organizations`, {
-                    headers: { 'Authorization': `Bearer ${this.token}` }
-                });
-                console.log('Organizations fetch status:', response.status);
-                if (response.ok) {
-                    const data = await response.json();
-                    organizations = this._sortOrganizationsByName(data.organizations || []);
-                    console.log('Organizations loaded:', organizations.length);
-                } else {
-                    const errorData = await response.json().catch(() => ({}));
-                    console.error('Failed to load organizations:', errorData);
+                organizations = await this._fetchAdminOrganizationsList();
+                console.log('Organizations loaded:', organizations.length);
+                if (!organizations.length) {
                     this.showNotification('Kon organisaties niet laden. Organisatie dropdown is mogelijk leeg.', 'warning');
                 }
             } catch (error) {
@@ -6724,28 +6718,10 @@ class HolwertAdmin {
             
             // Haal organisaties op voor dropdown (bij create en edit)
             if (mode !== 'view') {
-                try {
-                    const orgRes = await fetch(`${this.apiBaseUrl}/admin/organizations`, {
-                        headers: {
-                            'Authorization': `Bearer ${this.token}`,
-                            'Content-Type': 'application/json'
-                        }
-                    });
-                    if (orgRes.ok) {
-                        const orgData = await orgRes.json();
-                        organizations = this._sortOrganizationsByName(orgData.organizations || []);
-                        console.log('Organizations loaded:', organizations.length);
-                    } else {
-                        // Niet gooien van error, gewoon loggen en doorgaan zonder organisaties
-                        const errorText = await orgRes.text();
-                        console.warn('Failed to load organizations:', orgRes.status, errorText);
-                        // Toon alleen een waarschuwing, geen error
-                        this.showNotification('Organisaties konden niet worden geladen. Je kunt nog steeds een event aanmaken.', 'warning');
-                    }
-                } catch (err) {
-                    // Bij network errors, gewoon loggen en doorgaan
-                    console.warn('Error loading organizations (continuing anyway):', err);
-                    // Geen notification - modal wordt gewoon getoond zonder organisaties
+                organizations = await this._fetchAdminOrganizationsList();
+                console.log('Organizations loaded:', organizations.length);
+                if (!organizations.length) {
+                    this.showNotification('Organisaties konden niet worden geladen. Je kunt nog steeds een event aanmaken.', 'warning');
                 }
             }
             
