@@ -284,8 +284,8 @@
         };
         const existing = existingBlock || null;
         const overlay = document.createElement('div');
-        overlay.className = 'modal-overlay show';
-        overlay.style.zIndex = '10050';
+        overlay.className = 'modal-overlay show modal-stack-top';
+        overlay.style.display = 'flex';
         const typeOptions = (meta.block_types || []).map((t) =>
             `<option value="${esc(t.id)}" ${existing?.block_type === t.id ? 'selected' : ''}>${esc(t.label)}</option>`
         ).join('');

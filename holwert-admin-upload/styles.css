@@ -634,8 +634,13 @@ input, select, textarea {
 }
 
 .modal-overlay[style*="display: flex"],
-.modal-overlay[style*="display:flex"] {
+.modal-overlay[style*="display:flex"],
+.modal-overlay.show {
     display: flex !important;
+}
+
+.modal-overlay.modal-stack-top {
+    z-index: 10050 !important;
 }
 
 .modal {

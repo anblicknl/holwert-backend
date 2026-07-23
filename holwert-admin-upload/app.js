@@ -2895,7 +2895,18 @@ class HolwertAdmin {
             }
         };
 
-        modal.querySelector('#adminAddProfileBlockBtn')?.addEventListener('click', () => {
+        modal.querySelector('#adminAddProfileBlockBtn')?.addEventListener('click', async () => {
+            if (!meta.block_types?.length) {
+                try {
+                    const metaRes = await fetch(`${this.apiBaseUrl}/admin/organizations/${orgId}/profile-blocks/meta`, {
+                        headers: { Authorization: `Bearer ${this.token}` },
+                    });
+                    const metaData = await metaRes.json().catch(() => ({}));
+                    if (metaRes.ok) meta = metaData;
+                } catch {
+                    /* fallback in profile-blocks-ui */
+                }
+            }
             HolwertProfileBlocksUi.openBlockEditorModal({
                 meta,
                 existingBlock: null,
@@ -2906,7 +2917,7 @@ class HolwertAdmin {
                         body: JSON.stringify(payload),
                     });
                     const data = await res.json().catch(() => ({}));
-                    if (!res.ok) throw new Error(data.error || data.message || 'Opslaan mislukt');
+                    if (!res.ok) throw new Error(data.message || data.error || 'Opslaan mislukt');
                     await refreshList();
                     this.showNotification('Profielblok toegevoegd', 'success');
                 },
