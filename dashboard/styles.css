@@ -401,6 +401,14 @@ body {
     border-radius: 4px;
     font-size: 0.9rem;
     font-family: inherit;
+    box-sizing: border-box;
+}
+.form-group select {
+    min-height: 44px;
+    background-color: #fff;
+    cursor: pointer;
+    appearance: auto;
+    -webkit-appearance: menulist;
 }
 .form-group textarea { min-height: 100px; resize: vertical; }
 

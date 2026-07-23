@@ -2780,10 +2780,20 @@ class HolwertAdmin {
                 ]);
                 const metaData = await metaRes.json().catch(() => ({}));
                 const blocksData = await blocksRes.json().catch(() => ({}));
-                if (!metaRes.ok) throw new Error(metaData.message || metaData.error || 'Meta laden mislukt');
-                if (!blocksRes.ok) throw new Error(blocksData.message || blocksData.error || 'Blokken laden mislukt');
-                meta = metaData;
+                if (metaRes.ok) {
+                    meta = metaData;
+                }
+                if (!blocksRes.ok) {
+                    const blocksErr = blocksData.message || blocksData.error || 'Blokken laden mislukt';
+                    blocks = [];
+                    if (!metaRes.ok) throw new Error(blocksErr);
+                    listEl.innerHTML = `
+                        <p class="form-hint" style="color:#b45309;margin-bottom:1rem;">${esc(blocksErr)}</p>
+                        <p class="empty-message">Nog geen profielblokken voor deze organisatie (lijst kon niet worden geladen).</p>`;
+                    return;
+                }
                 blocks = Array.isArray(blocksData.blocks) ? blocksData.blocks : [];
+                if (!metaRes.ok) throw new Error(metaData.message || metaData.error || 'Meta laden mislukt');
                 const typeLabel = (id) => meta.block_types?.find((b) => b.id === id)?.label || id;
                 if (!blocks.length) {
                     listEl.innerHTML = '<p class="empty-message">Nog geen profielblokken voor deze organisatie.</p>';

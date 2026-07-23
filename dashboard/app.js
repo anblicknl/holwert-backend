@@ -1990,12 +1990,61 @@
     let profileBlocksMeta = { block_types: [], weekday_labels: [], suggested_types: [] };
     let profileBlocksCache = [];
 
-    document.getElementById('addProfileBlockBtn')?.addEventListener('click', () => openProfileBlockModal(null));
+    const DEFAULT_PROFILE_BLOCKS_META = {
+        block_types: [
+            { id: 'opening_hours', label: 'Openingstijden' },
+            { id: 'service_schedule', label: 'Diensten / vieringen' },
+            { id: 'match_schedule', label: 'Speelschema' },
+            { id: 'membership', label: 'Lidmaatschap' },
+            { id: 'facilities', label: 'Voorzieningen' },
+            { id: 'team', label: 'Team / bestuur' },
+            { id: 'links', label: 'Handige links' },
+            { id: 'notice', label: 'Mededeling' },
+        ],
+        weekday_labels: ['Zondag', 'Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag'],
+        suggested_types: ['notice', 'links', 'facilities'],
+    };
+
+    function normalizeProfileBlocksMeta(raw) {
+        const base = raw && typeof raw === 'object' ? raw : {};
+        return {
+            block_types: Array.isArray(base.block_types) && base.block_types.length
+                ? base.block_types
+                : DEFAULT_PROFILE_BLOCKS_META.block_types,
+            weekday_labels: Array.isArray(base.weekday_labels) && base.weekday_labels.length
+                ? base.weekday_labels
+                : DEFAULT_PROFILE_BLOCKS_META.weekday_labels,
+            suggested_types: Array.isArray(base.suggested_types) && base.suggested_types.length
+                ? base.suggested_types
+                : DEFAULT_PROFILE_BLOCKS_META.suggested_types,
+        };
+    }
+
+    async function ensureProfileBlocksMetaLoaded() {
+        if (profileBlocksMeta.block_types?.length) return profileBlocksMeta;
+        try {
+            const metaRes = await fetch(`${apiBase}/org/profile-blocks/meta`, { headers: authHeaders() });
+            const meta = await metaRes.json().catch(() => ({}));
+            if (metaRes.ok) {
+                profileBlocksMeta = normalizeProfileBlocksMeta(meta);
+                return profileBlocksMeta;
+            }
+        } catch {
+            /* fallback hieronder */
+        }
+        profileBlocksMeta = normalizeProfileBlocksMeta(null);
+        return profileBlocksMeta;
+    }
+
+    document.getElementById('addProfileBlockBtn')?.addEventListener('click', () => {
+        void openProfileBlockModal(null);
+    });
 
     async function loadProfileBlocks() {
         const container = document.getElementById('profileBlocksList');
         if (!container) return;
         container.innerHTML = '<p class="form-hint">Profielblokken laden…</p>';
+        let blocksError = null;
         try {
             const [metaRes, blocksRes] = await Promise.all([
                 fetch(`${apiBase}/org/profile-blocks/meta`, { headers: authHeaders() }),
@@ -2003,28 +2052,44 @@
             ]);
             const meta = await metaRes.json().catch(() => ({}));
             const blocksData = await blocksRes.json().catch(() => ({}));
-            if (!metaRes.ok) throw new Error(meta.error || meta.message || 'Meta laden mislukt');
-            if (!blocksRes.ok) throw new Error(blocksData.error || blocksData.message || 'Blokken laden mislukt');
-            profileBlocksMeta = meta;
-            profileBlocksCache = Array.isArray(blocksData.blocks) ? blocksData.blocks : [];
-            renderProfileBlocksList(container);
+            if (metaRes.ok) {
+                profileBlocksMeta = normalizeProfileBlocksMeta(meta);
+            } else {
+                profileBlocksMeta = normalizeProfileBlocksMeta(null);
+            }
+            if (!blocksRes.ok) {
+                blocksError = blocksData.message || blocksData.error || 'Blokken laden mislukt';
+                profileBlocksCache = [];
+            } else {
+                profileBlocksCache = Array.isArray(blocksData.blocks) ? blocksData.blocks : [];
+            }
+            if (!metaRes.ok && !blocksRes.ok) {
+                throw new Error(blocksError || meta.error || meta.message || 'Laden mislukt');
+            }
+            renderProfileBlocksList(container, blocksError);
         } catch (err) {
+            profileBlocksMeta = normalizeProfileBlocksMeta(profileBlocksMeta);
             container.innerHTML = `<p class="empty-message">Fout: ${escapeHtml(err.message || 'onbekende fout')}</p>`;
         }
     }
 
-    function renderProfileBlocksList(container) {
+    function renderProfileBlocksList(container, blocksError = null) {
+        const warn = blocksError
+            ? `<p class="form-hint" style="color:#b45309;margin-bottom:1rem;">${escapeHtml(blocksError)}</p>`
+            : '';
         if (!profileBlocksCache.length) {
             const suggested = (profileBlocksMeta.suggested_types || [])
                 .map((t) => profileBlocksMeta.block_types?.find((b) => b.id === t)?.label || t)
                 .filter(Boolean);
             container.innerHTML = `
+                ${warn}
                 <p class="empty-message">Nog geen profielblokken.</p>
                 ${suggested.length ? `<p class="form-hint">Suggesties voor jullie categorie: ${suggested.map((s) => escapeHtml(s)).join(', ')}.</p>` : ''}`;
             return;
         }
         const typeLabel = (id) => profileBlocksMeta.block_types?.find((b) => b.id === id)?.label || id;
         container.innerHTML = `
+            ${warn}
             <div class="profile-blocks-list">
                 ${profileBlocksCache.map((block, idx) => `
                     <div class="profile-block-row" data-block-id="${block.id}">
@@ -2041,7 +2106,9 @@
                     </div>`).join('')}
             </div>`;
         container.querySelectorAll('[data-block-edit]').forEach((btn) => {
-            btn.addEventListener('click', () => openProfileBlockModal(parseInt(btn.getAttribute('data-block-edit'), 10)));
+            btn.addEventListener('click', () => {
+                void openProfileBlockModal(parseInt(btn.getAttribute('data-block-edit'), 10));
+            });
         });
         container.querySelectorAll('[data-block-delete]').forEach((btn) => {
             btn.addEventListener('click', () => deleteProfileBlock(parseInt(btn.getAttribute('data-block-delete'), 10)));
@@ -2342,7 +2409,8 @@
         }
     }
 
-    function openProfileBlockModal(blockId) {
+    async function openProfileBlockModal(blockId) {
+        await ensureProfileBlocksMetaLoaded();
         const existing = blockId ? profileBlocksCache.find((b) => b.id === blockId) : null;
         const overlay = document.createElement('div');
         overlay.className = 'modal-overlay show';

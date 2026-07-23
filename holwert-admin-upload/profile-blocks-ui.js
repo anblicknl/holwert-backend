@@ -262,7 +262,26 @@
      * @param {{ meta: object, existingBlock?: object|null, onSave: (payload: object) => Promise<void> }} options
      */
     function openBlockEditorModal(options) {
-        const { meta, existingBlock, onSave } = options;
+        const { meta: rawMeta, existingBlock, onSave } = options;
+        const fallbackTypes = [
+            { id: 'opening_hours', label: 'Openingstijden' },
+            { id: 'service_schedule', label: 'Diensten / vieringen' },
+            { id: 'match_schedule', label: 'Speelschema' },
+            { id: 'membership', label: 'Lidmaatschap' },
+            { id: 'facilities', label: 'Voorzieningen' },
+            { id: 'team', label: 'Team / bestuur' },
+            { id: 'links', label: 'Handige links' },
+            { id: 'notice', label: 'Mededeling' },
+        ];
+        const meta = {
+            block_types: Array.isArray(rawMeta?.block_types) && rawMeta.block_types.length ? rawMeta.block_types : fallbackTypes,
+            weekday_labels: Array.isArray(rawMeta?.weekday_labels) && rawMeta.weekday_labels.length
+                ? rawMeta.weekday_labels
+                : ['Zondag', 'Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag'],
+            suggested_types: Array.isArray(rawMeta?.suggested_types) && rawMeta.suggested_types.length
+                ? rawMeta.suggested_types
+                : ['notice', 'links', 'facilities'],
+        };
         const existing = existingBlock || null;
         const overlay = document.createElement('div');
         overlay.className = 'modal-overlay show';

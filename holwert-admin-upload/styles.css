@@ -591,6 +591,14 @@ body.admin-login-open {
     font-size: 0.9rem;
     font-family: inherit;
     background: white;
+    box-sizing: border-box;
+}
+
+.form-group select {
+    min-height: 44px;
+    cursor: pointer;
+    appearance: auto;
+    -webkit-appearance: menulist;
 }
 
 .form-group input:focus,
