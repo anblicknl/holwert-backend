@@ -1669,3 +1669,35 @@ input, select, textarea {
         grid-template-columns: 1fr;
     }
 }
+
+.profile-blocks-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.profile-block-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 16px;
+    background: #fff;
+    border: 1px solid #e8ecf4;
+    border-radius: 10px;
+}
+
+.profile-block-row-main {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.profile-block-item {
+    padding: 12px;
+    margin-bottom: 10px;
+    border: 1px dashed #d8dee9;
+    border-radius: 8px;
+    background: #fafbfd;
+}

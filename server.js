@@ -4405,6 +4405,156 @@ app.get('/api/admin/organizations/:id/followers', authenticateToken, requireAdmi
   }
 });
 
+// Profielblokken (admin) — vóór /:id zodat het pad niet als id wordt gelezen
+app.get('/api/admin/organizations/:id/profile-blocks/meta', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const orgId = parseInt(req.params.id, 10);
+    if (Number.isNaN(orgId)) return res.status(400).json({ error: 'Invalid organization ID' });
+    const orgRow = await executeQuery('SELECT id, category FROM organizations WHERE id = ? LIMIT 1', [orgId]);
+    if (!orgRow.rows?.length) return res.status(404).json({ error: 'Organization not found' });
+    const category = orgRow.rows[0].category || 'vereniging';
+    res.json({
+      block_types: orgProfileBlocks.ORG_PROFILE_BLOCK_TYPES.map((id) => ({
+        id,
+        label: orgProfileBlocks.BLOCK_TYPE_LABELS[id] || id,
+      })),
+      suggested_types: orgProfileBlocks.suggestedTypesForCategory(category),
+      weekday_labels: orgProfileBlocks.WEEKDAY_LABELS,
+    });
+  } catch (error) {
+    console.error('GET /api/admin/organizations/:id/profile-blocks/meta error:', error);
+    res.status(500).json({ error: 'Kon bloktypes niet laden', message: error.message });
+  }
+});
+
+app.get('/api/admin/organizations/:id/profile-blocks', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    await ensureOrganizationProfileBlocksTable();
+    const orgId = parseInt(req.params.id, 10);
+    if (Number.isNaN(orgId)) return res.status(400).json({ error: 'Invalid organization ID' });
+    const orgRow = await executeQuery('SELECT id FROM organizations WHERE id = ? LIMIT 1', [orgId]);
+    if (!orgRow.rows?.length) return res.status(404).json({ error: 'Organization not found' });
+    const result = await executeQuery(
+      `SELECT id, block_type, title, data_json, sort_order, is_visible, created_at, updated_at
+       FROM organization_profile_blocks WHERE organization_id = ? ORDER BY sort_order ASC, id ASC`,
+      [orgId]
+    );
+    const blocks = (result.rows || []).map((row) => orgProfileBlocks.mapBlockRow(row));
+    res.json({ blocks });
+  } catch (error) {
+    console.error('GET /api/admin/organizations/:id/profile-blocks error:', error);
+    res.status(500).json({ error: 'Kon profielblokken niet laden', message: error.message });
+  }
+});
+
+app.post('/api/admin/organizations/:id/profile-blocks', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    await ensureOrganizationProfileBlocksTable();
+    const orgId = parseInt(req.params.id, 10);
+    if (Number.isNaN(orgId)) return res.status(400).json({ error: 'Invalid organization ID' });
+    const orgRow = await executeQuery('SELECT id FROM organizations WHERE id = ? LIMIT 1', [orgId]);
+    if (!orgRow.rows?.length) return res.status(404).json({ error: 'Organization not found' });
+    const { block_type, title, data, is_visible, sort_order } = req.body || {};
+    if (!orgProfileBlocks.isAllowedBlockType(block_type)) {
+      return res.status(400).json({ error: 'Ongeldig bloktype' });
+    }
+    const finalTitle = String(title || orgProfileBlocks.defaultTitleForType(block_type)).trim().slice(0, 255);
+    if (!finalTitle) return res.status(400).json({ error: 'Titel is verplicht' });
+    const normalized = orgProfileBlocks.normalizeBlockData(block_type, data ?? orgProfileBlocks.defaultDataForType(block_type));
+    const countRes = await executeQuery(
+      'SELECT COUNT(*) AS total FROM organization_profile_blocks WHERE organization_id = ?',
+      [orgId]
+    );
+    const nextSort = sort_order != null ? parseInt(sort_order, 10) : (parseInt(countRes.rows?.[0]?.total, 10) || 0);
+    const insert = await executeInsert(
+      `INSERT INTO organization_profile_blocks (organization_id, block_type, title, data_json, sort_order, is_visible, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [orgId, block_type, finalTitle, JSON.stringify(normalized), nextSort, is_visible !== false]
+    );
+    const id = insert.insertId;
+    const row = await executeQuery(
+      'SELECT id, block_type, title, data_json, sort_order, is_visible, created_at, updated_at FROM organization_profile_blocks WHERE id = ? AND organization_id = ?',
+      [id, orgId]
+    );
+    invalidateCache(`/api/organizations/${orgId}/profile-blocks`);
+    res.status(201).json({ block: orgProfileBlocks.mapBlockRow(row.rows[0]) });
+  } catch (error) {
+    console.error('POST /api/admin/organizations/:id/profile-blocks error:', error);
+    res.status(500).json({ error: 'Kon profielblok niet aanmaken', message: error.message });
+  }
+});
+
+app.put('/api/admin/organizations/:id/profile-blocks/:blockId', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    await ensureOrganizationProfileBlocksTable();
+    const orgId = parseInt(req.params.id, 10);
+    const blockId = parseInt(req.params.blockId, 10);
+    if (Number.isNaN(orgId) || Number.isNaN(blockId)) return res.status(400).json({ error: 'Ongeldig id' });
+    const existing = await executeQuery(
+      'SELECT id, block_type FROM organization_profile_blocks WHERE id = ? AND organization_id = ? LIMIT 1',
+      [blockId, orgId]
+    );
+    if (!existing.rows?.length) return res.status(404).json({ error: 'Blok niet gevonden' });
+    const blockType = existing.rows[0].block_type;
+    const { title, data, is_visible, sort_order } = req.body || {};
+    const sets = [];
+    const params = [];
+    if (title !== undefined) {
+      const finalTitle = String(title).trim().slice(0, 255);
+      if (!finalTitle) return res.status(400).json({ error: 'Titel is verplicht' });
+      sets.push('title = ?');
+      params.push(finalTitle);
+    }
+    if (data !== undefined) {
+      sets.push('data_json = ?');
+      params.push(JSON.stringify(orgProfileBlocks.normalizeBlockData(blockType, data)));
+    }
+    if (is_visible !== undefined) {
+      sets.push('is_visible = ?');
+      params.push(!!is_visible);
+    }
+    if (sort_order !== undefined) {
+      sets.push('sort_order = ?');
+      params.push(parseInt(sort_order, 10) || 0);
+    }
+    if (sets.length === 0) return res.status(400).json({ error: 'Geen velden om bij te werken' });
+    sets.push('updated_at = NOW()');
+    params.push(blockId, orgId);
+    await executeQuery(
+      `UPDATE organization_profile_blocks SET ${sets.join(', ')} WHERE id = ? AND organization_id = ?`,
+      params
+    );
+    const row = await executeQuery(
+      'SELECT id, block_type, title, data_json, sort_order, is_visible, created_at, updated_at FROM organization_profile_blocks WHERE id = ? AND organization_id = ?',
+      [blockId, orgId]
+    );
+    invalidateCache(`/api/organizations/${orgId}/profile-blocks`);
+    res.json({ block: orgProfileBlocks.mapBlockRow(row.rows[0]) });
+  } catch (error) {
+    console.error('PUT /api/admin/organizations/:id/profile-blocks/:blockId error:', error);
+    res.status(500).json({ error: 'Kon profielblok niet bijwerken', message: error.message });
+  }
+});
+
+app.delete('/api/admin/organizations/:id/profile-blocks/:blockId', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    await ensureOrganizationProfileBlocksTable();
+    const orgId = parseInt(req.params.id, 10);
+    const blockId = parseInt(req.params.blockId, 10);
+    if (Number.isNaN(orgId) || Number.isNaN(blockId)) return res.status(400).json({ error: 'Ongeldig id' });
+    const del = await executeQuery(
+      'DELETE FROM organization_profile_blocks WHERE id = ? AND organization_id = ?',
+      [blockId, orgId]
+    );
+    if (!(del.rowCount ?? del.rows?.length)) return res.status(404).json({ error: 'Blok niet gevonden' });
+    invalidateCache(`/api/organizations/${orgId}/profile-blocks`);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('DELETE /api/admin/organizations/:id/profile-blocks/:blockId error:', error);
+    res.status(500).json({ error: 'Kon profielblok niet verwijderen', message: error.message });
+  }
+});
+
 // Get single organization (admin) - MUST BE BEFORE /api/admin/organizations (without :id)
 app.get('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {

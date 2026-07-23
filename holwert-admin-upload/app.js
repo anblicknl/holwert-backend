@@ -411,9 +411,16 @@ class HolwertAdmin {
         if (organizationsListWrap) {
             organizationsListWrap.addEventListener('click', (e) => {
                 const editBtn = e.target.closest('.organization-edit-btn');
+                const blocksBtn = e.target.closest('.organization-blocks-btn');
                 const deleteBtn = e.target.closest('.organization-delete-btn');
                 const approveBtn = e.target.closest('.organization-approve-btn');
-                if (editBtn && editBtn.dataset.orgId) {
+                if (blocksBtn && blocksBtn.dataset.orgId) {
+                    const orgId = parseInt(blocksBtn.dataset.orgId, 10);
+                    const orgName = decodeURIComponent(blocksBtn.getAttribute('data-org-name') || '');
+                    if (!isNaN(orgId)) {
+                        this.openOrganizationProfileBlocks(orgId, orgName);
+                    }
+                } else if (editBtn && editBtn.dataset.orgId) {
                     const orgId = parseInt(editBtn.dataset.orgId, 10);
                     console.log('[Admin] Edit organization klik geregistreerd, id =', orgId);
                     if (!isNaN(orgId)) {
@@ -2008,6 +2015,7 @@ class HolwertAdmin {
     organizationActionButtonsHtml(org) {
         return `
             ${!org.is_approved ? `<button type="button" class="btn-icon btn-approve organization-approve-btn" data-org-id="${org.id}" title="Goedkeuren"><i class="fas fa-check"></i></button>` : ''}
+            <button type="button" class="btn-icon organization-blocks-btn" data-org-id="${org.id}" data-org-name="${encodeURIComponent(org.name || '')}" title="Profielblokken"><i class="fas fa-th-large"></i></button>
             <button class="btn-icon btn-edit organization-edit-btn" data-org-id="${org.id}" title="Bewerken"><i class="fas fa-edit"></i></button>
             <button class="btn-icon btn-delete organization-delete-btn" data-org-id="${org.id}" title="Verwijderen"><i class="fas fa-trash"></i></button>
         `;
@@ -2711,6 +2719,191 @@ class HolwertAdmin {
             console.error('editOrganization error:', e);
             this.showNotification(e.message || 'Fout bij laden organisatie', 'error');
         }
+    }
+
+    async openOrganizationProfileBlocks(orgId, orgName) {
+        if (!this.token) {
+            this.showNotification('Niet ingelogd.', 'error');
+            return;
+        }
+        if (typeof HolwertProfileBlocksUi === 'undefined') {
+            this.showNotification('Profielblokken-UI niet geladen. Vernieuw de pagina.', 'error');
+            return;
+        }
+        const esc = HolwertProfileBlocksUi.esc;
+        const modal = document.createElement('div');
+        modal.className = 'modal-overlay';
+        modal.style.display = 'flex';
+        modal.style.zIndex = '10040';
+        modal.innerHTML = `
+            <div class="modal-content modal-large">
+                <div class="modal-header">
+                    <h3>Profielblokken — ${esc(orgName || `Organisatie #${orgId}`)}</h3>
+                    <button type="button" class="modal-close" data-modal-close aria-label="Sluiten"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="modal-body">
+                    <p class="form-hint">Beheer extra profielinformatie in de app (openingstijden, diensten, links, enz.). Dezelfde blokken zijn ook zichtbaar in het organisatie-dashboard.</p>
+                    <div style="margin:0 0 1rem;display:flex;justify-content:flex-end;">
+                        <button type="button" class="btn btn-primary" id="adminAddProfileBlockBtn"><i class="fas fa-plus"></i> Nieuw blok</button>
+                    </div>
+                    <div id="adminProfileBlocksList"><p class="form-hint">Laden…</p></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-modal-close>Sluiten</button>
+                </div>
+            </div>`;
+        document.body.appendChild(modal);
+
+        const closeModal = () => modal.remove();
+        modal.querySelectorAll('.modal-close, [data-modal-close]').forEach((el) => {
+            el.addEventListener('click', closeModal);
+        });
+        modal.querySelector('.modal-content')?.addEventListener('click', (e) => e.stopPropagation());
+        modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+
+        let meta = { block_types: [], weekday_labels: [], suggested_types: [] };
+        let blocks = [];
+
+        const authHeaders = () => ({
+            Authorization: `Bearer ${this.token}`,
+            'Content-Type': 'application/json',
+        });
+
+        const refreshList = async () => {
+            const listEl = modal.querySelector('#adminProfileBlocksList');
+            if (!listEl) return;
+            listEl.innerHTML = '<p class="form-hint">Laden…</p>';
+            try {
+                const [metaRes, blocksRes] = await Promise.all([
+                    fetch(`${this.apiBaseUrl}/admin/organizations/${orgId}/profile-blocks/meta`, { headers: { Authorization: `Bearer ${this.token}` } }),
+                    fetch(`${this.apiBaseUrl}/admin/organizations/${orgId}/profile-blocks`, { headers: { Authorization: `Bearer ${this.token}` } }),
+                ]);
+                const metaData = await metaRes.json().catch(() => ({}));
+                const blocksData = await blocksRes.json().catch(() => ({}));
+                if (!metaRes.ok) throw new Error(metaData.error || metaData.message || 'Meta laden mislukt');
+                if (!blocksRes.ok) throw new Error(blocksData.error || blocksData.message || 'Blokken laden mislukt');
+                meta = metaData;
+                blocks = Array.isArray(blocksData.blocks) ? blocksData.blocks : [];
+                const typeLabel = (id) => meta.block_types?.find((b) => b.id === id)?.label || id;
+                if (!blocks.length) {
+                    listEl.innerHTML = '<p class="empty-message">Nog geen profielblokken voor deze organisatie.</p>';
+                    return;
+                }
+                listEl.innerHTML = `
+                    <div class="profile-blocks-list">
+                        ${blocks.map((block, idx) => `
+                            <div class="profile-block-row">
+                                <div class="profile-block-row-main">
+                                    <strong>${esc(block.title || '')}</strong>
+                                    <span class="form-hint">${esc(typeLabel(block.block_type))}${block.is_visible === false ? ' · verborgen' : ''}</span>
+                                </div>
+                                <div class="action-buttons">
+                                    <button type="button" class="btn-icon" data-admin-pb-up="${block.id}" title="Omhoog" ${idx === 0 ? 'disabled' : ''}><i class="fas fa-arrow-up"></i></button>
+                                    <button type="button" class="btn-icon" data-admin-pb-down="${block.id}" title="Omlaag" ${idx === blocks.length - 1 ? 'disabled' : ''}><i class="fas fa-arrow-down"></i></button>
+                                    <button type="button" class="btn-icon btn-edit" data-admin-pb-edit="${block.id}" title="Bewerken"><i class="fas fa-edit"></i></button>
+                                    <button type="button" class="btn-icon btn-delete" data-admin-pb-delete="${block.id}" title="Verwijderen"><i class="fas fa-trash"></i></button>
+                                </div>
+                            </div>`).join('')}
+                    </div>`;
+                listEl.querySelectorAll('[data-admin-pb-edit]').forEach((btn) => {
+                    btn.addEventListener('click', () => {
+                        const blockId = parseInt(btn.getAttribute('data-admin-pb-edit'), 10);
+                        const existing = blocks.find((b) => b.id === blockId);
+                        HolwertProfileBlocksUi.openBlockEditorModal({
+                            meta,
+                            existingBlock: existing,
+                            onSave: async (payload) => {
+                                const res = await fetch(`${this.apiBaseUrl}/admin/organizations/${orgId}/profile-blocks/${blockId}`, {
+                                    method: 'PUT',
+                                    headers: authHeaders(),
+                                    body: JSON.stringify(payload),
+                                });
+                                const data = await res.json().catch(() => ({}));
+                                if (!res.ok) throw new Error(data.error || data.message || 'Opslaan mislukt');
+                                await refreshList();
+                                this.showNotification('Profielblok bijgewerkt', 'success');
+                            },
+                        });
+                    });
+                });
+                listEl.querySelectorAll('[data-admin-pb-delete]').forEach((btn) => {
+                    btn.addEventListener('click', async () => {
+                        const blockId = parseInt(btn.getAttribute('data-admin-pb-delete'), 10);
+                        const block = blocks.find((b) => b.id === blockId);
+                        if (!block || !confirm(`Weet je zeker dat je "${block.title}" wilt verwijderen?`)) return;
+                        const res = await fetch(`${this.apiBaseUrl}/admin/organizations/${orgId}/profile-blocks/${blockId}`, {
+                            method: 'DELETE',
+                            headers: { Authorization: `Bearer ${this.token}` },
+                        });
+                        const data = await res.json().catch(() => ({}));
+                        if (!res.ok) {
+                            this.showNotification(data.error || data.message || 'Verwijderen mislukt', 'error');
+                            return;
+                        }
+                        await refreshList();
+                        this.showNotification('Profielblok verwijderd', 'success');
+                    });
+                });
+                listEl.querySelectorAll('[data-admin-pb-up]').forEach((btn) => {
+                    btn.addEventListener('click', async () => {
+                        const blockId = parseInt(btn.getAttribute('data-admin-pb-up'), 10);
+                        const idx = blocks.findIndex((b) => b.id === blockId);
+                        if (idx <= 0) return;
+                        const a = blocks[idx];
+                        const b = blocks[idx - 1];
+                        await Promise.all([
+                            fetch(`${this.apiBaseUrl}/admin/organizations/${orgId}/profile-blocks/${a.id}`, {
+                                method: 'PUT', headers: authHeaders(), body: JSON.stringify({ sort_order: idx - 1 }),
+                            }),
+                            fetch(`${this.apiBaseUrl}/admin/organizations/${orgId}/profile-blocks/${b.id}`, {
+                                method: 'PUT', headers: authHeaders(), body: JSON.stringify({ sort_order: idx }),
+                            }),
+                        ]);
+                        await refreshList();
+                    });
+                });
+                listEl.querySelectorAll('[data-admin-pb-down]').forEach((btn) => {
+                    btn.addEventListener('click', async () => {
+                        const blockId = parseInt(btn.getAttribute('data-admin-pb-down'), 10);
+                        const idx = blocks.findIndex((b) => b.id === blockId);
+                        if (idx < 0 || idx >= blocks.length - 1) return;
+                        const a = blocks[idx];
+                        const b = blocks[idx + 1];
+                        await Promise.all([
+                            fetch(`${this.apiBaseUrl}/admin/organizations/${orgId}/profile-blocks/${a.id}`, {
+                                method: 'PUT', headers: authHeaders(), body: JSON.stringify({ sort_order: idx + 1 }),
+                            }),
+                            fetch(`${this.apiBaseUrl}/admin/organizations/${orgId}/profile-blocks/${b.id}`, {
+                                method: 'PUT', headers: authHeaders(), body: JSON.stringify({ sort_order: idx }),
+                            }),
+                        ]);
+                        await refreshList();
+                    });
+                });
+            } catch (err) {
+                listEl.innerHTML = `<p class="empty-message">Fout: ${esc(err.message || 'onbekende fout')}</p>`;
+            }
+        };
+
+        modal.querySelector('#adminAddProfileBlockBtn')?.addEventListener('click', () => {
+            HolwertProfileBlocksUi.openBlockEditorModal({
+                meta,
+                existingBlock: null,
+                onSave: async (payload) => {
+                    const res = await fetch(`${this.apiBaseUrl}/admin/organizations/${orgId}/profile-blocks`, {
+                        method: 'POST',
+                        headers: authHeaders(),
+                        body: JSON.stringify(payload),
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok) throw new Error(data.error || data.message || 'Opslaan mislukt');
+                    await refreshList();
+                    this.showNotification('Profielblok toegevoegd', 'success');
+                },
+            });
+        });
+
+        await refreshList();
     }
 
     async deleteOrganization(id) {
