@@ -187,6 +187,15 @@ function computeOpeningHoursStatus(data) {
   };
 }
 
+function formatMembershipFee(value) {
+  const s = String(value || '').trim();
+  if (!s) return '';
+  if (s.includes('€')) return s;
+  if (/^(gratis|free)\b/i.test(s)) return s;
+  if (/^\d/.test(s)) return `€ ${s}`;
+  return s;
+}
+
 function normalizeBlockData(type, data) {
   const base = defaultDataForType(type);
   const raw = parseJsonData(data);
@@ -246,7 +255,7 @@ function normalizeBlockData(type, data) {
     case 'membership':
       return {
         intro: raw.intro ? String(raw.intro).trim().slice(0, 1000) : '',
-        fee: raw.fee ? String(raw.fee).trim().slice(0, 200) : '',
+        fee: raw.fee ? formatMembershipFee(String(raw.fee).trim().slice(0, 200)) : '',
         contact: raw.contact ? String(raw.contact).trim().slice(0, 200) : '',
         signup_url: raw.signup_url ? String(raw.signup_url).trim().slice(0, 500) : '',
         items: (Array.isArray(raw.items) ? raw.items : []).slice(0, 20).map((it) => ({

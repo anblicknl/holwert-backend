@@ -170,7 +170,7 @@
                 return `
                     <div class="form-group"><label>Intro</label><textarea id="pb_intro" rows="3">${esc(data?.intro || '')}</textarea></div>
                     <div class="form-row">
-                        <div class="form-group"><label>Contributie / tarief</label><input type="text" id="pb_fee" value="${esc(data?.fee || '')}"></div>
+                        <div class="form-group"><label>Contributie / tarief</label><input type="text" id="pb_fee" value="${esc(data?.fee || '')}" placeholder="Bijv. 25 per jaar"></div>
                         <div class="form-group"><label>Contact</label><input type="text" id="pb_contact" value="${esc(data?.contact || '')}"></div>
                     </div>
                     <div class="form-group"><label>Aanmeld-URL</label><input type="url" id="pb_signup_url" value="${esc(data?.signup_url || '')}" placeholder="https://…"></div>

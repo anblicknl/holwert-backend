@@ -2205,7 +2205,7 @@
                 return `
                     <div class="form-group"><label>Intro</label><textarea id="pb_intro" rows="3">${escapeHtml(data?.intro || '')}</textarea></div>
                     <div class="form-row">
-                        <div class="form-group"><label>Contributie / tarief</label><input type="text" id="pb_fee" value="${escapeHtml(data?.fee || '')}"></div>
+                        <div class="form-group"><label>Contributie / tarief</label><input type="text" id="pb_fee" value="${escapeHtml(data?.fee || '')}" placeholder="Bijv. 25 per jaar"></div>
                         <div class="form-group"><label>Contact</label><input type="text" id="pb_contact" value="${escapeHtml(data?.contact || '')}"></div>
                     </div>
                     <div class="form-group"><label>Aanmeld-URL</label><input type="url" id="pb_signup_url" value="${escapeHtml(data?.signup_url || '')}" placeholder="https://…"></div>
