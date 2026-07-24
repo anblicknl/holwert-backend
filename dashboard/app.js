@@ -2225,6 +2225,48 @@
         }
     }
 
+    function profileBlockItemActionsHtml() {
+        return `<div class="profile-block-item-actions">
+            <button type="button" class="btn-icon pb-item-up" title="Omhoog" aria-label="Omhoog"><i class="fas fa-arrow-up"></i></button>
+            <button type="button" class="btn-icon pb-item-down" title="Omlaag" aria-label="Omlaag"><i class="fas fa-arrow-down"></i></button>
+            <button type="button" class="btn btn-secondary btn-sm pb-remove-item">Verwijderen</button>
+        </div>`;
+    }
+
+    function wireProfileBlockItemActions(overlay) {
+        const updateButtons = () => {
+            const items = [...overlay.querySelectorAll('#pb_items_wrap .profile-block-item')];
+            items.forEach((item, idx) => {
+                const up = item.querySelector('.pb-item-up');
+                const down = item.querySelector('.pb-item-down');
+                if (up) up.disabled = idx === 0;
+                if (down) down.disabled = idx === items.length - 1;
+            });
+        };
+        if (overlay.dataset.itemsOrderWired !== '1') {
+            overlay.dataset.itemsOrderWired = '1';
+            overlay.addEventListener('click', (e) => {
+                const item = e.target.closest('.profile-block-item');
+                const wrap = item?.closest('#pb_items_wrap');
+                if (!item || !wrap) return;
+                if (e.target.closest('.pb-item-up')) {
+                    const prev = item.previousElementSibling;
+                    if (prev) wrap.insertBefore(item, prev);
+                    updateButtons();
+                } else if (e.target.closest('.pb-item-down')) {
+                    const next = item.nextElementSibling;
+                    if (next) wrap.insertBefore(next, item);
+                    updateButtons();
+                } else if (e.target.closest('.pb-remove-item')) {
+                    item.remove();
+                    updateButtons();
+                }
+            });
+        }
+        updateButtons();
+        overlay._updateProfileBlockItemButtons = updateButtons;
+    }
+
     function profileBlockServiceItemHtml(it, i, weekdayLabels) {
         const opts = (weekdayLabels || []).map((label, w) =>
             `<option value="${w}" ${Number(it?.weekday) === w ? 'selected' : ''}>${escapeHtml(label)}</option>`
@@ -2239,7 +2281,7 @@
                 <div class="form-group"><label>Locatie</label><input type="text" class="pb-location" value="${escapeHtml(it?.location || '')}"></div>
                 <div class="form-group"><label>Notitie</label><input type="text" class="pb-note" value="${escapeHtml(it?.note || '')}"></div>
             </div>
-            <button type="button" class="btn btn-secondary btn-sm pb-remove-item">Verwijderen</button>
+            ${profileBlockItemActionsHtml()}
         </div>`;
     }
 
@@ -2255,7 +2297,7 @@
                 <div class="form-group"><label>Competitie</label><input type="text" class="pb-competition" value="${escapeHtml(it?.competition || '')}"></div>
             </div>
             <label class="checkbox-label"><input type="checkbox" class="pb-is-home" ${it?.is_home !== false ? 'checked' : ''}> Thuiswedstrijd</label>
-            <button type="button" class="btn btn-secondary btn-sm pb-remove-item">Verwijderen</button>
+            ${profileBlockItemActionsHtml()}
         </div>`;
     }
 
@@ -2265,7 +2307,7 @@
                 <div class="form-group"><label>Label</label><input type="text" class="pb-label" value="${escapeHtml(it?.label || '')}"></div>
                 <div class="form-group"><label>Waarde</label><input type="text" class="pb-value" value="${escapeHtml(it?.value || '')}"></div>
             </div>
-            <button type="button" class="btn btn-secondary btn-sm pb-remove-item">Verwijderen</button>
+            ${profileBlockItemActionsHtml()}
         </div>`;
     }
 
@@ -2273,7 +2315,7 @@
         return `<div class="profile-block-item" data-item-idx="${i}">
             <div class="form-group"><label>Naam</label><input type="text" class="pb-label" value="${escapeHtml(it?.label || '')}"></div>
             <div class="form-group"><label>Toelichting</label><input type="text" class="pb-text" value="${escapeHtml(it?.text || '')}"></div>
-            <button type="button" class="btn btn-secondary btn-sm pb-remove-item">Verwijderen</button>
+            ${profileBlockItemActionsHtml()}
         </div>`;
     }
 
@@ -2284,7 +2326,7 @@
                 <div class="form-group"><label>Rol</label><input type="text" class="pb-role" value="${escapeHtml(it?.role || '')}"></div>
             </div>
             <div class="form-group"><label>Notitie</label><input type="text" class="pb-note" value="${escapeHtml(it?.note || '')}"></div>
-            <button type="button" class="btn btn-secondary btn-sm pb-remove-item">Verwijderen</button>
+            ${profileBlockItemActionsHtml()}
         </div>`;
     }
 
@@ -2294,7 +2336,7 @@
                 <div class="form-group"><label>Label</label><input type="text" class="pb-label" value="${escapeHtml(it?.label || '')}"></div>
                 <div class="form-group"><label>URL</label><input type="url" class="pb-url" value="${escapeHtml(it?.url || '')}"></div>
             </div>
-            <button type="button" class="btn btn-secondary btn-sm pb-remove-item">Verwijderen</button>
+            ${profileBlockItemActionsHtml()}
         </div>`;
     }
 
@@ -2325,11 +2367,9 @@
             div.innerHTML = html;
             const node = div.firstElementChild;
             wrap.appendChild(node);
-            node.querySelector('.pb-remove-item')?.addEventListener('click', () => node.remove());
+            overlay._updateProfileBlockItemButtons?.();
         });
-        overlay.querySelectorAll('.pb-remove-item').forEach((btn) => {
-            btn.addEventListener('click', () => btn.closest('.profile-block-item')?.remove());
-        });
+        wireProfileBlockItemActions(overlay);
     }
 
     function collectProfileBlockData(overlay, blockType) {

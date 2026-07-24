@@ -1714,3 +1714,16 @@ input, select, textarea {
     border-radius: 8px;
     background: #fafbfd;
 }
+
+.profile-block-item-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+}
+
+.profile-block-item-actions .btn-icon:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
