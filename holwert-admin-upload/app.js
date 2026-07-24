@@ -2015,8 +2015,8 @@ class HolwertAdmin {
     organizationActionButtonsHtml(org) {
         return `
             ${!org.is_approved ? `<button type="button" class="btn-icon btn-approve organization-approve-btn" data-org-id="${org.id}" title="Goedkeuren"><i class="fas fa-check"></i></button>` : ''}
-            <button type="button" class="btn-icon organization-blocks-btn" data-org-id="${org.id}" data-org-name="${encodeURIComponent(org.name || '')}" title="Profielblokken"><i class="fas fa-th-large"></i></button>
             <button class="btn-icon btn-edit organization-edit-btn" data-org-id="${org.id}" title="Bewerken"><i class="fas fa-edit"></i></button>
+            <button type="button" class="btn-icon organization-blocks-btn" data-org-id="${org.id}" data-org-name="${encodeURIComponent(org.name || '')}" title="Profielblokken"><i class="fas fa-th-large"></i></button>
             <button class="btn-icon btn-delete organization-delete-btn" data-org-id="${org.id}" title="Verwijderen"><i class="fas fa-trash"></i></button>
         `;
     }
