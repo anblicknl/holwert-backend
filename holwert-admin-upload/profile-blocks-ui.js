@@ -52,9 +52,10 @@
     }
 
     function profileBlockServiceItemHtml(it, i, weekdayLabels) {
-        const opts = (weekdayLabels || []).map((label, w) =>
-            `<option value="${w}" ${Number(it?.weekday) === w ? 'selected' : ''}>${esc(label)}</option>`
-        ).join('');
+        const opts = [1, 2, 3, 4, 5, 6, 0].map((w) => {
+            const label = (weekdayLabels || [])[w] || `Dag ${w}`;
+            return `<option value="${w}" ${Number(it?.weekday) === w ? 'selected' : ''}>${esc(label)}</option>`;
+        }).join('');
         return `<div class="profile-block-item" data-item-idx="${i}">
             <div class="form-row">
                 <div class="form-group"><label>Dag</label><select class="pb-weekday">${opts}</select></div>
@@ -135,8 +136,15 @@
                         <input type="text" id="pb_note" value="${esc(data?.note || '')}" maxlength="500" placeholder="Bijv. alleen op afspraak">
                     </div>
                     <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="pb_always_open" ${data?.always_open ? 'checked' : ''}> Altijd open (24/7)
+                        </label>
+                        <p class="form-hint">Handig voor een mini-bieb, automaat of andere locatie die altijd toegankelijk is.</p>
+                    </div>
+                    <div id="pb_week_schedule" class="form-group" style="${data?.always_open ? 'display:none;' : ''}">
                         <label>Weekschema</label>
-                        ${(weekdayLabels || []).map((label, day) => {
+                        ${[1, 2, 3, 4, 5, 6, 0].map((day) => {
+                            const label = (weekdayLabels || [])[day] || `Dag ${day}`;
                             const d = days.find((x) => Number(x.day) === day) || { day, closed: true };
                             const isOpen = !d.closed;
                             return `<div class="form-row" style="align-items:center;margin-bottom:8px;gap:8px;">
@@ -190,6 +198,13 @@
     }
 
     function wireProfileBlockForm(overlay, blockType, meta) {
+        const alwaysOpenCb = overlay.querySelector('#pb_always_open');
+        const weekSchedule = overlay.querySelector('#pb_week_schedule');
+        const syncAlwaysOpen = () => {
+            if (weekSchedule) weekSchedule.style.display = alwaysOpenCb?.checked ? 'none' : '';
+        };
+        alwaysOpenCb?.addEventListener('change', syncAlwaysOpen);
+        syncAlwaysOpen();
         overlay.querySelectorAll('.pb-day-open').forEach((cb) => {
             cb.addEventListener('change', () => {
                 const day = cb.getAttribute('data-day');
@@ -234,7 +249,12 @@
                         close: overlay.querySelector(`.pb-day-end[data-day="${day}"]`)?.value || '17:00',
                     });
                 }
-                return { note: overlay.querySelector('#pb_note')?.value?.trim() || '', days, exceptions: [] };
+                return {
+                    note: overlay.querySelector('#pb_note')?.value?.trim() || '',
+                    always_open: overlay.querySelector('#pb_always_open')?.checked === true,
+                    days,
+                    exceptions: [],
+                };
             }
             case 'service_schedule':
                 return {

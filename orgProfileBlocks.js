@@ -25,6 +25,8 @@ const BLOCK_TYPE_LABELS = {
 };
 
 const WEEKDAY_LABELS = ['Zondag', 'Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag'];
+/** Weergavevolgorde: maandag t/m zondag (day-index 0 = zondag blijft in data). */
+const WEEKDAY_ORDER_MONDAY_FIRST = [1, 2, 3, 4, 5, 6, 0];
 
 const CATEGORY_BLOCK_SUGGESTIONS = {
   horeca: ['opening_hours', 'notice', 'links', 'facilities'],
@@ -50,7 +52,8 @@ function defaultDataForType(type) {
     case 'opening_hours':
       return {
         note: '',
-        days: [0, 1, 2, 3, 4, 5, 6].map((day) => ({
+        always_open: false,
+        days: WEEKDAY_ORDER_MONDAY_FIRST.map((day) => ({
           day,
           closed: day === 0,
           open: '09:00',
@@ -123,6 +126,15 @@ function getAmsterdamNowParts(date = new Date()) {
 
 function computeOpeningHoursStatus(data) {
   const parsed = parseJsonData(data);
+  if (parsed.always_open) {
+    return {
+      is_open: true,
+      label: 'Altijd open',
+      detail: '24 uur per dag',
+      closes_at: null,
+      opens_at: null,
+    };
+  }
   const now = getAmsterdamNowParts();
   const exceptions = Array.isArray(parsed.exceptions) ? parsed.exceptions : [];
   const todayException = exceptions.find((ex) => ex && ex.date === now.dateKey);
@@ -182,7 +194,7 @@ function normalizeBlockData(type, data) {
     case 'opening_hours': {
       const daysIn = Array.isArray(raw.days) ? raw.days : [];
       const days = [];
-      for (let day = 0; day <= 6; day++) {
+      for (const day of WEEKDAY_ORDER_MONDAY_FIRST) {
         const found = daysIn.find((d) => Number(d?.day) === day);
         if (found) {
           days.push({
@@ -199,6 +211,7 @@ function normalizeBlockData(type, data) {
       }
       return {
         note: raw.note ? String(raw.note).trim().slice(0, 500) : '',
+        always_open: !!raw.always_open,
         days,
         exceptions: (Array.isArray(raw.exceptions) ? raw.exceptions : []).slice(0, 30).map((ex) => ({
           date: ex?.date ? String(ex.date).slice(0, 10) : '',
@@ -317,6 +330,7 @@ module.exports = {
   ORG_PROFILE_BLOCK_TYPES,
   BLOCK_TYPE_LABELS,
   WEEKDAY_LABELS,
+  WEEKDAY_ORDER_MONDAY_FIRST,
   CATEGORY_BLOCK_SUGGESTIONS,
   isAllowedBlockType,
   defaultTitleForType,
