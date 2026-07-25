@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Holwert Dorpsapp - Admin Panel</title>
-    <link rel="stylesheet" href="styles.css?v=20260724-pb-item-order">
+    <link rel="stylesheet" href="styles.css?v=20260725-admin-forms">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
 <body class="admin-login-open">
@@ -284,18 +284,17 @@
                 </div>
                 <div id="practicalMobileList" class="mobile-cards-container mobile-view"></div>
 
-                <hr style="margin: 2rem 0; border: 0; border-top: 1px solid #e0e0e0;">
-
-                <div class="section-header">
-                    <h3 style="margin: 0; font-size: 1.25rem;"><i class="fas fa-calendar-alt"></i> Afvalkalender</h3>
-                    <button type="button" id="saveAfvalkalenderBtn" class="btn btn-primary">
-                        <i class="fas fa-save"></i> Opslaan
-                    </button>
-                </div>
-                <p class="section-description" style="color:#666; margin-bottom:1rem;">
-                    Stel de ophaaldagen in voor oud papier en containers. Deze datums worden in de app (Praktisch) getoond en bepalen wanneer weer-tips over oud papier/containers verschijnen.
-                </p>
-                <div id="afvalkalenderForm" class="afvalkalender-form">
+                <div class="content-subsection">
+                    <div class="content-subsection__header">
+                        <h3><i class="fas fa-calendar-alt"></i> Afvalkalender</h3>
+                        <button type="button" id="saveAfvalkalenderBtn" class="btn btn-primary">
+                            <i class="fas fa-save"></i> Opslaan
+                        </button>
+                    </div>
+                    <p class="section-description">
+                        Stel de ophaaldagen in voor oud papier en containers. Deze datums worden in de app (Praktisch) getoond en bepalen wanneer tips over oud papier/containers verschijnen.
+                    </p>
+                    <div id="afvalkalenderForm" class="afvalkalender-form settings-panel--wide">
                     <div class="form-card">
                         <h4><i class="fas fa-archive"></i> Oud papier</h4>
                         <div class="form-group">
@@ -340,11 +339,12 @@
                                 <option value="even">Even weken</option>
                                 <option value="odd">Oneven weken</option>
                             </select>
-                            <small class="text-muted">De grijze container wordt automatisch aan de andere weken gekoppeld.</small>
+                            <span class="form-hint">De grijze container wordt automatisch aan de andere weken gekoppeld.</span>
                         </div>
                     </div>
                 </div>
                 <div id="afvalkalenderMessage" class="form-message"></div>
+                </div>
             </section>
 
             <!-- Content Pages Section -->
@@ -352,10 +352,10 @@
                 <div class="section-header">
                     <h2><i class="fas fa-file-alt"></i> Content pagina's</h2>
                 </div>
-                <p class="section-description" style="color:#666; margin-bottom:24px;">
+                <p class="section-description">
                     Beheer het privacybeleid en de gebruiksvoorwaarden. Deze teksten worden direct in de app getoond.
                 </p>
-                <div id="contentPagesContainer">
+                <div id="contentPagesContainer" class="content-pages-grid">
                     <!-- Content pages will be loaded here -->
                 </div>
             </section>
@@ -365,37 +365,37 @@
                 <div class="section-header">
                     <h2><i class="fas fa-bullhorn"></i> Dorpsomroeper</h2>
                 </div>
-                <div id="dorpsomroeperCard" class="card moderation-settings-card" style="padding: 20px;">
-                    <p class="section-description" style="margin-bottom: 16px;">
-                        Belangrijke dorpsmededeling bovenaan de app. Gebruikers kunnen hem wegklikken; daarna zien ze deze tekst niet meer.
-                        Zet <strong>Mededeling actief</strong> uit om hem direct te verbergen — ook voor mensen die de app later openen.
-                    </p>
-                    <div class="form-group" style="margin-bottom: 12px;">
-                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                            <input type="checkbox" id="dorpsomroeperEnabled">
-                            Mededeling actief
-                        </label>
+                <p class="section-description">
+                    Belangrijke dorpsmededeling bovenaan de app. Gebruikers kunnen hem wegklikken; daarna zien ze deze tekst niet meer.
+                    Zet <strong>Mededeling actief</strong> uit om hem direct te verbergen — ook voor mensen die de app later openen.
+                </p>
+                <div id="dorpsomroeperCard" class="settings-panel">
+                    <div class="settings-panel__fields">
+                        <div class="form-group checkbox-field">
+                            <label class="checkbox-label" for="dorpsomroeperEnabled">
+                                <input type="checkbox" id="dorpsomroeperEnabled">
+                                <span>Mededeling actief</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="dorpsomroeperText">Tekst in de app</label>
+                            <textarea id="dorpsomroeperText" rows="4" maxlength="500" placeholder="Bijv. Vanwege een gaslek: blijf binnen tot nader bericht."></textarea>
+                        </div>
+                        <div class="form-group checkbox-field">
+                            <label class="checkbox-label" for="dorpsomroeperSendPush">
+                                <input type="checkbox" id="dorpsomroeperSendPush">
+                                <span>Stuur ook pushmelding (bij nieuwe of gewijzigde tekst)</span>
+                            </label>
+                            <span class="form-hint">Alleen bij opslaan van een nieuwe mededeling. Gebruik bij urgente zaken (bijv. gaslek); laat uit voor minder dringend nieuws.</span>
+                        </div>
+                        <div class="form-group form-group--narrow">
+                            <label for="dorpsomroeperUntil">Automatisch verbergen na (optioneel)</label>
+                            <input type="date" id="dorpsomroeperUntil">
+                        </div>
                     </div>
-                    <div class="form-group" style="margin-bottom: 12px;">
-                        <label for="dorpsomroeperText">Tekst in de app</label>
-                        <textarea id="dorpsomroeperText" class="form-control" rows="3" maxlength="500" placeholder="Bijv. Vanwege een gaslek: blijf binnen tot nader bericht."></textarea>
-                    </div>
-                    <div class="form-group" style="margin-bottom: 12px;">
-                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                            <input type="checkbox" id="dorpsomroeperSendPush">
-                            Stuur ook pushmelding (bij nieuwe of gewijzigde tekst)
-                        </label>
-                        <p class="section-description" style="margin: 6px 0 0; font-size: 0.9rem;">
-                            Alleen bij opslaan van een nieuwe mededeling. Gebruik bij urgente zaken (bijv. gaslek); laat uit voor minder dringend nieuws.
-                        </p>
-                    </div>
-                    <div class="form-group" style="max-width: 280px; margin-bottom: 12px;">
-                        <label for="dorpsomroeperUntil">Automatisch verbergen na (optioneel)</label>
-                        <input type="date" id="dorpsomroeperUntil" class="form-control">
-                    </div>
-                    <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                    <div class="form-actions">
                         <button type="button" id="saveDorpsomroeperBtn" class="btn btn-primary">Opslaan</button>
-                        <span id="dorpsomroeperMsg" class="form-message" style="margin: 0;"></span>
+                        <span id="dorpsomroeperMsg" class="form-message"></span>
                     </div>
                 </div>
             </section>
@@ -405,20 +405,22 @@
                 <div class="section-header">
                     <h2><i class="fas fa-check-circle"></i> Moderatie</h2>
                 </div>
-                <div class="card moderation-settings-card" style="margin-bottom: 24px; padding: 20px;">
-                    <h3 style="margin: 0 0 8px; font-size: 1.05rem;">E-mail bij nieuwe aanmelding</h3>
-                    <p class="section-description" style="margin-bottom: 16px;">
+                <div class="settings-panel">
+                    <h3 class="settings-panel__title">E-mail bij nieuwe aanmelding</h3>
+                    <p class="settings-panel__intro">
                         Ontvang een melding wanneer een organisatie zich aanmeldt en op goedkeuring wacht.
                         Laat leeg om geen mails te versturen.
                     </p>
-                    <div class="form-group" style="max-width: 420px;">
-                        <label for="moderationNotificationEmail">Notificatie-adres</label>
-                        <input type="email" id="moderationNotificationEmail" class="form-control" placeholder="bijv. beheer@jouwdomein.nl" autocomplete="email">
+                    <div class="settings-panel__fields">
+                        <div class="form-group form-group--medium">
+                            <label for="moderationNotificationEmail">Notificatie-adres</label>
+                            <input type="email" id="moderationNotificationEmail" placeholder="bijv. beheer@jouwdomein.nl" autocomplete="email">
+                        </div>
                     </div>
-                    <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px;">
+                    <div class="form-actions">
                         <button type="button" id="saveModerationNotificationEmailBtn" class="btn btn-primary">Opslaan</button>
                         <button type="button" id="testModerationNotificationEmailBtn" class="btn btn-secondary">Testmail versturen</button>
-                        <span id="moderationNotificationEmailMsg" class="form-message" style="margin: 0;"></span>
+                        <span id="moderationNotificationEmailMsg" class="form-message"></span>
                     </div>
                 </div>
                 <div class="moderation-tabs">

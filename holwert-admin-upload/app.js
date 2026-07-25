@@ -4871,18 +4871,22 @@ class HolwertAdmin {
             container.innerHTML = pages.map(page => `
                 <div class="form-card" data-slug="${page.slug}">
                     <h4>${page.title || page.slug}</h4>
-                    <p class="text-muted" style="margin-bottom: 0.75rem;">Slug: <code>${page.slug}</code></p>
-                    <div class="form-group">
-                        <label>Titel</label>
-                        <input type="text" id="contentPageTitle-${page.slug}" value="${(page.title || '').replace(/"/g, '&quot;')}">
+                    <p class="form-hint" style="margin-top: 0; margin-bottom: 1rem;">Slug: <code>${page.slug}</code></p>
+                    <div class="settings-panel__fields">
+                        <div class="form-group">
+                            <label for="contentPageTitle-${page.slug}">Titel</label>
+                            <input type="text" id="contentPageTitle-${page.slug}" value="${(page.title || '').replace(/"/g, '&quot;')}">
+                        </div>
+                        <div class="form-group">
+                            <label for="contentPageContent-${page.slug}">Tekst</label>
+                            <textarea id="contentPageContent-${page.slug}" rows="8">${page.content || ''}</textarea>
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label>Tekst</label>
-                        <textarea id="contentPageContent-${page.slug}" rows="6">${page.content || ''}</textarea>
+                    <div class="form-actions">
+                        <button type="button" class="btn btn-primary" onclick="admin.saveContentPage('${page.slug}')">
+                            <i class="fas fa-save"></i> Opslaan
+                        </button>
                     </div>
-                    <button type="button" class="btn btn-primary" onclick="admin.saveContentPage('${page.slug}')">
-                        <i class="fas fa-save"></i> Opslaan
-                    </button>
                 </div>
             `).join('');
         } catch (error) {
@@ -5098,10 +5102,10 @@ class HolwertAdmin {
                             <input type="number" id="practicalSortOrder" value="${item?.sort_order ?? 0}">
                             <small class="text-muted">0 = bovenaan, hogere nummers komen lager in de lijst.</small>
                         </div>
-                        <div class="form-group">
+                        <div class="form-group checkbox-field">
                             <label class="checkbox-label">
                                 <input type="checkbox" id="practicalActive" ${item?.is_active ? 'checked' : ''}>
-                                Actief in de app
+                                <span>Actief in de app</span>
                             </label>
                         </div>
                     </form>
