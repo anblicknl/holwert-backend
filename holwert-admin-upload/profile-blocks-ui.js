@@ -81,7 +81,7 @@
                 <div class="form-group"><label>Locatie</label><input type="text" class="pb-location" value="${esc(it?.location || '')}"></div>
                 <div class="form-group"><label>Competitie</label><input type="text" class="pb-competition" value="${esc(it?.competition || '')}"></div>
             </div>
-            <label class="checkbox-label"><input type="checkbox" class="pb-is-home" ${it?.is_home !== false ? 'checked' : ''}> Thuiswedstrijd</label>
+            <div class="form-group checkbox-field"><label class="checkbox-label"><input type="checkbox" class="pb-is-home" ${it?.is_home !== false ? 'checked' : ''}><span>Thuiswedstrijd</span></label></div>
             ${profileBlockItemActionsHtml()}
         </div>`;
     }
@@ -135,11 +135,12 @@
                         <label>Notitie (optioneel)</label>
                         <input type="text" id="pb_note" value="${esc(data?.note || '')}" maxlength="500" placeholder="Bijv. alleen op afspraak">
                     </div>
-                    <div class="form-group">
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="pb_always_open" ${data?.always_open ? 'checked' : ''}> Altijd open (24/7)
+                    <div class="form-group checkbox-field">
+                        <label class="checkbox-label" for="pb_always_open">
+                            <input type="checkbox" id="pb_always_open" ${data?.always_open ? 'checked' : ''}>
+                            <span>Altijd open (24/7)</span>
                         </label>
-                        <p class="form-hint">Handig voor een mini-bieb, automaat of andere locatie die altijd toegankelijk is.</p>
+                        <span class="form-hint">Handig voor een mini-bieb, automaat of andere locatie die altijd toegankelijk is.</span>
                     </div>
                     <div id="pb_week_schedule" class="form-group" style="${data?.always_open ? 'display:none;' : ''}">
                         <label>Weekschema</label>
@@ -369,7 +370,12 @@
                         <select id="pb_block_type" ${existing ? 'disabled' : ''}>${typeOptions}</select>
                         ${existing ? '<p class="form-hint">Het type kan na aanmaken niet meer worden gewijzigd.</p>' : ''}
                     </div>
-                    <label class="checkbox-label"><input type="checkbox" id="pb_visible" ${existing?.is_visible === false ? '' : 'checked'}> Zichtbaar in de app</label>
+                    <div class="form-group checkbox-field">
+                        <label class="checkbox-label" for="pb_visible">
+                            <input type="checkbox" id="pb_visible" ${existing?.is_visible === false ? '' : 'checked'}>
+                            <span>Zichtbaar in de app</span>
+                        </label>
+                    </div>
                     <div id="pb_form_body" style="margin-top:1rem;"></div>
                 </div>
                 <div class="modal-footer">

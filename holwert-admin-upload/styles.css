@@ -866,6 +866,145 @@ input, select, textarea {
     background: white;
 }
 
+.modal-content.modal-large,
+.modal-content.large {
+    max-width: 720px;
+}
+
+.modal-intro {
+    color: #64748b;
+    font-size: 0.9rem;
+    line-height: 1.55;
+    margin: 0 0 1.25rem;
+}
+
+.modal-intro--warn {
+    color: #b45309;
+}
+
+.modal-body .form-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+}
+
+.modal-body .form-row .form-group {
+    margin-bottom: 0;
+}
+
+.form-section-title {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #64748b;
+    margin: 1.5rem 0 0.875rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid #f1f5f9;
+}
+
+.modal-body .form-section-title:first-child {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+}
+
+.color-input-row {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.color-input-row input[type="color"] {
+    width: 3rem;
+    height: 2.5rem;
+    padding: 0;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.color-input-row input[type="text"] {
+    flex: 1;
+    min-width: 8rem;
+}
+
+.form-group__sub {
+    margin-top: 0.75rem;
+}
+
+.form-group__sub.checkbox-field .form-hint {
+    margin-left: 1.75rem;
+}
+
+.form-subfields {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.form-subfield {
+    flex: 1;
+    min-width: 10rem;
+}
+
+.form-subfield label {
+    display: block;
+    font-size: 0.8125rem;
+    color: #64748b;
+    margin-bottom: 0.35rem;
+    font-weight: 500;
+}
+
+.form-group input[type="file"] {
+    margin-top: 0.5rem;
+    font-size: 0.875rem;
+}
+
+.file-input-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin-top: 0.5rem;
+}
+
+.practical-icon-preview-thumb {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 2px solid #e5e7eb;
+}
+
+.image-preview-box,
+.current-image {
+    margin-top: 0.75rem;
+}
+
+.image-preview-box img,
+.current-image img {
+    max-width: 200px;
+    border-radius: 8px;
+    border: 1px solid #e5e7eb;
+}
+
+.modal-body .form-hint,
+.modal-body small.form-hint {
+    margin-top: 0.35rem;
+}
+
+.modal-body small.text-muted {
+    display: block;
+    margin-top: 0.35rem;
+    color: #64748b;
+    font-size: 0.8125rem;
+    line-height: 1.45;
+}
+
 /* View Modal Styles */
 .modal-content {
     background: white;

@@ -178,6 +178,24 @@ class HolwertAdmin {
         this.init();
     }
 
+    /** Introductietekst bovenaan een modal-formulier. */
+    modalIntro(html, { warn = false } = {}) {
+        return `<p class="modal-intro${warn ? ' modal-intro--warn' : ''}">${html}</p>`;
+    }
+
+    /** Consistente checkbox-rij (vinkje links, optionele hint). */
+    checkboxFieldHtml(id, labelText, { checked = false, hint = '' } = {}) {
+        const hintHtml = hint ? `<span class="form-hint">${hint}</span>` : '';
+        return `
+            <div class="form-group checkbox-field">
+                <label class="checkbox-label" for="${id}">
+                    <input type="checkbox" id="${id}"${checked ? ' checked' : ''}>
+                    <span>${labelText}</span>
+                </label>
+                ${hintHtml}
+            </div>`;
+    }
+
     init() {
         populateOrgCategoryFilterSelect();
         this.setupEventListeners();
@@ -1789,9 +1807,7 @@ class HolwertAdmin {
                 </div>
                 <div class="modal-body">
                     <form id="createUserForm" class="edit-form">
-                        <p class="text-muted" style="font-size:0.9rem;margin-bottom:1rem;line-height:1.45;">
-                            Account voor de Holwert-app (inwoners, bezoekers, geïnteresseerden). Voor organisatie-dashboard: tab <strong>Organisatie-inlog</strong> of menu <strong>Organisaties → Dashboard-account</strong>.
-                        </p>
+                        ${this.modalIntro('Account voor de Holwert-app (inwoners, bezoekers, geïnteresseerden). Voor organisatie-dashboard: tab <strong>Organisatie-inlog</strong> of menu <strong>Organisaties → Dashboard-account</strong>.')}
                         <div class="form-group">
                             <label for="createEmail">E-mail *</label>
                             <input type="email" id="createEmail" name="email" required autocomplete="email">
@@ -1824,7 +1840,7 @@ class HolwertAdmin {
                                 <option value="interested">Geïnteresseerde</option>
                                 <option value="tourist">Toerist</option>
                             </select>
-                            <small style="display:block;margin-top:0.35rem;color:#666;">Zelfde opties als in de app; nodig voor een volledig profiel.</small>
+                            <span class="form-hint">Zelfde opties als in de app; nodig voor een volledig profiel.</span>
                         </div>
                     </form>
                 </div>
@@ -1924,12 +1940,10 @@ class HolwertAdmin {
                 </div>
                 <div class="modal-body">
                     <form id="createOrgDashUserForm" class="edit-form">
-                        <p class="text-muted" style="font-size:0.9rem;margin-bottom:1rem;line-height:1.45;">
-                            Inlog voor <strong>/dashboard</strong>. Je mag hetzelfde e-mailadres gebruiken als het contactadres van de organisatie — dat is de bedoeling.
-                        </p>
+                        ${this.modalIntro('Inlog voor <strong>/dashboard</strong>. Je mag hetzelfde e-mailadres gebruiken als het contactadres van de organisatie — dat is de bedoeling.')}
                         ${
                             !hasOrgs
-                                ? `<p class="text-muted" style="margin-bottom:1rem;">Er is nog geen organisatie. Maak eerst een organisatie aan (knop hieronder), daarna kun je het account koppelen.</p>`
+                                ? this.modalIntro('Er is nog geen organisatie. Maak eerst een organisatie aan (knop hieronder), daarna kun je het account koppelen.', { warn: true })
                                 : ''
                         }
                         <div class="form-group">
@@ -2342,6 +2356,7 @@ class HolwertAdmin {
                 </div>
                 <div class="modal-body">
                     <form id="createOrganizationForm">
+                        <p class="form-section-title">Algemeen</p>
                         <div class="form-group">
                             <label for="createOrgName">Naam *</label>
                             <input type="text" id="createOrgName" required placeholder="Naam van de organisatie">
@@ -2350,12 +2365,7 @@ class HolwertAdmin {
                             <label for="createOrgCategory">Categorie</label>
                             ${orgCategorySelectHtml('createOrgCategory', 'vereniging')}
                         </div>
-                        <div class="form-group">
-                            <label class="checkbox-label">
-                                <input type="checkbox" id="createOrgOndernemer">
-                                Dit is een ondernemer (zichtbaar bij Ondernemers in de app)
-                            </label>
-                        </div>
+                        ${this.checkboxFieldHtml('createOrgOndernemer', 'Dit is een ondernemer (zichtbaar bij Ondernemers in de app)')}
                         <div class="form-group">
                             <label for="createOrgDescription">Beschrijving</label>
                             <textarea id="createOrgDescription" rows="3" placeholder="Korte beschrijving"></textarea>
@@ -2364,65 +2374,65 @@ class HolwertAdmin {
                             <label for="createOrgBio">Bio</label>
                             <textarea id="createOrgBio" rows="2" placeholder="Optionele bio"></textarea>
                         </div>
+                        <p class="form-section-title">Contact</p>
                         <div class="form-group">
                             <label for="createOrgEmail">E-mail</label>
                             <input type="email" id="createOrgEmail" placeholder="contact@voorbeeld.nl">
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="createOrgPhone">Telefoon</label>
+                                <input type="text" id="createOrgPhone" placeholder="Telefoonnummer">
+                            </div>
+                            <div class="form-group">
+                                <label for="createOrgWhatsapp">WhatsApp</label>
+                                <input type="text" id="createOrgWhatsapp" placeholder="Nummer of link">
+                            </div>
                         </div>
                         <div class="form-group">
                             <label for="createOrgWebsite">Website</label>
                             <input type="url" id="createOrgWebsite" placeholder="https://">
                         </div>
                         <div class="form-group">
-                            <label for="createOrgPhone">Telefoon</label>
-                            <input type="text" id="createOrgPhone" placeholder="Telefoonnummer">
-                        </div>
-                        <div class="form-group">
-                            <label for="createOrgWhatsapp">WhatsApp</label>
-                            <input type="text" id="createOrgWhatsapp" placeholder="Nummer of link">
-                        </div>
-                        <div class="form-group">
                             <label for="createOrgAddress">Adres</label>
                             <input type="text" id="createOrgAddress" placeholder="Straat, postcode, plaats">
                         </div>
+                        <p class="form-section-title">Social media</p>
                         <div class="form-row">
-                            <div class="form-group" style="flex:1">
+                            <div class="form-group">
                                 <label for="createOrgFacebook">Facebook</label>
                                 <input type="url" id="createOrgFacebook" placeholder="https://facebook.com/...">
                             </div>
-                            <div class="form-group" style="flex:1">
+                            <div class="form-group">
                                 <label for="createOrgInstagram">Instagram</label>
                                 <input type="url" id="createOrgInstagram" placeholder="https://instagram.com/...">
                             </div>
                         </div>
                         <div class="form-row">
-                            <div class="form-group" style="flex:1">
+                            <div class="form-group">
                                 <label for="createOrgTwitter">Twitter / X</label>
                                 <input type="url" id="createOrgTwitter" placeholder="https://">
                             </div>
-                            <div class="form-group" style="flex:1">
+                            <div class="form-group">
                                 <label for="createOrgLinkedin">LinkedIn</label>
                                 <input type="url" id="createOrgLinkedin" placeholder="https://">
                             </div>
                         </div>
+                        <p class="form-section-title">Huisstijl &amp; logo</p>
                         <div class="form-group">
                             <label for="createOrgBrandColorHex">Brandkleur (hex, bijv. #0066CC)</label>
-                            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-                                <input type="color" id="createOrgBrandColorPicker" value="#0066CC" style="width:48px;height:40px;padding:0;border:1px solid #ddd;border-radius:6px;cursor:pointer;">
-                                <input type="text" id="createOrgBrandColorHex" placeholder="#RRGGBB" style="flex:1;min-width:120px;">
+                            <div class="color-input-row">
+                                <input type="color" id="createOrgBrandColorPicker" value="#0066CC">
+                                <input type="text" id="createOrgBrandColorHex" placeholder="#RRGGBB">
                             </div>
                         </div>
                         <div class="form-group">
                             <label for="createOrgLogoUrl">Logo-URL</label>
-                            <input type="url" id="createOrgLogoUrl" placeholder="https://... (of alleen upload hieronder)">
-                            <p class="text-muted" style="font-size:12px;margin-top:6px;margin-bottom:0;">Na opslaan kun je ook een bestand uploaden; dat krijgt voorrang boven de URL.</p>
-                            <input type="file" id="createOrgLogoFile" accept="image/*" style="margin-top:8px;">
+                            <input type="url" id="createOrgLogoUrl" placeholder="https://... (of upload hieronder)">
+                            <span class="form-hint">Na opslaan kun je ook een bestand uploaden; dat krijgt voorrang boven de URL.</span>
+                            <input type="file" id="createOrgLogoFile" accept="image/*">
                         </div>
-                        <div class="form-group">
-                            <label class="checkbox-label">
-                                <input type="checkbox" id="createOrgApproved" checked>
-                                Direct goedgekeurd (zichtbaar in app)
-                            </label>
-                        </div>
+                        ${this.checkboxFieldHtml('createOrgApproved', 'Direct goedgekeurd (zichtbaar in app)', { checked: true })}
                     </form>
                 </div>
                 <div class="modal-footer">
@@ -2565,6 +2575,7 @@ class HolwertAdmin {
                     </div>
                     <div class="modal-body">
                         <form id="editOrganizationForm">
+                            <p class="form-section-title">Algemeen</p>
                             <div class="form-group">
                                 <label for="editOrgName">Naam *</label>
                                 <input type="text" id="editOrgName" value="${escQ(org.name)}" required>
@@ -2573,12 +2584,7 @@ class HolwertAdmin {
                                 <label for="editOrgCategory">Categorie</label>
                                 ${orgCategorySelectHtml('editOrgCategory', org.category)}
                             </div>
-                            <div class="form-group">
-                                <label class="checkbox-label">
-                                    <input type="checkbox" id="editOrgOndernemer" ${org.is_ondernemer ? 'checked' : ''}>
-                                    Dit is een ondernemer (zichtbaar bij Ondernemers in de app)
-                                </label>
-                            </div>
+                            ${this.checkboxFieldHtml('editOrgOndernemer', 'Dit is een ondernemer (zichtbaar bij Ondernemers in de app)', { checked: !!org.is_ondernemer })}
                             <div class="form-group">
                                 <label for="editOrgDescription">Beschrijving</label>
                                 <textarea id="editOrgDescription" rows="3">${escTA(org.description)}</textarea>
@@ -2587,75 +2593,78 @@ class HolwertAdmin {
                                 <label for="editOrgBio">Bio</label>
                                 <textarea id="editOrgBio" rows="2">${escTA(org.bio)}</textarea>
                             </div>
+                            <p class="form-section-title">Contact</p>
                             <div class="form-group">
                                 <label for="editOrgEmail">E-mail</label>
                                 <input type="email" id="editOrgEmail" value="${escQ(org.email)}" placeholder="Optioneel">
-                                <label class="checkbox-label" style="margin-top:6px;font-size:0.85rem;">
-                                    <input type="checkbox" id="editOrgShowEmail" ${org.show_email !== false ? 'checked' : ''}>
-                                    Toon e-mailadres publiek in de app
-                                </label>
-                                <small class="text-muted">Als je dit vinkje uitschakelt, is het e-mailadres alleen intern zichtbaar.</small>
+                                <div class="form-group__sub checkbox-field">
+                                    <label class="checkbox-label" for="editOrgShowEmail">
+                                        <input type="checkbox" id="editOrgShowEmail" ${org.show_email !== false ? 'checked' : ''}>
+                                        <span>Toon e-mailadres publiek in de app</span>
+                                    </label>
+                                    <span class="form-hint">Uitgeschakeld = e-mailadres alleen intern zichtbaar.</span>
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="editOrgPhone">Telefoon</label>
+                                    <input type="text" id="editOrgPhone" value="${escQ(org.phone)}">
+                                </div>
+                                <div class="form-group">
+                                    <label for="editOrgWhatsapp">WhatsApp</label>
+                                    <input type="text" id="editOrgWhatsapp" value="${escQ(org.whatsapp)}">
+                                </div>
                             </div>
                             <div class="form-group">
                                 <label for="editOrgWebsite">Website</label>
                                 <input type="url" id="editOrgWebsite" value="${escQ(org.website)}" placeholder="https://">
                             </div>
                             <div class="form-group">
-                                <label for="editOrgPhone">Telefoon</label>
-                                <input type="text" id="editOrgPhone" value="${escQ(org.phone)}">
-                            </div>
-                            <div class="form-group">
-                                <label for="editOrgWhatsapp">WhatsApp</label>
-                                <input type="text" id="editOrgWhatsapp" value="${escQ(org.whatsapp)}">
-                            </div>
-                            <div class="form-group">
                                 <label for="editOrgAddress">Adres</label>
                                 <input type="text" id="editOrgAddress" value="${escQ(org.address)}">
                             </div>
+                            <p class="form-section-title">Social media</p>
                             <div class="form-row">
-                                <div class="form-group" style="flex:1">
+                                <div class="form-group">
                                     <label for="editOrgFacebook">Facebook</label>
                                     <input type="url" id="editOrgFacebook" value="${escQ(org.facebook)}" placeholder="https://">
                                 </div>
-                                <div class="form-group" style="flex:1">
+                                <div class="form-group">
                                     <label for="editOrgInstagram">Instagram</label>
                                     <input type="url" id="editOrgInstagram" value="${escQ(org.instagram)}" placeholder="https://">
                                 </div>
                             </div>
                             <div class="form-row">
-                                <div class="form-group" style="flex:1">
+                                <div class="form-group">
                                     <label for="editOrgTwitter">Twitter / X</label>
                                     <input type="url" id="editOrgTwitter" value="${escQ(org.twitter)}" placeholder="https://">
                                 </div>
-                                <div class="form-group" style="flex:1">
+                                <div class="form-group">
                                     <label for="editOrgLinkedin">LinkedIn</label>
                                     <input type="url" id="editOrgLinkedin" value="${escQ(org.linkedin)}" placeholder="https://">
                                 </div>
                             </div>
+                            <p class="form-section-title">Huisstijl &amp; logo</p>
                             <div class="form-group">
                                 <label for="editOrgBrandColorHex">Brandkleur (hex)</label>
-                                <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-                                    <input type="color" id="editOrgBrandColorPicker" value="${brandPickerVal}" style="width:48px;height:40px;padding:0;border:1px solid #ddd;border-radius:6px;cursor:pointer;">
-                                    <input type="text" id="editOrgBrandColorHex" placeholder="#RRGGBB" value="${escQ(org.brand_color || '')}" style="flex:1;min-width:120px;">
+                                <div class="color-input-row">
+                                    <input type="color" id="editOrgBrandColorPicker" value="${brandPickerVal}">
+                                    <input type="text" id="editOrgBrandColorHex" placeholder="#RRGGBB" value="${escQ(org.brand_color || '')}">
                                 </div>
                             </div>
                             ${logoPreview}
                             <div class="form-group">
                                 <label for="editOrgLogoUrl">Logo-URL</label>
                                 <input type="url" id="editOrgLogoUrl" value="${escQ(org.logo_url)}" placeholder="https://...">
-                                <p class="text-muted" style="font-size:12px;margin-top:6px;">Nieuw bestand uploaden overschrijft de URL hierboven.</p>
-                                <input type="file" id="editOrgLogoFile" accept="image/*" style="margin-top:8px;">
+                                <span class="form-hint">Nieuw bestand uploaden overschrijft de URL hierboven.</span>
+                                <input type="file" id="editOrgLogoFile" accept="image/*">
                             </div>
+                            <p class="form-section-title">Privacy &amp; zichtbaarheid</p>
                             <div class="form-group">
                                 <label for="editOrgPrivacy">Privacyverklaring (tekst voor in de app)</label>
                                 <textarea id="editOrgPrivacy" rows="4" placeholder="Optioneel">${escTA(org.privacy_statement)}</textarea>
                             </div>
-                            <div class="form-group">
-                                <label class="checkbox-label">
-                                    <input type="checkbox" id="editOrgApproved" ${org.is_approved ? 'checked' : ''}>
-                                    Goedgekeurd (zichtbaar in app)
-                                </label>
-                            </div>
+                            ${this.checkboxFieldHtml('editOrgApproved', 'Goedgekeurd (zichtbaar in app)', { checked: !!org.is_approved })}
                         </form>
                     </div>
                     <div class="modal-footer">
@@ -3662,34 +3671,26 @@ class HolwertAdmin {
 
                             <div class="form-group">
                                 <label>Bronvermelding (optioneel)</label>
-                                <div style="display:flex;gap:10px;flex-wrap:wrap;">
-                                    <div style="flex:1;min-width:160px;">
-                                        <label for="newsSourceName" style="font-size:0.82rem;color:#555;margin-bottom:3px;display:block;">Naam bron</label>
+                                <div class="form-subfields">
+                                    <div class="form-subfield">
+                                        <label for="newsSourceName">Naam bron</label>
                                         <input type="text" id="newsSourceName" value="${article?.source_name || ''}" placeholder="bijv. NOS, Omrop Fryslân…">
                                     </div>
-                                    <div style="flex:2;min-width:200px;">
-                                        <label for="newsSourceUrl" style="font-size:0.82rem;color:#555;margin-bottom:3px;display:block;">URL (link naar bron)</label>
+                                    <div class="form-subfield" style="flex:2;">
+                                        <label for="newsSourceUrl">URL (link naar bron)</label>
                                         <input type="url" id="newsSourceUrl" value="${article?.source_url || ''}" placeholder="https://…">
                                     </div>
                                 </div>
                             </div>
                             
-                            <div class="form-group">
-                                <label class="checkbox-label">
-                                    <input type="checkbox" id="newsPublished" name="is_published" 
-                                        ${article?.is_published !== false ? 'checked' : ''}>
-                                    <span>Direct publiceren (toon in app)</span>
-                                </label>
-                                <small class="form-hint">Uitvinken om als concept op te slaan</small>
-                            </div>
+                            ${this.checkboxFieldHtml('newsPublished', 'Direct publiceren (toon in app)', {
+                                checked: article?.is_published !== false,
+                                hint: 'Uitvinken om als concept op te slaan',
+                            })}
 
-                            <div class="form-group">
-                                <label class="checkbox-label">
-                                    <input type="checkbox" id="newsShareFacebook">
-                                    <span>Na opslaan delen op Facebook</span>
-                                </label>
-                                <small class="form-hint">Linkpreview opent automatisch. Titel en begin van de inhoud staan op je klembord om te plakken.</small>
-                            </div>
+                            ${this.checkboxFieldHtml('newsShareFacebook', 'Na opslaan delen op Facebook', {
+                                hint: 'Linkpreview opent automatisch. Titel en begin van de inhoud staan op je klembord om te plakken.',
+                            })}
                         </form>
                     </div>
                     <div class="modal-footer">
@@ -5063,17 +5064,17 @@ class HolwertAdmin {
                         <div class="form-group">
                             <label for="practicalIcon">Icoon (voor in de app)</label>
                             <input type="text" id="practicalIcon" value="${(item?.icon || 'information-circle-outline').replace(/"/g, '&quot;')}" placeholder="Ionicons-naam, of kies hieronder">
-                            <p class="text-muted" style="margin: 0.5rem 0 0.25rem 0; font-size: 0.85rem;">Alle iconen – zoek of scroll en klik om te selecteren:</p>
-                            <input type="search" id="practicalIconSearch" class="practical-icon-search" placeholder="Zoek bijv. 'phone', 'home', 'heart', 'mobile'…">
+                            <span class="form-hint">Zoek of scroll en klik om te selecteren:</span>
+                            <input type="search" id="practicalIconSearch" class="practical-icon-search" placeholder="Zoek bijv. 'phone', 'home', 'heart'…">
                             <div id="practicalIconCatalog" class="practical-icon-catalog"></div>
-                            <p class="text-muted" style="margin: 0.75rem 0 0.25rem 0; font-size: 0.85rem;"><i class="fas fa-portrait" style="margin-right: 4px;"></i> Of upload een eigen foto als icoon (bijv. wijkagent, logo van partner):</p>
-                            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 0.5rem; flex-wrap: wrap;">
-                                <label class="btn btn-secondary" style="cursor: pointer; margin: 0; padding: 0.35rem 0.75rem; font-size: 0.85rem;">
-                                    <i class="fas fa-upload" style="margin-right: 4px;"></i> Foto kiezen
+                            <span class="form-hint">Of upload een eigen foto als icoon (bijv. wijkagent, logo van partner):</span>
+                            <div class="file-input-row">
+                                <label class="btn btn-secondary btn-sm" style="cursor: pointer; margin: 0;">
+                                    <i class="fas fa-upload"></i> Foto kiezen
                                     <input type="file" id="practicalIconUpload" accept="image/*" style="display: none;">
                                 </label>
-                                <span id="practicalIconUploadStatus" style="font-size: 0.8rem; color: #666;"></span>
-                                <img id="practicalIconPreview" src="" alt="preview" style="width: 40px; height: 40px; border-radius: 50%; object-fit: cover; display: none; border: 2px solid #ddd;">
+                                <span id="practicalIconUploadStatus" class="form-hint" style="margin: 0;"></span>
+                                <img id="practicalIconPreview" src="" alt="preview" class="practical-icon-preview-thumb" style="display: none;">
                             </div>
                         </div>
                         <div class="form-group">
@@ -5091,7 +5092,7 @@ class HolwertAdmin {
                         <div class="form-group">
                             <label for="practicalUrl">Link-URL</label>
                             <input type="url" id="practicalUrl" value="${website.replace(/"/g, '&quot;')}" placeholder="https://...">
-                            <small class="text-muted">Alleen gebruikt als type = Telefoon/Link. In de app wordt telefoon en website beide getoond (indien ingevuld).</small>
+                            <span class="form-hint">Alleen gebruikt als type = Telefoon/Link. In de app worden telefoon en website beide getoond (indien ingevuld).</span>
                         </div>
                         <div class="form-group">
                             <label for="practicalDescription">Beschrijving / extra tekst</label>
@@ -5100,7 +5101,7 @@ class HolwertAdmin {
                         <div class="form-group">
                             <label for="practicalSortOrder">Volgorde</label>
                             <input type="number" id="practicalSortOrder" value="${item?.sort_order ?? 0}">
-                            <small class="text-muted">0 = bovenaan, hogere nummers komen lager in de lijst.</small>
+                            <span class="form-hint">0 = bovenaan, hogere nummers komen lager in de lijst.</span>
                         </div>
                         <div class="form-group checkbox-field">
                             <label class="checkbox-label">
@@ -6374,7 +6375,7 @@ class HolwertAdmin {
         const inferredOrg = this.inferOrgLinkForUser(user);
         const orgSelectId = user.organization_id ?? inferredOrg?.id ?? null;
         const orgLinkHint = !user.organization_id && inferredOrg
-            ? `<p class="text-muted" style="font-size:0.9rem;margin-bottom:0.75rem;color:#b45309;">Dit account hoort waarschijnlijk bij «${String(inferredOrg.name || '').replace(/</g, '&lt;')}». Kies die organisatie hieronder en sla op om de koppeling vast te leggen.</p>`
+            ? this.modalIntro(`Dit account hoort waarschijnlijk bij «${String(inferredOrg.name || '').replace(/</g, '&lt;')}». Kies die organisatie hieronder en sla op om de koppeling vast te leggen.`, { warn: true })
             : '';
         modal.innerHTML = `
             <div class="modal-content modal-large" id="editUserModalRoot">
@@ -6429,7 +6430,7 @@ class HolwertAdmin {
                             <select id="editOrganizationId" name="organization_id">
                                 ${this.buildOrganizationSelectHtml(orgSelectId)}
                             </select>
-                            <small style="display:block;margin-top:0.35rem;color:#666;">Voor dashboard-inlog: juiste organisatie kiezen en rol «Gebruiker» laten staan.</small>
+                            <span class="form-hint">Voor dashboard-inlog: juiste organisatie kiezen en rol «Gebruiker» laten staan.</span>
                         </div>
                         <div class="form-group">
                             <label>Profielfoto</label>
@@ -7271,14 +7272,14 @@ class HolwertAdmin {
                                 <div class="form-group">
                                     <label>Afbeelding (optioneel)</label>
                                     <input type="file" id="evImage" accept="image/*">
-                                    <div id="evImagePreview" style="display: none; margin-top: 10px;">
-                                        <img id="evImagePreviewImg" src="" style="max-width: 200px; max-height: 200px; border-radius: 8px;">
-                                        <button type="button" class="btn btn-sm btn-secondary" id="evImageClearBtn" style="margin-top: 5px;">Verwijder afbeelding</button>
+                                    <div id="evImagePreview" class="image-preview-box" style="display: none;">
+                                        <img id="evImagePreviewImg" src="" alt="Preview">
+                                        <button type="button" class="btn btn-sm btn-secondary" id="evImageClearBtn" style="margin-top: 0.5rem;">Verwijder afbeelding</button>
                                     </div>
                                     ${initial.image_url ? `
-                                        <div style="margin-top: 10px;" data-existing-image="${initial.image_url}">
-                                            <p>Huidige afbeelding:</p>
-                                            <img src="${initial.image_url}" style="max-width: 200px; max-height: 200px; border-radius: 8px;">
+                                        <div class="current-image" data-existing-image="${initial.image_url}">
+                                            <span class="form-hint">Huidige afbeelding:</span>
+                                            <img src="${initial.image_url}" alt="Huidige afbeelding">
                                         </div>
                                     ` : ''}
                                 </div>
