@@ -473,6 +473,10 @@ class HolwertAdmin {
         if (testModerationNotificationEmailBtn) {
             testModerationNotificationEmailBtn.addEventListener('click', () => this.testModerationNotificationEmail());
         }
+        const saveDorpsomroeperBtn = document.getElementById('saveDorpsomroeperBtn');
+        if (saveDorpsomroeperBtn) {
+            saveDorpsomroeperBtn.addEventListener('click', () => this.saveDorpsomroeper());
+        }
         const afvalOudPapierType = document.getElementById('afvalOudPapierType');
         if (afvalOudPapierType) {
             afvalOudPapierType.addEventListener('change', (e) => {
@@ -485,7 +489,7 @@ class HolwertAdmin {
         }
     }
 
-    checkAuth() {
+    async checkAuth() {
         console.log('=== CHECK AUTH ===');
         console.log('HolwertAdmin initialized');
         console.log('API Base URL:', this.apiBaseUrl);
@@ -493,6 +497,17 @@ class HolwertAdmin {
         
         if (this.token) {
             console.log('Token found, showing main screen');
+            try {
+                const profRes = await fetch(`${this.apiBaseUrl}/auth/profile`, {
+                    headers: { Authorization: `Bearer ${this.token}` },
+                });
+                if (profRes.ok) {
+                    const profData = await profRes.json();
+                    if (profData.user) this.currentUser = profData.user;
+                }
+            } catch (e) {
+                console.warn('Kon profiel bij checkAuth niet laden:', e);
+            }
             this.showMainScreen();
             console.log('Calling showSection(dashboard)');
             this.showSection('dashboard');
@@ -581,8 +596,18 @@ class HolwertAdmin {
 
         // Start automatische polling van notificatie-badges (elke 30 seconden)
         this.startBadgePolling();
+        this.updateSuperAdminUiVisibility();
 
         console.log('=== END SHOW MAIN SCREEN ===');
+    }
+
+    updateSuperAdminUiVisibility() {
+        const role = String(this.currentUser?.role || '').trim().toLowerCase();
+        const isSuperAdmin = role === 'superadmin';
+        const card = document.getElementById('dorpsomroeperCard');
+        if (card) {
+            card.style.display = isSuperAdmin ? '' : 'none';
+        }
     }
 
     startBadgePolling() {
@@ -5788,6 +5813,93 @@ class HolwertAdmin {
         }
     }
 
+    async loadDorpsomroeper() {
+        const card = document.getElementById('dorpsomroeperCard');
+        if (!card || card.style.display === 'none') return;
+
+        const enabledEl = document.getElementById('dorpsomroeperEnabled');
+        const textEl = document.getElementById('dorpsomroeperText');
+        const untilEl = document.getElementById('dorpsomroeperUntil');
+        const sendPushEl = document.getElementById('dorpsomroeperSendPush');
+        if (!enabledEl || !textEl || !untilEl) return;
+
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/admin/settings/dorpsomroeper`, {
+                headers: {
+                    Authorization: `Bearer ${this.token}`,
+                    'Content-Type': 'application/json',
+                },
+            });
+            if (!response.ok) return;
+            const data = await response.json();
+            enabledEl.checked = data.enabled === true;
+            textEl.value = data.text || '';
+            untilEl.value = data.until || '';
+            if (sendPushEl) sendPushEl.checked = false;
+        } catch (error) {
+            console.warn('Kon dorpsomroeper niet laden:', error.message);
+        }
+    }
+
+    async saveDorpsomroeper() {
+        const enabledEl = document.getElementById('dorpsomroeperEnabled');
+        const textEl = document.getElementById('dorpsomroeperText');
+        const untilEl = document.getElementById('dorpsomroeperUntil');
+        const sendPushEl = document.getElementById('dorpsomroeperSendPush');
+        const msgEl = document.getElementById('dorpsomroeperMsg');
+        if (!enabledEl || !textEl || !untilEl) return;
+
+        const enabled = enabledEl.checked;
+        const sendPush = sendPushEl ? sendPushEl.checked : false;
+        const text = (textEl.value || '').trim();
+        const until = (untilEl.value || '').trim();
+
+        if (enabled && !text) {
+            if (msgEl) {
+                msgEl.textContent = 'Voer tekst in voor een actieve mededeling.';
+                msgEl.className = 'form-message error';
+            }
+            return;
+        }
+
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/admin/settings/dorpsomroeper`, {
+                method: 'PUT',
+                headers: {
+                    Authorization: `Bearer ${this.token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ enabled, text, until: until || null, sendPush }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data.message || data.error || `HTTP ${response.status}`);
+            }
+            if (sendPushEl) sendPushEl.checked = false;
+            if (msgEl) {
+                if (!enabled) {
+                    msgEl.textContent = 'Dorpsomroeper uitgeschakeld — mededeling verschijnt niet meer in de app.';
+                } else if (data.pushQueued) {
+                    msgEl.textContent = 'Mededeling actief. Push wordt verstuurd.';
+                } else {
+                    msgEl.textContent = 'Mededeling opgeslagen (alleen banner in de app).';
+                }
+                msgEl.className = 'form-message success';
+            }
+            const note = !enabled
+                ? 'Dorpsomroeper uitgeschakeld'
+                : data.pushQueued
+                    ? 'Dorpsomroeper actief — push verstuurd'
+                    : 'Dorpsomroeper opgeslagen';
+            this.showNotification(note, 'success');
+        } catch (error) {
+            if (msgEl) {
+                msgEl.textContent = 'Opslaan mislukt: ' + (error.message || error);
+                msgEl.className = 'form-message error';
+            }
+        }
+    }
+
     async saveModerationNotificationEmail() {
         const input = document.getElementById('moderationNotificationEmail');
         const msgEl = document.getElementById('moderationNotificationEmailMsg');
@@ -5870,7 +5982,9 @@ class HolwertAdmin {
 
     async loadModeration() {
         try {
+            this.updateSuperAdminUiVisibility();
             await this.loadModerationNotificationEmail();
+            await this.loadDorpsomroeper();
 
             const container = document.getElementById('moderationContent');
             if (!container) return;

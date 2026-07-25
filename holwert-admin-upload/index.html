@@ -377,6 +377,40 @@
                         <span id="moderationNotificationEmailMsg" class="form-message" style="margin: 0;"></span>
                     </div>
                 </div>
+                <div id="dorpsomroeperCard" class="card moderation-settings-card" style="margin-bottom: 24px; padding: 20px; display: none;">
+                    <h3 style="margin: 0 0 8px; font-size: 1.05rem;"><i class="fas fa-bullhorn"></i> Dorpsomroeper</h3>
+                    <p class="section-description" style="margin-bottom: 16px;">
+                        Belangrijke dorpsmededeling bovenaan de app. Gebruikers kunnen hem wegklikken; daarna zien ze deze tekst niet meer.
+                        Zet <strong>Mededeling actief</strong> uit om hem direct te verbergen — ook voor mensen die de app later openen.
+                    </p>
+                    <div class="form-group" style="margin-bottom: 12px;">
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" id="dorpsomroeperEnabled">
+                            Mededeling actief
+                        </label>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 12px;">
+                        <label for="dorpsomroeperText">Tekst in de app</label>
+                        <textarea id="dorpsomroeperText" class="form-control" rows="3" maxlength="500" placeholder="Bijv. Vanwege een gaslek: blijf binnen tot nader bericht."></textarea>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 12px;">
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" id="dorpsomroeperSendPush">
+                            Stuur ook pushmelding (bij nieuwe of gewijzigde tekst)
+                        </label>
+                        <p class="section-description" style="margin: 6px 0 0; font-size: 0.9rem;">
+                            Alleen bij opslaan van een nieuwe mededeling. Gebruik bij urgente zaken (bijv. gaslek); laat uit voor minder dringend nieuws.
+                        </p>
+                    </div>
+                    <div class="form-group" style="max-width: 280px; margin-bottom: 12px;">
+                        <label for="dorpsomroeperUntil">Automatisch verbergen na (optioneel)</label>
+                        <input type="date" id="dorpsomroeperUntil" class="form-control">
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                        <button type="button" id="saveDorpsomroeperBtn" class="btn btn-primary">Opslaan</button>
+                        <span id="dorpsomroeperMsg" class="form-message" style="margin: 0;"></span>
+                    </div>
+                </div>
                 <div class="moderation-tabs">
                     <button class="tab-btn active" data-type="all">Alle Pending</button>
                     <button class="tab-btn" data-type="news">Nieuws</button>

@@ -1182,6 +1182,7 @@ const authenticateToken = (req, res, next) => {
 
 // Admin-rollen (JWT kan ontbreken of afwijken van DB na handmatige fixes)
 const ELEVATED_ADMIN_ROLES = new Set(['admin', 'superadmin', 'editor']);
+const SUPERADMIN_ROLES = new Set(['superadmin']);
 
 function normalizeAdminRole(roleRaw) {
   if (roleRaw == null) return '';
@@ -1218,6 +1219,37 @@ const requireAdmin = async (req, res, next) => {
     });
   } catch (err) {
     console.error('requireAdmin:', err);
+    return res.status(500).json({ error: 'Auth check failed', message: err.message });
+  }
+};
+
+/** Alleen superadmin — o.a. globale app-banner. */
+const requireSuperAdmin = async (req, res, next) => {
+  try {
+    const jwtRole = normalizeAdminRole(req.user && req.user.role);
+    if (jwtRole && SUPERADMIN_ROLES.has(jwtRole)) {
+      return next();
+    }
+    const userId = req.user && req.user.userId;
+    if (userId == null) {
+      return res.status(403).json({
+        error: 'Superadmin privileges required',
+        message: 'Token mist gebruikers-id. Log opnieuw in.',
+      });
+    }
+    const r = await executeQuery('SELECT role FROM users WHERE id = ?', [userId]);
+    const dbRole = normalizeAdminRole(r.rows?.[0]?.role);
+    if (dbRole && SUPERADMIN_ROLES.has(dbRole)) {
+      return next();
+    }
+    return res.status(403).json({
+      error: 'Superadmin privileges required',
+      message: 'Alleen een superadmin kan deze actie uitvoeren.',
+      jwtRole: req.user && req.user.role != null ? req.user.role : null,
+      dbRole: r.rows?.[0]?.role != null ? r.rows[0].role : null,
+    });
+  } catch (err) {
+    console.error('requireSuperAdmin:', err);
     return res.status(500).json({ error: 'Auth check failed', message: err.message });
   }
 };
@@ -5879,6 +5911,223 @@ app.post('/api/admin/settings/moderation-notification/test', authenticateToken, 
     res.status(500).json({ error: 'Testmail mislukt', message: error.message });
   }
 });
+
+const DORPSOMROEPER_SLUG = '_setting_global_app_banner';
+
+function parseDorpsomroeperFromContent(raw) {
+  if (raw == null || String(raw).trim() === '') return null;
+  try {
+    const parsed = JSON.parse(String(raw));
+    if (!parsed || typeof parsed !== 'object') return null;
+    const text = parsed.text != null ? String(parsed.text).trim() : '';
+    const bannerId = parsed.bannerId != null ? String(parsed.bannerId).trim() : '';
+    const enabled = parsed.enabled === true || parsed.enabled === 'true';
+    const until =
+      parsed.until != null && String(parsed.until).trim() !== '' ? String(parsed.until).trim() : null;
+    return { enabled, text, bannerId, until };
+  } catch {
+    return null;
+  }
+}
+
+function isDorpsomroeperActive(banner) {
+  if (!banner || !banner.enabled || !banner.text || !banner.bannerId) return false;
+  if (banner.until) {
+    const untilEnd = new Date(`${banner.until}T23:59:59`);
+    if (!Number.isNaN(untilEnd.getTime()) && untilEnd < new Date()) return false;
+  }
+  return true;
+}
+
+function buildPublicDorpsomroeperResponse(banner) {
+  if (!isDorpsomroeperActive(banner)) {
+    return { active: false, text: null, bannerId: null };
+  }
+  return { active: true, text: banner.text, bannerId: banner.bannerId };
+}
+
+function generateDorpsomroeperId() {
+  return `dorpsomroeper-${Date.now()}`;
+}
+
+async function getDorpsomroeperFromDb() {
+  const result = await executeQuery(
+    'SELECT content FROM content_pages WHERE slug = ? LIMIT 1',
+    [DORPSOMROEPER_SLUG],
+  );
+  return parseDorpsomroeperFromContent(result.rows?.[0]?.content);
+}
+
+async function setDorpsomroeperInDb(banner) {
+  const content = JSON.stringify({
+    enabled: banner.enabled === true,
+    text: banner.text || '',
+    bannerId: banner.bannerId || '',
+    until: banner.until || null,
+  });
+  const existing = await executeQuery(
+    'SELECT id FROM content_pages WHERE slug = ? LIMIT 1',
+    [DORPSOMROEPER_SLUG],
+  );
+  if (existing.rows?.length > 0) {
+    await executeQuery(
+      'UPDATE content_pages SET title = ?, content = ? WHERE slug = ?',
+      ['Dorpsomroeper', content, DORPSOMROEPER_SLUG],
+    );
+  } else {
+    await executeInsert(
+      'INSERT INTO content_pages (slug, title, content) VALUES (?, ?, ?)',
+      [DORPSOMROEPER_SLUG, 'Dorpsomroeper', content],
+    );
+  }
+}
+
+/**
+ * Push voor Dorpsomroeper — alle actieve apparaat-tokens, geen gebruikersvoorkeur (superadmin kiest bij publicatie).
+ */
+async function notifyAllUsersOfDorpsomroeper(text, bannerId) {
+  const body = String(text || '').trim();
+  if (!body) return { success: false, sent: 0 };
+
+  const result = await executeQuery(
+    `SELECT pt.id, pt.user_id, pt.token
+     FROM push_tokens pt
+     WHERE pt.is_active = true
+     ORDER BY pt.last_used_at DESC, pt.updated_at DESC, pt.id DESC`,
+  );
+
+  const eligibleRows = pickLatestPushTokenPerUser(result.rows || []);
+  if (!eligibleRows.length) {
+    console.log('[dorpsomroeper push] geen actieve tokens');
+    return { success: true, sent: 0 };
+  }
+
+  const notification = {
+    title: 'Dorpsomroeper',
+    body: body.length > 200 ? `${body.slice(0, 197)}…` : body,
+    data: {
+      type: 'dorpsomroeper',
+      bannerId: bannerId || '',
+    },
+  };
+
+  let sent = 0;
+  for (const batch of chunkArray(eligibleRows, 100)) {
+    const tokens = batch.map((row) => row.token).filter(Boolean);
+    if (!tokens.length) continue;
+    const sendResult = await sendPushNotification(tokens, notification);
+    if (!sendResult.success) continue;
+    sent += sendResult.sent ?? tokens.length;
+
+    for (const row of batch) {
+      try {
+        await executeQuery(
+          `INSERT INTO notification_history
+           (user_id, push_token_id, notification_type, title, body, data, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [
+            row.user_id,
+            row.id,
+            'dorpsomroeper',
+            notification.title,
+            notification.body,
+            JSON.stringify(notification.data || {}),
+            'sent',
+          ],
+        );
+      } catch {
+        /* history optioneel */
+      }
+    }
+  }
+
+  console.log(`📢 Dorpsomroeper push verstuurd naar ${sent} apparaat(en)`);
+  return { success: true, sent };
+}
+
+function queueDorpsomroeperPush(text, bannerId) {
+  void notifyAllUsersOfDorpsomroeper(text, bannerId).catch((err) => {
+    console.error('[dorpsomroeper push] mislukt:', err.message);
+  });
+}
+
+async function handleDorpsomroeperGet(req, res) {
+  try {
+    const banner = await getDorpsomroeperFromDb();
+    res.json(buildPublicDorpsomroeperResponse(banner));
+  } catch (error) {
+    console.error('Get dorpsomroeper error:', error);
+    res.status(500).json({ error: 'Kon mededeling niet ophalen', message: error.message });
+  }
+}
+
+async function handleDorpsomroeperAdminGet(req, res) {
+  try {
+    const banner = await getDorpsomroeperFromDb();
+    if (!banner) {
+      return res.json({ enabled: false, text: '', bannerId: '', until: null });
+    }
+    res.json({
+      enabled: banner.enabled,
+      text: banner.text,
+      bannerId: banner.bannerId,
+      until: banner.until,
+    });
+  } catch (error) {
+    console.error('Get dorpsomroeper settings error:', error);
+    res.status(500).json({ error: 'Kon instelling niet ophalen', message: error.message });
+  }
+}
+
+async function handleDorpsomroeperAdminPut(req, res) {
+  try {
+    const enabled = req.body?.enabled === true || req.body?.enabled === 'true';
+    const sendPush = req.body?.sendPush === true || req.body?.sendPush === 'true';
+    const text = req.body?.text != null ? String(req.body.text).trim() : '';
+    const untilRaw = req.body?.until;
+    const until = untilRaw != null && String(untilRaw).trim() !== '' ? String(untilRaw).trim() : null;
+
+    if (enabled && !text) {
+      return res.status(400).json({ error: 'Tekst is verplicht wanneer de mededeling actief is' });
+    }
+    if (text.length > 500) {
+      return res.status(400).json({ error: 'Tekst mag maximaal 500 tekens bevatten' });
+    }
+    if (until && Number.isNaN(new Date(`${until}T12:00:00`).getTime())) {
+      return res.status(400).json({ error: 'Ongeldige einddatum' });
+    }
+
+    const existing = await getDorpsomroeperFromDb();
+    let bannerId = existing?.bannerId || generateDorpsomroeperId();
+    const textChanged = !existing || (existing.text || '') !== text;
+    const enablingFresh = enabled && (!existing?.enabled || textChanged);
+    if (enablingFresh) {
+      bannerId = generateDorpsomroeperId();
+    }
+
+    const banner = { enabled, text, bannerId, until };
+    await setDorpsomroeperInDb(banner);
+
+    const pushQueued = sendPush && enablingFresh;
+    if (pushQueued) {
+      queueDorpsomroeperPush(text, bannerId);
+    }
+
+    res.json({ success: true, ...banner, pushQueued });
+  } catch (error) {
+    console.error('Save dorpsomroeper error:', error);
+    res.status(500).json({ error: 'Kon instelling niet opslaan', message: error.message });
+  }
+}
+
+app.get('/api/app/dorpsomroeper', handleDorpsomroeperGet);
+app.get('/api/app/global-banner', handleDorpsomroeperGet);
+
+app.get('/api/admin/settings/dorpsomroeper', authenticateToken, requireSuperAdmin, handleDorpsomroeperAdminGet);
+app.get('/api/admin/settings/global-banner', authenticateToken, requireSuperAdmin, handleDorpsomroeperAdminGet);
+
+app.put('/api/admin/settings/dorpsomroeper', authenticateToken, requireSuperAdmin, handleDorpsomroeperAdminPut);
+app.put('/api/admin/settings/global-banner', authenticateToken, requireSuperAdmin, handleDorpsomroeperAdminPut);
 
 // ── Content Pages (admin) ────────────────────────────────────
 app.get('/api/admin/content-pages', authenticateToken, requireAdmin, async (req, res) => {
