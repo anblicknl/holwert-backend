@@ -2250,10 +2250,15 @@ input, select, textarea {
     color: #111827;
 }
 
+.news-content-text,
+.rich-text-body {
+    line-height: 1.8;
+    color: #333;
+}
+
 .modal-description-text {
     color: #475569;
     line-height: 1.6;
-    white-space: pre-wrap;
 }
 
 .admin-event-preview-hero {

@@ -31,6 +31,20 @@ function stripHtmlForShareText(html, maxLen = 300) {
     return text;
 }
 
+/** Web/HTML-weergave: behoud regeleinden uit textarea (plain text of gemengd met HTML). */
+function formatRichTextForWeb(raw) {
+    if (!raw) return '';
+    let s = String(raw).replace(/\r\n/g, '\n');
+    s = s.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+    s = s.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '');
+    s = s.replace(/<!--[\s\S]*?-->/g, '');
+    const hasHtml = /<[a-z][\s\S]*>/i.test(s);
+    if (!hasHtml) {
+        s = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+    return s.replace(/\n/g, '<br />');
+}
+
 function buildFacebookShareMessage(title, content, shareUrl) {
     const parts = [];
     const heading = (title || '').trim();
@@ -4113,7 +4127,7 @@ class HolwertAdmin {
                 
                 <!-- Content -->
                 <div class="news-content">
-                    <div class="news-content-text">${article.content}</div>
+                    <div class="news-content-text">${formatRichTextForWeb(article.content)}</div>
                 </div>
                 
                 <!-- Author -->
@@ -4769,7 +4783,7 @@ class HolwertAdmin {
                 ${event.description ? `
                     <div class="modal-description">
                         <h3 class="modal-description-title">Over dit evenement</h3>
-                        <div class="modal-description-text">${event.description}</div>
+                        <div class="modal-description-text">${formatRichTextForWeb(event.description)}</div>
                     </div>
                 ` : ''}
             </div>
@@ -6156,7 +6170,7 @@ class HolwertAdmin {
                 `<div class="moderation-org-preview-row"><strong>${h(label)}</strong><div>${innerHtml}</div></div>`;
             const textOrDash = (s) => {
                 const t = (s == null ? '' : String(s)).trim();
-                return t ? `<div style="white-space:pre-wrap;">${h(t)}</div>` : '<span class="text-muted">—</span>';
+                return t ? `<div class="rich-text-body">${formatRichTextForWeb(t)}</div>` : '<span class="text-muted">—</span>';
             };
             const linkOrDash = (url) => {
                 const u = (url || '').trim();
@@ -7198,7 +7212,7 @@ class HolwertAdmin {
                             </div>
                             <div class="admin-event-preview-body">
                                 <h3 class="modal-description-title">Beschrijving</h3>
-                                <div class="modal-description-text">${initial.description || 'Geen beschrijving beschikbaar'}</div>
+                                <div class="modal-description-text">${formatRichTextForWeb(initial.description || '') || 'Geen beschrijving beschikbaar'}</div>
                             </div>
                         </div>
                         <div class="modal-footer">

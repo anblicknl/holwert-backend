@@ -82,6 +82,27 @@ function stripHtmlForPreview(input, maxLen = 120) {
   return maxLen > 0 && text.length > maxLen ? text.slice(0, maxLen) : text;
 }
 
+/**
+ * Web/HTML-weergave: behoud regeleinden uit textarea (plain text of gemengd met HTML).
+ * Zelfde idee als prepareRichTextHtml in de mobile app.
+ */
+function formatRichTextForWeb(raw) {
+  if (!raw) return '';
+  let s = String(raw).replace(/\r\n/g, '\n');
+  s = s.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+  s = s.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '');
+  s = s.replace(/<!--[\s\S]*?-->/g, '');
+  const hasHtml = /<[a-z][\s\S]*>/i.test(s);
+  if (!hasHtml) {
+    s = s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+  return s.replace(/\n/g, '<br />');
+}
+
 function getCacheKey(endpoint, params = {}) {
   return `${endpoint}:${JSON.stringify(params)}`;
 }
@@ -2945,7 +2966,7 @@ app.get('/news/:id', async (req, res) => {
       }
       ${image ? `<img src="${image}" alt="${title}" />` : ''}
       <div class="content">
-        ${article.content || ''}
+        ${formatRichTextForWeb(article.content || '')}
       </div>
       <div class="store-hint">
         <p>Dit bericht staat in de Holwert Dorpsapp.</p>
@@ -6238,7 +6259,7 @@ app.get('/api/app/content-pages/:slug', async (req, res) => {
 // Public HTML pages for store links (Privacy Policy / Terms) – content from backend
 function contentPageHtml(slug, title, content) {
   const safeTitle = String(title || slug).replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const body = content || '<p>Geen inhoud.</p>';
+  const body = content ? formatRichTextForWeb(content) : '<p>Geen inhoud.</p>';
   return `<!DOCTYPE html>
 <html lang="nl">
 <head>
