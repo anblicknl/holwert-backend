@@ -603,10 +603,10 @@ class HolwertAdmin {
 
     updateSuperAdminUiVisibility() {
         const role = String(this.currentUser?.role || '').trim().toLowerCase();
-        const isSuperAdmin = role === 'superadmin';
+        const canManageDorpsomroeper = role === 'superadmin' || role === 'admin';
         const navItem = document.getElementById('dorpsomroeperNavItem');
         if (navItem) {
-            navItem.style.display = isSuperAdmin ? '' : 'none';
+            navItem.style.display = canManageDorpsomroeper ? '' : 'none';
         }
     }
 

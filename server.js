@@ -1183,6 +1183,8 @@ const authenticateToken = (req, res, next) => {
 // Admin-rollen (JWT kan ontbreken of afwijken van DB na handmatige fixes)
 const ELEVATED_ADMIN_ROLES = new Set(['admin', 'superadmin', 'editor']);
 const SUPERADMIN_ROLES = new Set(['superadmin']);
+/** Dorpsomroeper: hoofdbeheerder (admin) + superadmin, niet editor. */
+const DORPSOMROEPER_ADMIN_ROLES = new Set(['admin', 'superadmin']);
 
 function normalizeAdminRole(roleRaw) {
   if (roleRaw == null) return '';
@@ -1250,6 +1252,37 @@ const requireSuperAdmin = async (req, res, next) => {
     });
   } catch (err) {
     console.error('requireSuperAdmin:', err);
+    return res.status(500).json({ error: 'Auth check failed', message: err.message });
+  }
+};
+
+/** Dorpsomroeper — admin of superadmin (niet editor). */
+const requireDorpsomroeperAdmin = async (req, res, next) => {
+  try {
+    const jwtRole = normalizeAdminRole(req.user && req.user.role);
+    if (jwtRole && DORPSOMROEPER_ADMIN_ROLES.has(jwtRole)) {
+      return next();
+    }
+    const userId = req.user && req.user.userId;
+    if (userId == null) {
+      return res.status(403).json({
+        error: 'Dorpsomroeper privileges required',
+        message: 'Token mist gebruikers-id. Log opnieuw in.',
+      });
+    }
+    const r = await executeQuery('SELECT role FROM users WHERE id = ?', [userId]);
+    const dbRole = normalizeAdminRole(r.rows?.[0]?.role);
+    if (dbRole && DORPSOMROEPER_ADMIN_ROLES.has(dbRole)) {
+      return next();
+    }
+    return res.status(403).json({
+      error: 'Dorpsomroeper privileges required',
+      message: 'Alleen admin of superadmin kan de Dorpsomroeper beheren.',
+      jwtRole: req.user && req.user.role != null ? req.user.role : null,
+      dbRole: r.rows?.[0]?.role != null ? r.rows[0].role : null,
+    });
+  } catch (err) {
+    console.error('requireDorpsomroeperAdmin:', err);
     return res.status(500).json({ error: 'Auth check failed', message: err.message });
   }
 };
@@ -6123,11 +6156,11 @@ async function handleDorpsomroeperAdminPut(req, res) {
 app.get('/api/app/dorpsomroeper', handleDorpsomroeperGet);
 app.get('/api/app/global-banner', handleDorpsomroeperGet);
 
-app.get('/api/admin/settings/dorpsomroeper', authenticateToken, requireSuperAdmin, handleDorpsomroeperAdminGet);
-app.get('/api/admin/settings/global-banner', authenticateToken, requireSuperAdmin, handleDorpsomroeperAdminGet);
+app.get('/api/admin/settings/dorpsomroeper', authenticateToken, requireDorpsomroeperAdmin, handleDorpsomroeperAdminGet);
+app.get('/api/admin/settings/global-banner', authenticateToken, requireDorpsomroeperAdmin, handleDorpsomroeperAdminGet);
 
-app.put('/api/admin/settings/dorpsomroeper', authenticateToken, requireSuperAdmin, handleDorpsomroeperAdminPut);
-app.put('/api/admin/settings/global-banner', authenticateToken, requireSuperAdmin, handleDorpsomroeperAdminPut);
+app.put('/api/admin/settings/dorpsomroeper', authenticateToken, requireDorpsomroeperAdmin, handleDorpsomroeperAdminPut);
+app.put('/api/admin/settings/global-banner', authenticateToken, requireDorpsomroeperAdmin, handleDorpsomroeperAdminPut);
 
 // ── Content Pages (admin) ────────────────────────────────────
 app.get('/api/admin/content-pages', authenticateToken, requireAdmin, async (req, res) => {
