@@ -51,6 +51,22 @@
         return `${NEWS_PUBLIC_SHARE_BASE_URL}${Number(newsId)}`;
     }
 
+    function checkboxFieldHtml(id, labelText, { checked = false, hint = '', disabled = false } = {}) {
+        const dis = disabled ? ' disabled' : '';
+        const hintHtml = hint ? `<span class="form-hint">${hint}</span>` : '';
+        return `<div class="form-group checkbox-field">
+            <label class="checkbox-label" for="${id}">
+                <input type="checkbox" id="${id}"${checked ? ' checked' : ''}${dis}>
+                <span>${labelText}</span>
+            </label>
+            ${hintHtml}
+        </div>`;
+    }
+
+    function previewThumbHtml(url, alt = '') {
+        return url ? `<div class="preview-thumb"><img src="${escapeHtml(url)}" alt="${escapeHtml(alt)}"></div>` : '';
+    }
+
     function stripHtmlForShareText(html, maxLen = 300) {
         if (!html) return '';
         let text = String(html)
@@ -153,7 +169,7 @@
         const select = document.getElementById('newsCategory');
         const group = document.getElementById('newsCustomCategoryGroup');
         if (!select || !group) return;
-        group.style.display = select.value === 'overig' ? 'block' : 'none';
+        group.classList.toggle('form-group--hidden', select.value !== 'overig');
     }
 
     function newsCategoryLabel(category, customCategory) {
@@ -295,7 +311,7 @@
         const f = input?.files?.[0];
         if (!f || !f.type.startsWith('image/') || !prev) return;
         orgLogoPreviewObjectUrl = URL.createObjectURL(f);
-        prev.innerHTML = `<img src="${orgLogoPreviewObjectUrl}" alt="" style="max-height:96px;border-radius:6px;margin-top:8px;object-fit:contain">`;
+        prev.innerHTML = `<div class="org-logo-preview"><img src="${orgLogoPreviewObjectUrl}" alt=""></div>`;
     });
 
     function trimOrUndef(id) {
@@ -618,11 +634,11 @@
         if (!pdfUrl) return '';
         return `
             <input type="hidden" id="${flagId}" class="js-pdf-remove-flag" value="0">
-            <div class="js-pdf-current" style="margin-top:8px;display:flex;flex-wrap:wrap;align-items:center;gap:8px;">
+            <div class="js-pdf-current">
                 <small>Huidige PDF: <a href="${escapeHtml(pdfUrl)}" target="_blank" rel="noopener">bekijken</a></small>
                 <button type="button" class="btn btn-sm btn-danger js-pdf-remove-btn">Verwijder PDF</button>
             </div>
-            <p class="form-hint js-pdf-marked" hidden style="margin-top:6px;color:#c0304f;">
+            <p class="form-hint js-pdf-marked" hidden>
                 PDF wordt verwijderd bij opslaan.
                 <button type="button" class="btn btn-sm btn-secondary js-pdf-undo-btn">Ongedaan maken</button>
             </p>
@@ -853,7 +869,7 @@
     async function loadFollowers() {
         const container = document.getElementById('followersContent');
         if (!container) return;
-        container.innerHTML = '<p class="form-hint" style="padding:1rem">Volgers laden…</p>';
+        container.innerHTML = '<p class="form-hint state-message">Volgers laden…</p>';
         try {
             const res = await fetch(`${apiBase}/org/followers?limit=500`, { headers: authHeaders() });
             const data = await res.json().catch(() => ({}));
@@ -886,7 +902,7 @@
                     }).join('')}
                 </ul>`;
         } catch (err) {
-            container.innerHTML = `<p class="form-hint" style="padding:1rem;color:#c00">Kon volgers niet laden: ${escapeHtml(err.message || 'onbekende fout')}</p>`;
+            container.innerHTML = `<p class="form-hint state-message state-message--error">Kon volgers niet laden: ${escapeHtml(err.message || 'onbekende fout')}</p>`;
         }
     }
 
@@ -991,9 +1007,7 @@
                 const d = await r.json();
                 if (r.ok) article = d.article;
             }
-            const imgPreview = article?.image_url
-                ? `<p style="margin:0 0 8px"><img src="${escapeHtml(article.image_url)}" alt="" style="max-height:120px;border-radius:6px"></p>`
-                : '';
+            const imgPreview = previewThumbHtml(article?.image_url);
             const titleHtml = isPreview ? 'Artikel bekijken' : (article ? 'Artikel bewerken' : 'Nieuw artikel');
             const editorToolbar = isPreview ? '' : '<div class="editor-toolbar"><button type="button" class="editor-btn" onclick="adminFormatText(\'newsContent\',\'bold\')" title="Vet"><b>B</b></button><button type="button" class="editor-btn" onclick="adminFormatText(\'newsContent\',\'italic\')" title="Cursief"><i>I</i></button><button type="button" class="editor-btn" onclick="adminFormatText(\'newsContent\',\'link\')" title="Link">&#128279;</button></div><small class="form-hint">Selecteer tekst en klik een knop om op te maken. De eerste regels verschijnen automatisch in het nieuwsoverzicht in de app.</small>';
             const publishedAtValue = article?.published_at
@@ -1007,21 +1021,23 @@
                             ${NEWS_CATEGORIES.map((cat) => `<option value="${cat.id}" ${selectedCategory === cat.id ? 'selected' : ''}>${cat.label}</option>`).join('')}
                         </select>
                    </div>
-                   <div class="form-group" id="newsCustomCategoryGroup" style="display:${selectedCategory === 'overig' ? 'block' : 'none'}">
+                   <div class="form-group${selectedCategory === 'overig' ? '' : ' form-group--hidden'}" id="newsCustomCategoryGroup">
                         <label for="newsCustomCategory">Eigen onderwerp</label>
                         <input type="text" id="newsCustomCategory" maxlength="100" placeholder="bijv. Jaarverslag, Weersverwachting" value="${escapeHtml(article?.custom_category || '')}">
                         <p class="form-hint">Wordt boven het artikel in de app getoond (alleen bij Overig).</p>
                    </div>`
                 : `<div class="form-group">
                         <label>Onderwerp</label>
-                        <p style="margin:0">${escapeHtml(newsCategoryLabel(article?.category, article?.custom_category))}</p>
+                        <p class="readonly-value">${escapeHtml(newsCategoryLabel(article?.category, article?.custom_category))}</p>
                    </div>`;
             const imageEditable = !isPreview
                 ? `${imgPreview}
                             <input type="file" id="newsImageFile" accept="image/*">
                             <p class="form-hint">Optioneel: JPG/PNG, max. 9 MB. Wordt in jullie organisatiemap geplaatst.</p>
-                            <label style="margin-top:8px;display:block">Of afbeeldings-URL (https)</label>
-                            <input type="url" id="newsImageUrlInput" placeholder="https://..." value="${escapeHtml(article?.image_url || '')}">`
+                            <div class="form-group__sub">
+                                <label for="newsImageUrlInput">Of afbeeldings-URL (https)</label>
+                                <input type="url" id="newsImageUrlInput" placeholder="https://..." value="${escapeHtml(article?.image_url || '')}">
+                            </div>`
                 : (imgPreview || '<p class="form-hint">Geen afbeelding</p>');
             overlay.innerHTML = `
                 <div class="modal-content">
@@ -1043,19 +1059,19 @@
                         <div class="form-group">
                             <label>Bronvermelding (optioneel)</label>
                             ${!isPreview
-                                ? `<div style="display:flex;gap:10px;flex-wrap:wrap;">
-                                       <div style="flex:1;min-width:140px;">
-                                           <label style="font-size:0.82rem;color:#555;margin-bottom:3px;display:block;">Naam bron</label>
+                                ? `<div class="form-subfields">
+                                       <div class="form-subfield">
+                                           <label for="newsSourceName">Naam bron</label>
                                            <input type="text" id="newsSourceName" placeholder="bijv. NOS, Leeuwarder Courant…" value="${escapeHtml(article?.source_name || '')}">
                                        </div>
-                                       <div style="flex:2;min-width:180px;">
-                                           <label style="font-size:0.82rem;color:#555;margin-bottom:3px;display:block;">URL (link naar bron)</label>
+                                       <div class="form-subfield form-subfield--wide">
+                                           <label for="newsSourceUrl">URL (link naar bron)</label>
                                            <input type="url" id="newsSourceUrl" placeholder="https://…" value="${escapeHtml(article?.source_url || '')}">
                                        </div>
                                    </div>
                                    <p class="form-hint">Wordt onder het artikel in de app getoond als &quot;Bron: …&quot; (zelfde als in /admin).</p>`
                                 : (article?.source_name
-                                    ? `<p style="margin:0">Bron: <a href="${escapeHtml(article.source_url || '#')}" target="_blank" rel="noopener">${escapeHtml(article.source_name)}</a></p>`
+                                    ? `<p class="readonly-value">Bron: <a href="${escapeHtml(article.source_url || '#')}" target="_blank" rel="noopener">${escapeHtml(article.source_name)}</a></p>`
                                     : '<p class="form-hint">Geen bronvermelding ingesteld. Klik op <strong>Bewerken</strong> (potlood) om naam en URL toe te voegen.</p>')
                             }
                         </div>
@@ -1089,13 +1105,10 @@
                                     : '<p class="form-hint">Geen PDF</p>')
                             }
                         </div>
-                        <div class="form-group">
-                            <label><input type="checkbox" id="newsPublished" ${article?.is_published ? 'checked' : ''} ${dis}> Gepubliceerd</label>
-                        </div>
-                        ${!isPreview ? `<div class="form-group">
-                            <label><input type="checkbox" id="newsShareFacebook" ${dis}> Na opslaan delen op Facebook</label>
-                            <p class="form-hint">Opent Facebook met linkpreview van dit bericht. Titel en begin van de inhoud staan op je klembord om te plakken.</p>
-                        </div>` : ''}
+                        ${checkboxFieldHtml('newsPublished', 'Gepubliceerd', { checked: !!article?.is_published, disabled: isPreview })}
+                        ${!isPreview ? checkboxFieldHtml('newsShareFacebook', 'Na opslaan delen op Facebook', {
+                            hint: 'Opent Facebook met linkpreview van dit bericht. Titel en begin van de inhoud staan op je klembord om te plakken.',
+                        }) : ''}
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary modal-close-btn">${isPreview ? 'Sluiten' : 'Annuleren'}</button>
@@ -1356,9 +1369,7 @@
             if (isDuplicate && event) {
                 event = applyEventDuplicateDefaults(event);
             }
-            const evImg = event?.image_url
-                ? `<p style="margin:0 0 8px"><img src="${escapeHtml(event.image_url)}" alt="" style="max-height:120px;border-radius:6px"></p>`
-                : '';
+            const evImg = previewThumbHtml(event?.image_url);
             const titleHtml = isView
                 ? 'Evenement bekijken'
                 : isDuplicate
@@ -1372,8 +1383,10 @@
                 ? `${evImg}
                             <input type="file" id="eventImageFile" accept="image/*">
                             <p class="form-hint">Optioneel, max. 9 MB.</p>
-                            <label style="margin-top:8px;display:block">Of URL</label>
-                            <input type="url" id="eventImageUrlInput" placeholder="https://..." value="${escapeHtml(event?.image_url || '')}">`
+                            <div class="form-group__sub">
+                                <label for="eventImageUrlInput">Of URL</label>
+                                <input type="url" id="eventImageUrlInput" placeholder="https://..." value="${escapeHtml(event?.image_url || '')}">
+                            </div>`
                 : (evImg || '<p class="form-hint">Geen afbeelding</p>');
             overlay.innerHTML = `
                 <div class="modal-content">
@@ -1550,10 +1563,10 @@
             const org = data.organization || {};
             const brandVal = profileBrandPickerDefault(org.brand_color);
             const logoBlock = org.logo_url
-                ? `<p style="margin:0 0 8px"><img src="${escapeHtml(org.logo_url)}" alt="Logo" style="max-height:100px;border-radius:8px;border:1px solid #e8ecf4"></p>`
+                ? previewThumbHtml(org.logo_url, 'Logo')
                 : '<p class="form-hint">Nog geen logo.</p>';
             root.innerHTML = `
-                <p class="form-hint" style="margin-bottom:1.25rem;">Dezelfde gegevens als in het beheerderspaneel (behalve <strong>goedkeuring</strong> — dat blijft bij de beheerder).</p>
+                <p class="section-description">Dezelfde gegevens als in het beheerderspaneel (behalve <strong>goedkeuring</strong> — dat blijft bij de beheerder).</p>
 
                 <h3 class="profile-subheading">Basis</h3>
                 <div class="form-group">
@@ -1581,11 +1594,10 @@
                 <div class="form-group">
                     <label for="profile_email">E-mail (contact)</label>
                     <input type="email" id="profile_email" value="${escapeHtml(org.email || '')}" placeholder="Optioneel">
-                    <label class="checkbox-label" style="margin-top:6px;font-size:0.85rem;">
-                        <input type="checkbox" id="profile_show_email" ${org.show_email !== false ? 'checked' : ''}>
-                        Toon e-mailadres publiek in de app
-                    </label>
-                    <small class="text-muted">Als je dit uitschakelt, sla je het e-mailadres intern op maar is het niet zichtbaar voor bezoekers.</small>
+                    ${checkboxFieldHtml('profile_show_email', 'Toon e-mailadres publiek in de app', {
+                        checked: org.show_email !== false,
+                        hint: 'Als je dit uitschakelt, sla je het e-mailadres intern op maar is het niet zichtbaar voor bezoekers.',
+                    })}
                 </div>
                 <div class="form-row">
                     <div class="form-group">
@@ -1627,9 +1639,9 @@
                 <h3 class="profile-subheading">Huisstijl</h3>
                 <div class="form-group">
                     <label for="profile_brand_color_hex">Brandkleur (hex)</label>
-                    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-                        <input type="color" id="profile_brand_color_picker" value="${escapeHtml(brandVal)}" style="width:48px;height:40px;padding:0;border:1px solid #ddd;border-radius:6px;cursor:pointer;" title="Kies kleur">
-                        <input type="text" id="profile_brand_color_hex" placeholder="#RRGGBB" style="flex:1;min-width:140px;" value="${escapeHtml((org.brand_color && String(org.brand_color).trim()) || '')}">
+                    <div class="color-input-row">
+                        <input type="color" id="profile_brand_color_picker" value="${escapeHtml(brandVal)}" title="Kies kleur">
+                        <input type="text" id="profile_brand_color_hex" placeholder="#RRGGBB" value="${escapeHtml((org.brand_color && String(org.brand_color).trim()) || '')}">
                     </div>
                     <p class="form-hint">Wordt o.a. in de app gebruikt bij jullie organisatie.</p>
                 </div>
@@ -1638,18 +1650,20 @@
                     ${logoBlock}
                     <input type="file" id="profileLogoFile" accept="image/*">
                     <p class="form-hint">Nieuw bestand uploaden: kies afbeelding (max. 9 MB) en klik bovenaan op Opslaan.</p>
-                    <label style="margin-top:10px;display:block">Of logo-URL</label>
-                    <input type="url" id="profile_logo_url" placeholder="https://…" value="${escapeHtml(org.logo_url || '')}">
+                    <div class="form-group__sub">
+                        <label for="profile_logo_url">Of logo-URL</label>
+                        <input type="url" id="profile_logo_url" placeholder="https://…" value="${escapeHtml(org.logo_url || '')}">
+                    </div>
                 </div>
 
-                <h3 class="profile-subheading"><i class="fas fa-shield-alt" style="margin-right:6px;"></i>Privacy statement</h3>
+                <h3 class="profile-subheading"><i class="fas fa-shield-alt"></i>Privacy statement</h3>
                 <div class="form-group">
                     <label for="profile_privacy_statement">Tekst voor in de app</label>
                     <textarea id="profile_privacy_statement" rows="6" placeholder="Optioneel">${escapeHtml(org.privacy_statement || '')}</textarea>
                 </div>
 
                 <h3 class="profile-subheading">Account (dashboard-inlog)</h3>
-                <p class="form-hint" style="margin-bottom:1rem;">Wachtwoord voor <strong>dit dashboard</strong>, los van het contact-e-mailadres hierboven.</p>
+                <p class="section-description">Wachtwoord voor <strong>dit dashboard</strong>, los van het contact-e-mailadres hierboven.</p>
                 <div class="form-group">
                     <label for="accountCurrentPassword">Huidig wachtwoord</label>
                     <input type="password" id="accountCurrentPassword" autocomplete="current-password">
@@ -1663,7 +1677,7 @@
                     <input type="password" id="accountNewPassword2" autocomplete="new-password" minlength="6">
                 </div>
                 <button type="button" class="btn btn-secondary" id="changeAccountPasswordBtn"><i class="fas fa-key"></i> Alleen wachtwoord wijzigen</button>
-                <p id="accountPasswordMsg" class="form-hint" style="margin-top:0.75rem;display:none;" aria-live="polite"></p>`;
+                <p id="accountPasswordMsg" class="form-hint" aria-live="polite"></p>`;
 
             const picker = document.getElementById('profile_brand_color_picker');
             const hexEl = document.getElementById('profile_brand_color_hex');
@@ -1687,8 +1701,9 @@
         const setMsg = (text, isError) => {
             if (!msgEl) return;
             msgEl.textContent = text;
-            msgEl.style.display = text ? 'block' : 'none';
-            msgEl.style.color = isError ? '#b00020' : '#1a6b1a';
+            msgEl.classList.toggle('is-visible', !!text);
+            msgEl.classList.toggle('is-error', !!text && isError);
+            msgEl.classList.toggle('is-success', !!text && !isError);
         };
         setMsg('', false);
         const cur = document.getElementById('accountCurrentPassword')?.value || '';
@@ -1837,7 +1852,7 @@
         const sidebar   = document.getElementById('sidebarStats');
         if (!container) return;
 
-        container.innerHTML = '<p class="form-hint" style="padding:1rem">Statistieken laden…</p>';
+        container.innerHTML = '<p class="form-hint state-message">Statistieken laden…</p>';
 
         try {
             const orgId = organization?.id;
@@ -1933,7 +1948,7 @@
                 <div class="overview-events-grid">
                     ${nextEvents.length > 0 ? `
                     <div class="overview-section">
-                        <h4><i class="fas fa-calendar-check" style="color:#2f9e44"></i> Komende evenementen</h4>
+                        <h4><i class="fas fa-calendar-check icon-upcoming"></i> Komende evenementen</h4>
                         <ul class="overview-list">
                             ${nextEvents.map(e => `<li>
                                 <span class="overview-list-title">${escapeHtml(e.title || '')}</span>
@@ -1943,7 +1958,7 @@
                     </div>` : '<div class="overview-section"><p class="form-hint">Geen komende evenementen.</p></div>'}
                     ${pastEvents.length > 0 ? `
                     <div class="overview-section">
-                        <h4><i class="fas fa-calendar-alt" style="color:#868e96"></i> Evenementen geweest</h4>
+                        <h4><i class="fas fa-calendar-alt icon-past"></i> Evenementen geweest</h4>
                         <ul class="overview-list overview-list-past">
                             ${pastEvents.map(e => `<li>
                                 <span class="overview-list-title">${escapeHtml(e.title || '')}</span>
@@ -1981,7 +1996,7 @@
                 el.addEventListener('click', go);
             });
         } catch (err) {
-            container.innerHTML = '<p class="form-hint" style="padding:1rem;color:#c00">Kon statistieken niet laden.</p>';
+            container.innerHTML = '<p class="form-hint state-message state-message--error">Kon statistieken niet laden.</p>';
         }
     }
 
@@ -2075,7 +2090,7 @@
 
     function renderProfileBlocksList(container, blocksError = null) {
         const warn = blocksError
-            ? `<p class="form-hint" style="color:#b45309;margin-bottom:1rem;">${escapeHtml(blocksError)}</p>`
+            ? `<p class="form-hint form-hint--warning">${escapeHtml(blocksError)}</p>`
             : '';
         if (!profileBlocksCache.length) {
             const suggested = (profileBlocksMeta.suggested_types || [])
@@ -2170,26 +2185,25 @@
                         <label>Notitie (optioneel)</label>
                         <input type="text" id="pb_note" value="${escapeHtml(data?.note || '')}" maxlength="500" placeholder="Bijv. alleen op afspraak">
                     </div>
-                    <div class="form-group">
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="pb_always_open" ${data?.always_open ? 'checked' : ''}> Altijd open (24/7)
-                        </label>
-                        <p class="form-hint">Handig voor een mini-bieb, automaat of andere locatie die altijd toegankelijk is.</p>
-                    </div>
-                    <div id="pb_week_schedule" class="form-group" style="${data?.always_open ? 'display:none;' : ''}">
+                    ${checkboxFieldHtml('pb_always_open', 'Altijd open (24/7)', {
+                        checked: !!data?.always_open,
+                        hint: 'Handig voor een mini-bieb, automaat of andere locatie die altijd toegankelijk is.',
+                    })}
+                    <div id="pb_week_schedule" class="form-group${data?.always_open ? ' form-group--hidden' : ''}">
                         <label>Weekschema</label>
                         ${[1, 2, 3, 4, 5, 6, 0].map((day) => {
                             const label = (weekdayLabels || [])[day] || `Dag ${day}`;
                             const d = days.find((x) => Number(x.day) === day) || { day, closed: true };
                             const isOpen = !d.closed;
-                            return `<div class="form-row" style="align-items:center;margin-bottom:8px;gap:8px;">
-                                <span style="min-width:100px;font-weight:500;">${escapeHtml(label)}</span>
-                                <label class="checkbox-label" style="margin:0;white-space:nowrap;">
-                                    <input type="checkbox" class="pb-day-open" data-day="${day}" ${isOpen ? 'checked' : ''}> Open
+                            return `<div class="week-schedule-row">
+                                <span class="week-schedule-row__day">${escapeHtml(label)}</span>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" class="pb-day-open" data-day="${day}" ${isOpen ? 'checked' : ''}>
+                                    <span>Open</span>
                                 </label>
-                                <input type="time" class="pb-day-start" data-day="${day}" value="${escapeHtml(d.open || '09:00')}" ${isOpen ? '' : 'disabled'} style="flex:1;">
-                                <span style="padding:0 2px;">–</span>
-                                <input type="time" class="pb-day-end" data-day="${day}" value="${escapeHtml(d.close || '17:00')}" ${isOpen ? '' : 'disabled'} style="flex:1;">
+                                <input type="time" class="pb-day-start" data-day="${day}" value="${escapeHtml(d.open || '09:00')}" ${isOpen ? '' : 'disabled'}>
+                                <span class="week-schedule-row__sep">–</span>
+                                <input type="time" class="pb-day-end" data-day="${day}" value="${escapeHtml(d.close || '17:00')}" ${isOpen ? '' : 'disabled'}>
                             </div>`;
                         }).join('')}
                     </div>`;
@@ -2304,7 +2318,9 @@
                 <div class="form-group"><label>Locatie</label><input type="text" class="pb-location" value="${escapeHtml(it?.location || '')}"></div>
                 <div class="form-group"><label>Competitie</label><input type="text" class="pb-competition" value="${escapeHtml(it?.competition || '')}"></div>
             </div>
-            <label class="checkbox-label"><input type="checkbox" class="pb-is-home" ${it?.is_home !== false ? 'checked' : ''}> Thuiswedstrijd</label>
+            <div class="form-group checkbox-field">
+                <label class="checkbox-label"><input type="checkbox" class="pb-is-home" ${it?.is_home !== false ? 'checked' : ''}><span>Thuiswedstrijd</span></label>
+            </div>
             ${profileBlockItemActionsHtml()}
         </div>`;
     }
@@ -2352,7 +2368,7 @@
         const alwaysOpenCb = overlay.querySelector('#pb_always_open');
         const weekSchedule = overlay.querySelector('#pb_week_schedule');
         const syncAlwaysOpen = () => {
-            if (weekSchedule) weekSchedule.style.display = alwaysOpenCb?.checked ? 'none' : '';
+            if (weekSchedule) weekSchedule.classList.toggle('form-group--hidden', !!alwaysOpenCb?.checked);
         };
         alwaysOpenCb?.addEventListener('change', syncAlwaysOpen);
         syncAlwaysOpen();
@@ -2482,7 +2498,7 @@
         ).join('');
         const initialType = existing?.block_type || profileBlocksMeta.suggested_types?.[0] || profileBlocksMeta.block_types?.[0]?.id || 'notice';
         overlay.innerHTML = `
-            <div class="modal-content" style="max-width:640px;">
+            <div class="modal-content modal-content--wide">
                 <div class="modal-header">
                     <h3>${existing ? 'Profielblok bewerken' : 'Nieuw profielblok'}</h3>
                     <button type="button" class="modal-close">&times;</button>
@@ -2497,8 +2513,8 @@
                         <select id="pb_block_type" ${existing ? 'disabled' : ''}>${typeOptions}</select>
                         ${existing ? '<p class="form-hint">Het type kan na aanmaken niet meer worden gewijzigd.</p>' : ''}
                     </div>
-                    <label class="checkbox-label"><input type="checkbox" id="pb_visible" ${existing?.is_visible === false ? '' : 'checked'}> Zichtbaar in de app</label>
-                    <div id="pb_form_body" style="margin-top:1rem;"></div>
+                    ${checkboxFieldHtml('pb_visible', 'Zichtbaar in de app', { checked: existing?.is_visible !== false })}
+                    <div id="pb_form_body" class="pb-form-body"></div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary modal-close-btn">Annuleren</button>

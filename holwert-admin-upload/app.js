@@ -1115,7 +1115,7 @@ class HolwertAdmin {
         if (!container) return;
 
         if (pendingContent.length === 0) {
-            container.innerHTML = '<p class="text-muted">Geen wachtende content</p>';
+            container.innerHTML = '<p class="form-hint" style="margin:0;">Geen wachtende content.</p>';
             return;
         }
 
@@ -6057,7 +6057,7 @@ class HolwertAdmin {
         if (!items || items.length === 0) {
             container.innerHTML = `
                 <div class="empty-state">
-                    <i class="fas fa-check-circle" style="font-size: 48px; color: #28a745; margin-bottom: 16px;"></i>
+                    <i class="fas fa-check-circle"></i>
                     <h3>Alles is gemodereerd!</h3>
                     <p>Er is momenteel geen content die wacht op goedkeuring.</p>
                 </div>
@@ -6080,16 +6080,15 @@ class HolwertAdmin {
                 const author = this.escHtml(item.author_name || 'Onbekende gebruiker');
                 const typeNl = this.escHtml(typeLabel(t));
                 return `
-            <div class="moderation-item" style="background: white; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border-left: 4px solid #ffc107;">
-                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+            <article class="moderation-item">
+                <div class="moderation-item__head">
                     <div>
-                        <h4 style="margin: 0; color: #212529; font-size: 18px;">${title}</h4>
-                        <p style="margin: 4px 0 0 0; color: #6c757d; font-size: 14px;">
-                            <i class="fas fa-tag" style="margin-right: 6px;"></i>
-                            ${typeNl}
+                        <h4 class="moderation-item__title">${title}</h4>
+                        <p class="moderation-item__type">
+                            <i class="fas fa-tag"></i>${typeNl}
                         </p>
                     </div>
-                    <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+                    <div class="moderation-item__actions">
                         ${
                             t === 'organization'
                                 ? `<button type="button" class="btn btn-secondary btn-sm" onclick="admin.previewOrganizationFromModeration(${item.id})" title="Volledig organisatieprofiel bekijken">
@@ -6107,25 +6106,27 @@ class HolwertAdmin {
                 </div>
                 ${
                     desc
-                        ? `<div style="margin-bottom: 12px;"><p style="color: #495057; line-height: 1.5; margin: 0;">${desc}</p></div>`
+                        ? `<div class="moderation-item__body"><p style="margin:0;">${desc}</p></div>`
                         : ''
                 }
-                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #6c757d;">
-                    <span><i class="fas fa-user" style="margin-right: 4px;"></i>${author}</span>
-                    <span><i class="fas fa-clock" style="margin-right: 4px;"></i>${
+                <div class="moderation-item__meta">
+                    <span><i class="fas fa-user"></i>${author}</span>
+                    <span><i class="fas fa-clock"></i>${
                         item.created_at ? new Date(item.created_at).toLocaleDateString('nl-NL') : 'Onbekende datum'
                     }</span>
                 </div>
-            </div>`;
+            </article>`;
             })
             .join('');
 
         container.innerHTML = `
-            <div class="moderation-header" style="margin-bottom: 20px;">
-                <h3 style="margin: 0; color: #212529;">Content wacht op moderatie (${items.length})</h3>
-                <p style="margin: 4px 0 0 0; color: #6c757d;">Beoordeel en goedkeur of wijs af</p>
+            <div class="moderation-header">
+                <h3>Content wacht op moderatie (${items.length})</h3>
+                <p>Beoordeel en goedkeur of wijs af.</p>
             </div>
+            <div class="moderation-list">
             ${itemsHtml}
+            </div>
         `;
     }
 
@@ -7182,42 +7183,22 @@ class HolwertAdmin {
                 overlay.innerHTML = `
                     <div class="modal" style="max-width: 600px;">
                         <div class="modal-header">
-                            <h3>Event Preview</h3>
+                            <h3>Evenement bekijken</h3>
                             <button type="button" class="close js-event-modal-close" aria-label="Sluiten">&times;</button>
                         </div>
                         <div class="modal-body" style="padding: 0;">
-                            <div style="background: linear-gradient(135deg, #f8f6f0 0%, #f0ede5 100%); padding: 24px; border-radius: 12px 12px 0 0;">
-                                <h1 style="font-size: 28px; font-weight: 600; color: #212529; margin-bottom: 16px; line-height: 1.3;">${initial.title || 'Geen titel'}</h1>
-                                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
-                                    <div style="display: flex; align-items: center; gap: 8px; color: #6c757d;">
-                                        <i class="fas fa-calendar" style="font-size: 16px;"></i>
-                                        <span style="font-weight: 500;">${eventDate}</span>
-                                    </div>
+                            <div class="admin-event-preview-hero">
+                                <h1>${initial.title || 'Geen titel'}</h1>
+                                <div class="admin-event-preview-meta">
+                                    <div class="admin-event-preview-meta-row"><i class="fas fa-calendar"></i><span>${eventDate}</span></div>
+                                    <div class="admin-event-preview-meta-row"><i class="fas fa-clock"></i><span>${eventTime}${endTime ? ` - ${endTime}` : ''}</span></div>
+                                    <div class="admin-event-preview-meta-row"><i class="fas fa-map-marker-alt"></i><span>${initial.location || 'Locatie onbekend'}</span></div>
+                                    ${initial.organization_name ? `<div class="admin-event-preview-meta-row"><i class="fas fa-building"></i><span>${initial.organization_name}</span></div>` : ''}
                                 </div>
-                                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
-                                    <div style="display: flex; align-items: center; gap: 8px; color: #6c757d;">
-                                        <i class="fas fa-clock" style="font-size: 16px;"></i>
-                                        <span style="font-weight: 500;">${eventTime}${endTime ? ` - ${endTime}` : ''}</span>
-                                    </div>
-                                </div>
-                                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px;">
-                                    <div style="display: flex; align-items: center; gap: 8px; color: #6c757d;">
-                                        <i class="fas fa-map-marker-alt" style="font-size: 16px;"></i>
-                                        <span style="font-weight: 500;">${initial.location || 'Locatie onbekend'}</span>
-                                    </div>
-                                </div>
-                                ${initial.organization_name ? `
-                                    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px;">
-                                        <div style="display: flex; align-items: center; gap: 8px; color: #6c757d;">
-                                            <i class="fas fa-building" style="font-size: 16px;"></i>
-                                            <span style="font-weight: 500;">${initial.organization_name}</span>
-                                        </div>
-                                    </div>
-                                ` : ''}
                             </div>
-                            <div style="padding: 24px;">
-                                <h3 style="font-size: 18px; font-weight: 600; color: #212529; margin-bottom: 12px;">Beschrijving</h3>
-                                <div style="color: #495057; line-height: 1.6; white-space: pre-wrap;">${initial.description || 'Geen beschrijving beschikbaar'}</div>
+                            <div class="admin-event-preview-body">
+                                <h3 class="modal-description-title">Beschrijving</h3>
+                                <div class="modal-description-text">${initial.description || 'Geen beschrijving beschikbaar'}</div>
                             </div>
                         </div>
                         <div class="modal-footer">
