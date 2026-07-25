@@ -6019,21 +6019,11 @@ async function setDorpsomroeperInDb(banner) {
     bannerId: banner.bannerId || '',
     until: banner.until || null,
   });
-  const existing = await executeQuery(
-    'SELECT id FROM content_pages WHERE slug = ? LIMIT 1',
-    [DORPSOMROEPER_SLUG],
+  await executeQuery(
+    `INSERT INTO content_pages (slug, title, content) VALUES (?, ?, ?)
+     ON DUPLICATE KEY UPDATE title = VALUES(title), content = VALUES(content)`,
+    [DORPSOMROEPER_SLUG, 'Dorpsomroeper', content],
   );
-  if (existing.rows?.length > 0) {
-    await executeQuery(
-      'UPDATE content_pages SET title = ?, content = ? WHERE slug = ?',
-      ['Dorpsomroeper', content, DORPSOMROEPER_SLUG],
-    );
-  } else {
-    await executeInsert(
-      'INSERT INTO content_pages (slug, title, content) VALUES (?, ?, ?)',
-      [DORPSOMROEPER_SLUG, 'Dorpsomroeper', content],
-    );
-  }
 }
 
 /**
@@ -6117,6 +6107,7 @@ async function handleDorpsomroeperGet(req, res) {
 
 async function handleDorpsomroeperAdminGet(req, res) {
   try {
+    res.set('Cache-Control', 'no-store');
     const banner = await getDorpsomroeperFromDb();
     if (!banner) {
       return res.json({ enabled: false, text: '', bannerId: '', until: null });
@@ -6161,6 +6152,16 @@ async function handleDorpsomroeperAdminPut(req, res) {
 
     const banner = { enabled, text, bannerId, until };
     await setDorpsomroeperInDb(banner);
+
+    const saved = await getDorpsomroeperFromDb();
+    const savedEnabled = saved?.enabled === true;
+    if (savedEnabled !== enabled) {
+      console.error('[dorpsomroeper] verify mislukt', { wanted: enabled, got: saved?.enabled, saved });
+      return res.status(500).json({
+        error: 'Instelling kon niet worden opgeslagen',
+        message: 'De database bevestigde de wijziging niet. Probeer opnieuw of neem contact op.',
+      });
+    }
 
     const pushQueued = sendPush && enablingFresh;
     if (pushQueued) {

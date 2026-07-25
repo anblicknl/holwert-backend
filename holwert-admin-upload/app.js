@@ -509,6 +509,14 @@ class HolwertAdmin {
         if (saveDorpsomroeperBtn) {
             saveDorpsomroeperBtn.addEventListener('click', () => this.saveDorpsomroeper());
         }
+        const dorpsomroeperEnabled = document.getElementById('dorpsomroeperEnabled');
+        if (dorpsomroeperEnabled) {
+            dorpsomroeperEnabled.addEventListener('change', (e) => {
+                if (!e.target.checked) {
+                    void this.saveDorpsomroeper();
+                }
+            });
+        }
         const afvalOudPapierType = document.getElementById('afvalOudPapierType');
         if (afvalOudPapierType) {
             afvalOudPapierType.addEventListener('change', (e) => {
@@ -5844,6 +5852,7 @@ class HolwertAdmin {
 
         try {
             const response = await fetch(`${this.apiBaseUrl}/admin/settings/dorpsomroeper`, {
+                cache: 'no-store',
                 headers: {
                     Authorization: `Bearer ${this.token}`,
                     'Content-Type': 'application/json',
@@ -5866,6 +5875,7 @@ class HolwertAdmin {
         const untilEl = document.getElementById('dorpsomroeperUntil');
         const sendPushEl = document.getElementById('dorpsomroeperSendPush');
         const msgEl = document.getElementById('dorpsomroeperMsg');
+        const saveBtn = document.getElementById('saveDorpsomroeperBtn');
         if (!enabledEl || !textEl || !untilEl) return;
 
         const enabled = enabledEl.checked;
@@ -5881,9 +5891,15 @@ class HolwertAdmin {
             return;
         }
 
+        if (saveBtn) {
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Opslaan…';
+        }
+
         try {
             const response = await fetch(`${this.apiBaseUrl}/admin/settings/dorpsomroeper`, {
                 method: 'PUT',
+                cache: 'no-store',
                 headers: {
                     Authorization: `Bearer ${this.token}`,
                     'Content-Type': 'application/json',
@@ -5895,6 +5911,7 @@ class HolwertAdmin {
                 throw new Error(data.message || data.error || `HTTP ${response.status}`);
             }
             if (sendPushEl) sendPushEl.checked = false;
+            enabledEl.checked = data.enabled === true;
             if (msgEl) {
                 if (!enabled) {
                     msgEl.textContent = 'Dorpsomroeper uitgeschakeld — mededeling verschijnt niet meer in de app.';
@@ -5915,6 +5932,12 @@ class HolwertAdmin {
             if (msgEl) {
                 msgEl.textContent = 'Opslaan mislukt: ' + (error.message || error);
                 msgEl.className = 'form-message error';
+            }
+            this.showNotification('Dorpsomroeper opslaan mislukt: ' + (error.message || error), 'error');
+        } finally {
+            if (saveBtn) {
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Opslaan';
             }
         }
     }
