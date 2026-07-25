@@ -604,9 +604,9 @@ class HolwertAdmin {
     updateSuperAdminUiVisibility() {
         const role = String(this.currentUser?.role || '').trim().toLowerCase();
         const isSuperAdmin = role === 'superadmin';
-        const card = document.getElementById('dorpsomroeperCard');
-        if (card) {
-            card.style.display = isSuperAdmin ? '' : 'none';
+        const navItem = document.getElementById('dorpsomroeperNavItem');
+        if (navItem) {
+            navItem.style.display = isSuperAdmin ? '' : 'none';
         }
     }
 
@@ -902,6 +902,9 @@ class HolwertAdmin {
                 break;
             case 'found-lost':
                 this.loadFoundLost();
+                break;
+            case 'dorpsomroeper':
+                this.loadDorpsomroeper();
                 break;
             case 'moderation':
                 this.loadModeration();
@@ -5814,9 +5817,6 @@ class HolwertAdmin {
     }
 
     async loadDorpsomroeper() {
-        const card = document.getElementById('dorpsomroeperCard');
-        if (!card || card.style.display === 'none') return;
-
         const enabledEl = document.getElementById('dorpsomroeperEnabled');
         const textEl = document.getElementById('dorpsomroeperText');
         const untilEl = document.getElementById('dorpsomroeperUntil');
@@ -5984,7 +5984,6 @@ class HolwertAdmin {
         try {
             this.updateSuperAdminUiVisibility();
             await this.loadModerationNotificationEmail();
-            await this.loadDorpsomroeper();
 
             const container = document.getElementById('moderationContent');
             if (!container) return;

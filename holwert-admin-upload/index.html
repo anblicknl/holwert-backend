@@ -92,6 +92,10 @@
                     <i class="fas fa-file-alt"></i>
                     <span>Content</span>
                 </li>
+                <li class="nav-item" id="dorpsomroeperNavItem" data-section="dorpsomroeper" style="display: none;">
+                    <i class="fas fa-bullhorn"></i>
+                    <span>Dorpsomroeper</span>
+                </li>
                 <li class="nav-item" data-section="moderation">
                     <i class="fas fa-check-circle"></i>
                     <span>Moderatie</span>
@@ -356,29 +360,12 @@
                 </div>
             </section>
 
-            <!-- Moderation Section -->
-            <section id="moderation" class="content-section">
+            <!-- Dorpsomroeper (alleen superadmin) -->
+            <section id="dorpsomroeper" class="content-section">
                 <div class="section-header">
-                    <h2><i class="fas fa-check-circle"></i> Moderatie</h2>
+                    <h2><i class="fas fa-bullhorn"></i> Dorpsomroeper</h2>
                 </div>
-                <div class="card moderation-settings-card" style="margin-bottom: 24px; padding: 20px;">
-                    <h3 style="margin: 0 0 8px; font-size: 1.05rem;">E-mail bij nieuwe aanmelding</h3>
-                    <p class="section-description" style="margin-bottom: 16px;">
-                        Ontvang een melding wanneer een organisatie zich aanmeldt en op goedkeuring wacht.
-                        Laat leeg om geen mails te versturen.
-                    </p>
-                    <div class="form-group" style="max-width: 420px;">
-                        <label for="moderationNotificationEmail">Notificatie-adres</label>
-                        <input type="email" id="moderationNotificationEmail" class="form-control" placeholder="bijv. beheer@jouwdomein.nl" autocomplete="email">
-                    </div>
-                    <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px;">
-                        <button type="button" id="saveModerationNotificationEmailBtn" class="btn btn-primary">Opslaan</button>
-                        <button type="button" id="testModerationNotificationEmailBtn" class="btn btn-secondary">Testmail versturen</button>
-                        <span id="moderationNotificationEmailMsg" class="form-message" style="margin: 0;"></span>
-                    </div>
-                </div>
-                <div id="dorpsomroeperCard" class="card moderation-settings-card" style="margin-bottom: 24px; padding: 20px; display: none;">
-                    <h3 style="margin: 0 0 8px; font-size: 1.05rem;"><i class="fas fa-bullhorn"></i> Dorpsomroeper</h3>
+                <div id="dorpsomroeperCard" class="card moderation-settings-card" style="padding: 20px;">
                     <p class="section-description" style="margin-bottom: 16px;">
                         Belangrijke dorpsmededeling bovenaan de app. Gebruikers kunnen hem wegklikken; daarna zien ze deze tekst niet meer.
                         Zet <strong>Mededeling actief</strong> uit om hem direct te verbergen — ook voor mensen die de app later openen.
@@ -409,6 +396,29 @@
                     <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
                         <button type="button" id="saveDorpsomroeperBtn" class="btn btn-primary">Opslaan</button>
                         <span id="dorpsomroeperMsg" class="form-message" style="margin: 0;"></span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Moderation Section -->
+            <section id="moderation" class="content-section">
+                <div class="section-header">
+                    <h2><i class="fas fa-check-circle"></i> Moderatie</h2>
+                </div>
+                <div class="card moderation-settings-card" style="margin-bottom: 24px; padding: 20px;">
+                    <h3 style="margin: 0 0 8px; font-size: 1.05rem;">E-mail bij nieuwe aanmelding</h3>
+                    <p class="section-description" style="margin-bottom: 16px;">
+                        Ontvang een melding wanneer een organisatie zich aanmeldt en op goedkeuring wacht.
+                        Laat leeg om geen mails te versturen.
+                    </p>
+                    <div class="form-group" style="max-width: 420px;">
+                        <label for="moderationNotificationEmail">Notificatie-adres</label>
+                        <input type="email" id="moderationNotificationEmail" class="form-control" placeholder="bijv. beheer@jouwdomein.nl" autocomplete="email">
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px;">
+                        <button type="button" id="saveModerationNotificationEmailBtn" class="btn btn-primary">Opslaan</button>
+                        <button type="button" id="testModerationNotificationEmailBtn" class="btn btn-secondary">Testmail versturen</button>
+                        <span id="moderationNotificationEmailMsg" class="form-message" style="margin: 0;"></span>
                     </div>
                 </div>
                 <div class="moderation-tabs">
