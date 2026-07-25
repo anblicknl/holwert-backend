@@ -5915,19 +5915,26 @@ class HolwertAdmin {
             if (msgEl) {
                 if (!enabled) {
                     msgEl.textContent = 'Dorpsomroeper uitgeschakeld — mededeling verschijnt niet meer in de app.';
-                } else if (data.pushQueued) {
-                    msgEl.textContent = 'Mededeling actief. Push wordt verstuurd.';
+                } else if (sendPush && (data.pushSent || 0) > 0) {
+                    msgEl.textContent = `Mededeling actief. Push verstuurd naar ${data.pushSent} apparaat(en).`;
+                } else if (sendPush) {
+                    msgEl.textContent = 'Mededeling opgeslagen. Geen push verstuurd (geen actieve apparaat-tokens).';
+                    msgEl.className = 'form-message error';
                 } else {
                     msgEl.textContent = 'Mededeling opgeslagen (alleen banner in de app).';
                 }
-                msgEl.className = 'form-message success';
+                if (msgEl.className !== 'form-message error') {
+                    msgEl.className = 'form-message success';
+                }
             }
             const note = !enabled
                 ? 'Dorpsomroeper uitgeschakeld'
-                : data.pushQueued
-                    ? 'Dorpsomroeper actief — push verstuurd'
-                    : 'Dorpsomroeper opgeslagen';
-            this.showNotification(note, 'success');
+                : sendPush && (data.pushSent || 0) > 0
+                    ? `Dorpsomroeper actief — push naar ${data.pushSent} apparaat(en)`
+                    : sendPush
+                        ? 'Dorpsomroeper opgeslagen — geen push (geen tokens)'
+                        : 'Dorpsomroeper opgeslagen';
+            this.showNotification(note, sendPush && !(data.pushSent > 0) && enabled ? 'error' : 'success');
         } catch (error) {
             if (msgEl) {
                 msgEl.textContent = 'Opslaan mislukt: ' + (error.message || error);

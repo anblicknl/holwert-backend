@@ -6036,7 +6036,7 @@ async function notifyAllUsersOfDorpsomroeper(text, bannerId) {
   const result = await executeQuery(
     `SELECT pt.id, pt.user_id, pt.token
      FROM push_tokens pt
-     WHERE pt.is_active = true
+     WHERE (pt.is_active = 1 OR pt.is_active = true)
      ORDER BY pt.last_used_at DESC, pt.updated_at DESC, pt.id DESC`,
   );
 
@@ -6086,13 +6086,7 @@ async function notifyAllUsersOfDorpsomroeper(text, bannerId) {
   }
 
   console.log(`📢 Dorpsomroeper push verstuurd naar ${sent} apparaat(en)`);
-  return { success: true, sent };
-}
-
-function queueDorpsomroeperPush(text, bannerId) {
-  void notifyAllUsersOfDorpsomroeper(text, bannerId).catch((err) => {
-    console.error('[dorpsomroeper push] mislukt:', err.message);
-  });
+  return { success: sent > 0, sent };
 }
 
 async function handleDorpsomroeperGet(req, res) {
@@ -6163,12 +6157,14 @@ async function handleDorpsomroeperAdminPut(req, res) {
       });
     }
 
-    const pushQueued = sendPush && enablingFresh;
-    if (pushQueued) {
-      queueDorpsomroeperPush(text, bannerId);
+    const pushAttempted = sendPush && enabled && !!text;
+    let pushSent = 0;
+    if (pushAttempted) {
+      const pushResult = await notifyAllUsersOfDorpsomroeper(text, bannerId);
+      pushSent = pushResult.sent ?? 0;
     }
 
-    res.json({ success: true, ...banner, pushQueued });
+    res.json({ success: true, ...banner, pushQueued: pushAttempted, pushSent });
   } catch (error) {
     console.error('Save dorpsomroeper error:', error);
     res.status(500).json({ error: 'Kon instelling niet opslaan', message: error.message });
@@ -8801,10 +8797,11 @@ async function sendPushNotification(pushTokens, notification) {
     console.log(`✅ Sent ${validTokens.length} push notification(s)`);
     
     // Log results
+    let successCount = validTokens.length;
     if (response.data && response.data.data) {
       const rawTickets = response.data.data;
       const tickets = Array.isArray(rawTickets) ? rawTickets : [rawTickets];
-      const successCount = tickets.filter(t => t.status === 'ok').length;
+      successCount = tickets.filter(t => t.status === 'ok').length;
       const errorCount = tickets.filter(t => t.status === 'error').length;
       
       console.log(`   Success: ${successCount}, Errors: ${errorCount}`);
@@ -8818,8 +8815,8 @@ async function sendPushNotification(pushTokens, notification) {
     }
     
     return {
-      success: true,
-      sent: validTokens.length,
+      success: successCount > 0,
+      sent: successCount,
       response: response.data
     };
   } catch (error) {
