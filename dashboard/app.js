@@ -280,17 +280,58 @@
         }
     }
 
-    (function initPasswordResetFromUrl() {
+    (async function initPasswordResetFromUrl() {
         const p = new URLSearchParams(window.location.search);
         const rt = (p.get('reset') || '').trim();
-        if (rt && /^[a-f0-9]{64}$/i.test(rt)) {
-            showAuthPanel('reset');
-            const hid = document.getElementById('resetPwToken');
-            if (hid) hid.value = rt;
-            const rp1 = document.getElementById('resetPw1');
-            const rp2 = document.getElementById('resetPw2');
-            if (rp1) rp1.value = '';
-            if (rp2) rp2.value = '';
+        if (!rt || !/^[a-f0-9]{64}$/i.test(rt)) return;
+
+        showAuthPanel('reset');
+        const hid = document.getElementById('resetPwToken');
+        if (hid) hid.value = rt;
+        const rp1 = document.getElementById('resetPw1');
+        const rp2 = document.getElementById('resetPw2');
+        if (rp1) rp1.value = '';
+        if (rp2) rp2.value = '';
+
+        const btn = document.getElementById('resetPasswordSubmitBtn');
+        if (btn) btn.disabled = true;
+        if (resetPasswordMsg) {
+            resetPasswordMsg.textContent = 'Link controleren…';
+            resetPasswordMsg.style.color = '';
+            resetPasswordMsg.classList.remove('login-feedback--success', 'login-feedback--error');
+            resetPasswordMsg.classList.add('show');
+        }
+
+        try {
+            const res = await fetch(`${apiBase}/auth/org-validate-reset-token`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: rt }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || data.valid !== true) {
+                throw new Error(
+                    data.error ||
+                        'Deze resetlink is verlopen of al gebruikt. Vraag een nieuwe aan via «Wachtwoord vergeten».',
+                );
+            }
+            if (resetPasswordMsg) {
+                resetPasswordMsg.textContent = '';
+                resetPasswordMsg.classList.remove('show', 'login-feedback--error');
+            }
+            if (btn) btn.disabled = false;
+        } catch (err) {
+            if (hid) hid.value = '';
+            clearResetQueryFromUrl();
+            if (resetPasswordMsg) {
+                resetPasswordMsg.textContent =
+                    err.message ||
+                    'Deze resetlink is verlopen of al gebruikt. Vraag een nieuwe aan via «Wachtwoord vergeten».';
+                resetPasswordMsg.style.color = '';
+                resetPasswordMsg.classList.remove('login-feedback--success');
+                resetPasswordMsg.classList.add('login-feedback--error', 'show');
+            }
+            if (btn) btn.disabled = true;
         }
     })();
 

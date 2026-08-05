@@ -3498,6 +3498,7 @@ async function handleOrgForgotPasswordRequest(req, res) {
       return res.status(200).json(generic);
     }
     await ensureOrgPasswordResetsTable();
+    await purgeExpiredOrgPasswordResets().catch(() => {});
     const rawToken = crypto.randomBytes(32).toString('hex');
     const tokenHash = hashOrgPasswordResetToken(rawToken);
     try {
@@ -3550,8 +3551,13 @@ async function handleOrgResetPasswordRequest(req, res) {
       return res.status(400).json({ error: 'Het wachtwoord moet minimaal 6 tekens zijn.' });
     }
     const tokenHash = hashOrgPasswordResetToken(token);
+    await purgeExpiredOrgPasswordResets().catch(() => {});
     const row = await executeQuery(
-      'SELECT user_id FROM org_password_resets WHERE token_hash = ? AND expires_at > NOW() LIMIT 1',
+      `SELECT user_id FROM org_password_resets
+       WHERE token_hash = ?
+         AND expires_at > NOW()
+         AND created_at > DATE_SUB(NOW(), INTERVAL 1 HOUR)
+       LIMIT 1`,
       [tokenHash],
     );
     if (!row.rows.length) {
@@ -3571,8 +3577,58 @@ async function handleOrgResetPasswordRequest(req, res) {
   }
 }
 
+async function handleOrgValidateResetTokenRequest(req, res) {
+  try {
+    const token =
+      (req.body?.token != null ? String(req.body.token) : '') ||
+      (req.query?.token != null ? String(req.query.token) : '');
+    const trimmed = token.trim();
+    if (!/^[a-f0-9]{64}$/i.test(trimmed)) {
+      return res.status(400).json({ valid: false, error: 'Ongeldige of verlopen link.' });
+    }
+    await purgeExpiredOrgPasswordResets().catch(() => {});
+    const tokenHash = hashOrgPasswordResetToken(trimmed);
+    const row = await executeQuery(
+      `SELECT user_id FROM org_password_resets
+       WHERE token_hash = ?
+         AND expires_at > NOW()
+         AND created_at > DATE_SUB(NOW(), INTERVAL 1 HOUR)
+       LIMIT 1`,
+      [tokenHash],
+    );
+    if (!row.rows.length) {
+      return res.status(400).json({
+        valid: false,
+        error: 'Deze resetlink is verlopen of al gebruikt. Vraag een nieuwe aan via «Wachtwoord vergeten».',
+      });
+    }
+    return res.json({ valid: true });
+  } catch (error) {
+    console.error('org-validate-reset-token error:', error);
+    return res.status(500).json({ valid: false, error: 'Er ging iets mis. Probeer het later opnieuw.' });
+  }
+}
+
+async function purgeExpiredOrgPasswordResets() {
+  await executeQuery(
+    `DELETE FROM org_password_resets
+     WHERE expires_at <= NOW()
+        OR created_at <= DATE_SUB(NOW(), INTERVAL 1 HOUR)`,
+  );
+}
+
+async function purgeExpiredAppPasswordResets() {
+  await executeQuery(
+    `DELETE FROM app_password_resets
+     WHERE expires_at <= NOW()
+        OR created_at <= DATE_SUB(NOW(), INTERVAL 1 HOUR)`,
+  );
+}
+
 app.post('/api/auth/org-reset-password', orgForgotPasswordRateLimiter, handleOrgResetPasswordRequest);
 app.post('/auth/org-reset-password', orgForgotPasswordRateLimiter, handleOrgResetPasswordRequest);
+app.post('/api/auth/org-validate-reset-token', orgForgotPasswordRateLimiter, handleOrgValidateResetTokenRequest);
+app.post('/auth/org-validate-reset-token', orgForgotPasswordRateLimiter, handleOrgValidateResetTokenRequest);
 
 function isAppPasswordResetEligible(u) {
   if (!u) return false;
@@ -3640,6 +3696,7 @@ async function handleAppForgotPasswordRequest(req, res) {
       return res.status(200).json(generic);
     }
     await ensureAppPasswordResetsTable();
+    await purgeExpiredAppPasswordResets().catch(() => {});
     const rawCode = String(crypto.randomInt(100000, 1000000));
     const tokenHash = hashOrgPasswordResetToken(rawCode);
     try {
@@ -3693,9 +3750,14 @@ async function handleAppResetPasswordRequest(req, res) {
     if (!user || !isAppPasswordResetEligible(user)) {
       return res.status(400).json({ error: 'Ongeldige of verlopen code. Vraag een nieuwe aan via «Wachtwoord vergeten».' });
     }
+    await purgeExpiredAppPasswordResets().catch(() => {});
     const tokenHash = hashOrgPasswordResetToken(code);
     const row = await executeQuery(
-      'SELECT id FROM app_password_resets WHERE user_id = ? AND token_hash = ? AND expires_at > NOW() LIMIT 1',
+      `SELECT id FROM app_password_resets
+       WHERE user_id = ? AND token_hash = ?
+         AND expires_at > NOW()
+         AND created_at > DATE_SUB(NOW(), INTERVAL 1 HOUR)
+       LIMIT 1`,
       [user.id, tokenHash],
     );
     if (!row.rows.length) {
