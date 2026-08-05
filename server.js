@@ -3574,6 +3574,151 @@ async function handleOrgResetPasswordRequest(req, res) {
 app.post('/api/auth/org-reset-password', orgForgotPasswordRateLimiter, handleOrgResetPasswordRequest);
 app.post('/auth/org-reset-password', orgForgotPasswordRateLimiter, handleOrgResetPasswordRequest);
 
+function isAppPasswordResetEligible(u) {
+  if (!u) return false;
+  if (!isMysqlUserActive(u.is_active)) return false;
+  const role = String(u.role || '').toLowerCase();
+  if (role === 'admin' || role === 'superadmin' || role === 'editor') return false;
+  const oid = u.organization_id != null ? parseInt(u.organization_id, 10) : NaN;
+  if (!Number.isNaN(oid) && oid > 0) return false;
+  return true;
+}
+
+async function findUserRowForAppPasswordReset(emailNormalized) {
+  let userResult;
+  try {
+    userResult = await executeQuery(
+      'SELECT id, email, role, is_active, organization_id FROM users WHERE LOWER(TRIM(email)) = ? LIMIT 1',
+      [emailNormalized],
+    );
+  } catch (colErr) {
+    userResult = await executeQuery(
+      'SELECT id, email, role, is_active FROM users WHERE LOWER(TRIM(email)) = ? LIMIT 1',
+      [emailNormalized],
+    );
+  }
+  return userResult.rows?.[0] ?? null;
+}
+
+async function sendAppPasswordResetEmailViaHosting({ toEmail, code }) {
+  const esc = (s) =>
+    String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+
+  const subject = 'Holwert: wachtwoord wijzigen (app)';
+  const html = `<p>Je hebt een nieuw wachtwoord aangevraagd voor de <strong>Holwert-app</strong>.</p>
+<p>Je code: <strong style="font-size:1.35em;letter-spacing:0.12em">${esc(code)}</strong></p>
+<p>Vul deze code in de app in bij «Wachtwoord vergeten» en kies een nieuw wachtwoord.</p>
+<p>Deze code is <strong>1 uur</strong> geldig. Als je dit niet zelf hebt aangevraagd, kun je deze e-mail negeren.</p>`;
+  const text = `Je hebt een nieuw wachtwoord aangevraagd voor de Holwert-app.
+
+Je code: ${code}
+
+Vul deze code in de app in bij Wachtwoord vergeten en kies een nieuw wachtwoord.
+Deze code is 1 uur geldig. Als je dit niet zelf hebt aangevraagd, kun je deze e-mail negeren.`;
+
+  return sendMailViaHosting({ toEmail, subject, html, text });
+}
+
+async function handleAppForgotPasswordRequest(req, res) {
+  const generic = {
+    message:
+      'Als dit e-mailadres bij ons bekend is, ontvang je zo meteen een e-mail met een code om je wachtwoord te vernieuwen. Controleer ook je spam-map.',
+  };
+  try {
+    const emailRaw =
+      req.body?.email != null ? String(req.body.email).trim().toLowerCase() : '';
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailRaw)) {
+      return res.status(200).json(generic);
+    }
+    const user = await findUserRowForAppPasswordReset(emailRaw);
+    if (!user || !isAppPasswordResetEligible(user)) {
+      console.log('[app-forgot-password] geen reset-mail (onbekend of geen app-account):', emailRaw);
+      return res.status(200).json(generic);
+    }
+    await ensureAppPasswordResetsTable();
+    const rawCode = String(crypto.randomInt(100000, 1000000));
+    const tokenHash = hashOrgPasswordResetToken(rawCode);
+    try {
+      await executeQuery('DELETE FROM app_password_resets WHERE user_id = ?', [user.id]);
+    } catch (delErr) {
+      if (!isMysqlMissingTableError(delErr)) throw delErr;
+      await ensureAppPasswordResetsTable();
+    }
+    await executeInsert(
+      'INSERT INTO app_password_resets (user_id, token_hash, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR))',
+      [user.id, tokenHash],
+    );
+    const sent = await sendAppPasswordResetEmailViaHosting({ toEmail: user.email, code: rawCode });
+    if (!sent.ok) {
+      await executeQuery('DELETE FROM app_password_resets WHERE user_id = ?', [user.id]).catch(() => {});
+      console.warn('[app-forgot-password] geen e-mail verstuurd:', sent.reason, 'naar', user.email);
+    } else {
+      console.log('[app-forgot-password] reset-code verstuurd naar', user.email);
+    }
+    return res.status(200).json(generic);
+  } catch (error) {
+    const msg = String(error?.message || '');
+    if (/disallowed table/i.test(msg) && /app_password_resets/i.test(msg)) {
+      console.error('app-forgot-password: app_password_resets niet op proxy-whitelist');
+      return res.status(503).json({
+        error: 'Wachtwoord-reset is tijdelijk niet beschikbaar. De beheerder moet db-proxy.php bijwerken (tabel app_password_resets).',
+        message: msg,
+      });
+    }
+    console.error('app-forgot-password error:', error);
+    return res.status(500).json({
+      error: 'Er ging iets mis. Probeer het later opnieuw.',
+      message: error.message,
+    });
+  }
+}
+
+async function handleAppResetPasswordRequest(req, res) {
+  try {
+    const emailRaw =
+      req.body?.email != null ? String(req.body.email).trim().toLowerCase() : '';
+    const code = req.body?.code != null ? String(req.body.code).trim().replace(/\s+/g, '') : '';
+    const password = req.body?.password != null ? String(req.body.password) : '';
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailRaw) || !/^\d{6}$/.test(code)) {
+      return res.status(400).json({ error: 'Ongeldige code of e-mailadres.' });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'Het wachtwoord moet minimaal 6 tekens zijn.' });
+    }
+    const user = await findUserRowForAppPasswordReset(emailRaw);
+    if (!user || !isAppPasswordResetEligible(user)) {
+      return res.status(400).json({ error: 'Ongeldige of verlopen code. Vraag een nieuwe aan via «Wachtwoord vergeten».' });
+    }
+    const tokenHash = hashOrgPasswordResetToken(code);
+    const row = await executeQuery(
+      'SELECT id FROM app_password_resets WHERE user_id = ? AND token_hash = ? AND expires_at > NOW() LIMIT 1',
+      [user.id, tokenHash],
+    );
+    if (!row.rows.length) {
+      return res.status(400).json({ error: 'Ongeldige of verlopen code. Vraag een nieuwe aan via «Wachtwoord vergeten».' });
+    }
+    const hashed = await bcrypt.hash(password, 10);
+    await executeQuery('UPDATE users SET password_hash = ? WHERE id = ?', [hashed, user.id]);
+    await executeQuery('DELETE FROM app_password_resets WHERE user_id = ?', [user.id]);
+    return res.json({ message: 'Je wachtwoord is bijgewerkt. Je kunt nu inloggen.' });
+  } catch (error) {
+    console.error('app-reset-password error:', error);
+    return res.status(500).json({
+      error: 'Er ging iets mis. Probeer het later opnieuw.',
+      message: error.message,
+    });
+  }
+}
+
+app.post('/api/auth/forgot-password', orgForgotPasswordRateLimiter, handleAppForgotPasswordRequest);
+app.post('/auth/forgot-password', orgForgotPasswordRateLimiter, handleAppForgotPasswordRequest);
+app.post('/api/auth/reset-password', orgForgotPasswordRateLimiter, handleAppResetPasswordRequest);
+app.post('/auth/reset-password', orgForgotPasswordRateLimiter, handleAppResetPasswordRequest);
+
 // Register handler (gebruikt voor beide route-varianten i.v.m. Vercel path-handling)
 const handleRegister = async (req, res) => {
   try {
@@ -6870,6 +7015,11 @@ app.put('/api/org/me/password', authenticateToken, requireOrgPortal, async (req,
     } catch (e) {
       /* org_password_resets kan ontbreken op oudere omgevingen */
     }
+    try {
+      await executeQuery('DELETE FROM app_password_resets WHERE user_id = ?', [userId]);
+    } catch (e) {
+      /* app_password_resets kan ontbreken op oudere omgevingen */
+    }
     return res.json({
       message: 'Je wachtwoord is bijgewerkt. Gebruik bij de volgende keer inloggen je nieuwe wachtwoord.',
     });
@@ -9276,6 +9426,35 @@ async function ensureOrgPasswordResetsTable() {
     console.log('✅ org_password_resets tabel aangemaakt');
   } catch (e) {
     console.error('ensureOrgPasswordResetsTable create:', e.message);
+    throw e;
+  }
+}
+
+async function ensureAppPasswordResetsTable() {
+  try {
+    await executeQuery('SELECT 1 FROM app_password_resets LIMIT 1');
+    return;
+  } catch (probeErr) {
+    if (!isMysqlMissingTableError(probeErr)) {
+      console.warn('ensureAppPasswordResetsTable probe:', probeErr.message);
+      return;
+    }
+  }
+  try {
+    await executeQuery(`
+      CREATE TABLE IF NOT EXISTS app_password_resets (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        token_hash CHAR(64) NOT NULL,
+        expires_at DATETIME NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_app_password_resets_user (user_id),
+        KEY idx_app_password_resets_token (token_hash)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    console.log('✅ app_password_resets tabel aangemaakt');
+  } catch (e) {
+    console.error('ensureAppPasswordResetsTable create:', e.message);
     throw e;
   }
 }
