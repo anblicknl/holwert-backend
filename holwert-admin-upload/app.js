@@ -298,6 +298,11 @@ class HolwertAdmin {
             });
         }
 
+        const migrateOrgLogosBtn = document.getElementById('migrateOrgLogosBtn');
+        if (migrateOrgLogosBtn) {
+            migrateOrgLogosBtn.addEventListener('click', () => this.migrateEmbeddedLogos({ manual: true }));
+        }
+
         const addOrgDashboardAccountBtn = document.getElementById('addOrgDashboardAccountBtn');
         if (addOrgDashboardAccountBtn) {
             addOrgDashboardAccountBtn.addEventListener('click', () => {
@@ -2173,6 +2178,10 @@ class HolwertAdmin {
                     const sorted = this._sortOrganizationsByName(data.organizations);
                     this.organizationsList = sorted;
                     this.displayOrganizations(sorted);
+                    if (!this._logoMigrateDone) {
+                        this._logoMigrateDone = true;
+                        void this.migrateEmbeddedLogos({ silent: true });
+                    }
                 } else {
                     console.log('No organizations found in response');
                     this.organizationsList = [];
@@ -2206,6 +2215,60 @@ class HolwertAdmin {
             const container = document.getElementById('organizationsTableBody');
             if (container) {
                 container.innerHTML = `<tr><td colspan="5" class="empty-message">Fout: ${error.message}</td></tr>`;
+            }
+        }
+    }
+
+    async migrateEmbeddedLogos({ silent = false, manual = false } = {}) {
+        if (!this.token || this._logoMigrateRunning) return 0;
+        this._logoMigrateRunning = true;
+        const btn = document.getElementById('migrateOrgLogosBtn');
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Logo\'s verlichten…';
+        }
+        let converted = 0;
+        try {
+            for (let i = 0; i < 8; i++) {
+                const response = await fetch(`${this.apiBaseUrl}/admin/organizations/migrate-logos`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${this.token}`,
+                    },
+                    body: JSON.stringify({ limit: 6 }),
+                });
+                if (response.status === 404) {
+                    this._logoMigrateDone = false;
+                    if (manual) this.showNotification('API is nog aan het bijwerken. Probeer zo opnieuw.', 'warning');
+                    return 0;
+                }
+                if (!response.ok) {
+                    const err = await response.json().catch(() => ({}));
+                    throw new Error(err.message || err.error || `HTTP ${response.status}`);
+                }
+                const data = await response.json();
+                converted += Array.isArray(data.converted) ? data.converted.length : 0;
+                if (!data.remaining) break;
+            }
+            if (converted > 0) {
+                this.showNotification(`${converted} logo's omgezet naar lichte bestanden.`, 'success');
+                await this.loadOrganizations();
+            } else if (manual && !silent) {
+                this.showNotification('Alle logo\'s staan al als bestand op de server.', 'success');
+            }
+            return converted;
+        } catch (error) {
+            console.warn('migrateEmbeddedLogos:', error);
+            if (manual || !silent) {
+                this.showNotification(`Logo's omzetten mislukt: ${error.message}`, 'error');
+            }
+            return converted;
+        } finally {
+            this._logoMigrateRunning = false;
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-compress"></i> Logo\'s verlichten';
             }
         }
     }

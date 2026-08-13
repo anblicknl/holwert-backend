@@ -1413,6 +1413,59 @@ function filenameWithImageMimeExt(filename, mime) {
   return `${name}.${ext}`;
 }
 
+async function migrateOneEmbeddedOrgLogo(org) {
+  const parsed = parseImageDataUrl(org.logo_url);
+  if (!parsed) throw new Error('Ongeldige afbeeldingsdata');
+  const buffer = Buffer.from(parsed.base64Data, 'base64');
+  if (!buffer.length || buffer.length > 12 * 1024 * 1024) {
+    throw new Error('Logo leeg of te groot');
+  }
+  const filename = `org-logo-${org.id}-${Date.now()}.${extFromImageMime(parsed.mime)}`;
+  const imageUrl = await uploadImageBufferToSharedHosting(
+    buffer,
+    filename,
+    parsed.mime,
+    folderSegmentForOrgUpload(org.id),
+  );
+  await executeQuery(
+    'UPDATE organizations SET logo_url = ?, updated_at = NOW() WHERE id = ?',
+    [imageUrl, org.id],
+  );
+  return imageUrl;
+}
+
+async function migrateEmbeddedOrganizationLogos(limit = 6) {
+  const cap = Math.min(Math.max(parseInt(limit, 10) || 6, 1), 12);
+  const result = await executeQuery(
+    `SELECT id, name, logo_url FROM organizations
+     WHERE logo_url LIKE 'data:image%'
+     ORDER BY id ASC
+     LIMIT ?`,
+    [cap],
+  );
+  const rows = result.rows || [];
+  const converted = [];
+  const failed = [];
+  for (const org of rows) {
+    try {
+      const imageUrl = await migrateOneEmbeddedOrgLogo(org);
+      converted.push({ id: org.id, name: org.name, imageUrl });
+    } catch (err) {
+      console.error('[migrate-logos]', org.id, err);
+      failed.push({ id: org.id, name: org.name, error: err.message || String(err) });
+    }
+  }
+  const remainResult = await executeQuery(
+    `SELECT COUNT(*) AS total FROM organizations WHERE logo_url LIKE 'data:image%'`,
+  );
+  const remaining = parseInt(remainResult.rows?.[0]?.total || 0, 10);
+  if (converted.length) {
+    invalidateCache('/api/organizations');
+    invalidateCache('/api/admin/organizations');
+  }
+  return { converted, failed, remaining };
+}
+
 /** Upload bestand naar holwert.appenvloed.com/upload (org-submap: twee cijfers, bv. 07 of 00). */
 async function uploadFileBufferToSharedHosting(buffer, originalname, mimetype, orgFolderTwoDigits) {
   const form = new FormData();
@@ -5062,6 +5115,26 @@ app.get('/api/admin/organizations', authenticateToken, requireAdmin, async (req,
   }
 });
 
+// Zet ingesloten base64-logo's om naar bestanden op de hosting (lichte URL in de app-lijst).
+app.post('/api/admin/organizations/migrate-logos', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const limit = req.body && req.body.limit != null ? req.body.limit : 6;
+    const result = await migrateEmbeddedOrganizationLogos(limit);
+    res.json({
+      message: result.converted.length
+        ? `${result.converted.length} logo's omgezet`
+        : 'Geen ingesloten logos meer om te zetten',
+      ...result,
+    });
+  } catch (error) {
+    console.error('[POST /api/admin/organizations/migrate-logos]', error);
+    res.status(500).json({
+      error: 'Omzetten van logos mislukt',
+      message: error.message,
+    });
+  }
+});
+
 // Create organization (admin)
 app.post('/api/admin/organizations', authenticateToken, requireAdmin, async (req, res) => {
   try {
@@ -8242,7 +8315,18 @@ app.get('/api/organizations/:id', async (req, res) => {
       return res.status(404).json({ error: 'Organization not found' });
     }
 
-    res.json({ organization: result.rows[0] });
+    const organization = result.rows[0];
+    if (typeof organization.logo_url === 'string' && organization.logo_url.startsWith('data:image')) {
+      try {
+        organization.logo_url = await migrateOneEmbeddedOrgLogo(organization);
+        invalidateCache('/api/organizations');
+        invalidateCache('/api/admin/organizations');
+      } catch (migrateErr) {
+        console.error('[organizations/:id] logo-migrate', organization.id, migrateErr);
+      }
+    }
+
+    res.json({ organization });
   } catch (error) {
     console.error('Error fetching organization detail:', error);
     res.status(500).json({ error: 'Failed to fetch organization detail', message: error.message });
