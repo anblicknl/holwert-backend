@@ -82,6 +82,33 @@ function stripHtmlForPreview(input, maxLen = 120) {
   return maxLen > 0 && text.length > maxLen ? text.slice(0, maxLen) : text;
 }
 
+/** Lijst-endpoints: geen data:-URI's (vaak 50–100 KB per logo → trage app). */
+function listSafeMediaUrl(url) {
+  if (url == null) return null;
+  const s = String(url).trim();
+  if (!s || /^data:/i.test(s)) return null;
+  return s;
+}
+
+function sanitizeListNewsItem(article) {
+  if (!article || typeof article !== 'object') return article;
+  return {
+    ...article,
+    image_url: listSafeMediaUrl(article.image_url),
+    organization_logo: listSafeMediaUrl(article.organization_logo),
+  };
+}
+
+function sanitizeListOrganization(org) {
+  if (!org || typeof org !== 'object') return org;
+  const logo = listSafeMediaUrl(org.logo_url);
+  return {
+    ...org,
+    logo_url: logo,
+    has_logo: logo != null || org.has_logo === true,
+  };
+}
+
 /**
  * Web/HTML-weergave: behoud regeleinden uit textarea (plain text of gemengd met HTML).
  * Zelfde idee als prepareRichTextHtml in de mobile app.
@@ -1649,17 +1676,20 @@ app.get('/api/app/bootstrap', async (req, res) => {
       executeQuery(countNewsQuery, [])
     ]);
 
-    const newsRows = (newsResult.rows || []).map((article) => ({
-      ...article,
-      excerpt: stripHtmlForPreview(article.excerpt, 120),
-    }));
+    const newsRows = (newsResult.rows || []).map((article) =>
+      sanitizeListNewsItem({
+        ...article,
+        excerpt: stripHtmlForPreview(article.excerpt, 120),
+      }),
+    );
 
     let orgRows = orgResult.rows || [];
-    // Laat logo_url ongemoeid; de mobiele app normaliseert zelf base64 -> file:// via ApiService
-    orgRows = orgRows.map((o) => ({
-      ...o,
-      description: typeof o.description === 'string' ? o.description.slice(0, 200) : o.description
-    }));
+    orgRows = orgRows.map((o) =>
+      sanitizeListOrganization({
+        ...o,
+        description: typeof o.description === 'string' ? o.description.slice(0, 200) : o.description,
+      }),
+    );
 
     const totalNews = parseInt(countResult.rows?.[0]?.total || 0);
     res.set('Cache-Control', 'public, max-age=30');
@@ -1860,14 +1890,14 @@ app.get('/api/news', async (req, res) => {
       const cleanExcerpt = minimalMode
         ? stripHtmlForPreview(article.excerpt, 120)
         : stripHtmlForPreview(article.excerpt, 0);
-      const item = { ...article, excerpt: cleanExcerpt };
+      const item = sanitizeListNewsItem({ ...article, excerpt: cleanExcerpt });
       if (!minimalMode) {
         item.image_variants = {
-          original: article.image_url,
-          full: article.image_url,
-          large: article.image_url,
-          medium: article.image_url,
-          thumbnail: article.image_url
+          original: item.image_url,
+          full: item.image_url,
+          large: item.image_url,
+          medium: item.image_url,
+          thumbnail: item.image_url
         };
       }
       return item;
@@ -2806,7 +2836,7 @@ app.get('/api/news/head', async (req, res) => {
     const newsParams = [];
     const newsQuery = `
       SELECT n.id, n.title,
-        LEFT(COALESCE(n.content, ''), 500)) as excerpt,
+        LEFT(COALESCE(n.content, ''), 500) as excerpt,
         n.image_url, n.created_at, n.updated_at,
         COALESCE(n.published_at, n.created_at) as published_at,
         n.organization_id, n.category, n.custom_category,
@@ -2822,10 +2852,12 @@ app.get('/api/news/head', async (req, res) => {
     newsParams.push(limit);
 
     const newsResult = await executeQuery(newsQuery, newsParams);
-    const newsRows = (newsResult.rows || []).map((article) => ({
-      ...article,
-      excerpt: stripHtmlForPreview(article.excerpt, 120),
-    }));
+    const newsRows = (newsResult.rows || []).map((article) =>
+      sanitizeListNewsItem({
+        ...article,
+        excerpt: stripHtmlForPreview(article.excerpt, 120),
+      }),
+    );
 
     res.set('Cache-Control', 'public, max-age=30');
     res.json({ news: newsRows });
@@ -3007,7 +3039,7 @@ app.post('/api/news', authenticateToken, async (req, res) => {
     let isPublished = false;
 
     // Admin mag direct publiceren op basis van aangevinkte optie
-    if (req.user?.role === 'admin') {
+    if (req.user?.role === 'admin' || req.user?.role === 'superadmin') {
       isPublished = req.body.is_published === true;
     } else if (organization_id) {
       // Niet-admin: publiceer alleen meteen als organisatie goedgekeurd is
@@ -4901,11 +4933,12 @@ app.get('/api/admin/organizations', authenticateToken, requireAdmin, async (req,
   try {
     await ensureOrgColumns();
     await pruneOrphanFollows();
-    const { page = 1, limit = 20, status } = req.query;
+    const { page = 1, limit = 20, status, lite } = req.query;
     const offset = (page - 1) * limit;
+    const liteMode = lite === '1' || lite === 'true';
     
     // Check cache
-    const cacheKey = getCacheKey('/api/admin/organizations', { page, limit, status });
+    const cacheKey = getCacheKey('/api/admin/organizations', { page, limit, status, lite: liteMode });
     const cached = getCached(cacheKey);
     
     if (cached) {
@@ -4914,6 +4947,15 @@ app.get('/api/admin/organizations', authenticateToken, requireAdmin, async (req,
     }
     
     console.log('[Organizations] Fetching fresh data from database');
+
+    const followerSelect = liteMode
+      ? '0 AS followers_count'
+      : `(
+          SELECT COUNT(DISTINCT f.user_id)
+          FROM follows f
+          INNER JOIN users u ON u.id = f.user_id
+          WHERE f.organization_id = o.id
+        ) AS followers_count`;
 
     let query = `
       SELECT 
@@ -4925,12 +4967,7 @@ app.get('/api/admin/organizations', authenticateToken, requireAdmin, async (req,
         o.is_approved, 
         o.created_at,
         o.logo_url,
-        (
-          SELECT COUNT(DISTINCT f.user_id)
-          FROM follows f
-          INNER JOIN users u ON u.id = f.user_id
-          WHERE f.organization_id = o.id
-        ) AS followers_count
+        ${followerSelect}
       FROM organizations o
       WHERE 1=1
     `;
@@ -8282,12 +8319,15 @@ app.get('/api/organizations', async (req, res) => {
     const result = await executeQuery(query, params);
     let rows = result.rows || [];
 
-    // Bij minimal: alleen description inkorten; logo_url behouden voor weergave in app
     if (minimal === 'true') {
-      rows = rows.map((o) => ({
-        ...o,
-        description: typeof o.description === 'string' ? o.description.slice(0, 200) : o.description
-      }));
+      rows = rows.map((o) =>
+        sanitizeListOrganization({
+          ...o,
+          description: typeof o.description === 'string' ? o.description.slice(0, 200) : o.description,
+        }),
+      );
+    } else {
+      rows = rows.map((o) => sanitizeListOrganization(o));
     }
 
     // Get total count (only if not minimal, to save time)

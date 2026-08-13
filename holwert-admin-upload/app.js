@@ -3214,8 +3214,8 @@ class HolwertAdmin {
     // ===== NEWS MANAGEMENT =====
     async loadNews() {
         try {
-            console.log('🔄 Loading news from:', `${this.apiBaseUrl}/admin/news`);
-            const response = await fetch(`${this.apiBaseUrl}/admin/news`, {
+            console.log('🔄 Loading news from:', `${this.apiBaseUrl}/admin/news?minimal=true&limit=50`);
+            const response = await fetch(`${this.apiBaseUrl}/admin/news?minimal=true&limit=50`, {
                 headers: {
                     'Authorization': `Bearer ${this.token}`
                 }
@@ -3496,6 +3496,11 @@ class HolwertAdmin {
         return `${this.apiBaseUrl}/admin/organizations?${q.toString()}`;
     }
 
+    _adminOrganizationsLiteUrl() {
+        const q = new URLSearchParams({ limit: '200', lite: '1' });
+        return `${this.apiBaseUrl}/admin/organizations?${q.toString()}`;
+    }
+
     async _fetchAdminOrganizationsList(extraParams = {}) {
         if (!this.token) return [];
         try {
@@ -3517,19 +3522,15 @@ class HolwertAdmin {
             console.log('🎬 openNewsModal called');
             console.log('📝 Mode:', mode);
             console.log('🆔 News ID:', newsId);
-            
-            // Laad organizaties
-            let organizations = [];
-            try {
-                console.log('Fetching organizations for news modal...');
-                organizations = await this._fetchAdminOrganizationsList();
-                console.log('Organizations loaded:', organizations.length);
-                if (!organizations.length) {
-                    this.showNotification('Kon organisaties niet laden. Organisatie dropdown is mogelijk leeg.', 'warning');
-                }
-            } catch (error) {
-                console.error('Error loading organizations:', error);
-                this.showNotification('Fout bij laden organisaties. Organisatie dropdown is mogelijk leeg.', 'warning');
+
+            document.querySelectorAll('.modal-overlay').forEach((el) => {
+                if (el.querySelector('#newsForm')) el.remove();
+            });
+
+            let organizations = Array.isArray(this.organizationsList) ? this.organizationsList : [];
+            if (!organizations.length) {
+                organizations = await this._fetchAdminOrganizationsList({ lite: '1' });
+                if (organizations.length) this.organizationsList = organizations;
             }
 
             // Als edit mode, haal nieuws artikel op (vóór category-selectie)
@@ -3567,6 +3568,15 @@ class HolwertAdmin {
             const isEdit = mode === 'edit' && article;
             const title = isEdit ? 'Nieuws Bewerken' : 'Nieuw Nieuws Artikel';
             const buttonText = isEdit ? 'Bijwerken' : 'Opslaan';
+            const escAttr = (s) =>
+                String(s ?? '')
+                    .replace(/&/g, '&amp;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/</g, '&lt;');
+            const escTextarea = (s) =>
+                String(s ?? '')
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;');
             
             // Publicatiedatum/tijd: API levert published_at als COALESCE(published_at, created_at) — die eerst gebruiken.
             // Geen toISOString() voor de datum (UTC verschuift de kalenderdag); lokale velden via helpers.
@@ -3595,7 +3605,7 @@ class HolwertAdmin {
                             <div class="form-group">
                                 <label for="newsTitle">Titel *</label>
                                 <input type="text" id="newsTitle" name="title" 
-                                    value="${article?.title || ''}" 
+                                    value="${escAttr(article?.title || '')}" 
                                     placeholder="Titel van het artikel" required>
                             </div>
                             
@@ -3623,7 +3633,7 @@ class HolwertAdmin {
                                         <option value="">Geen organisatie</option>
                                         ${organizations.map(org => `
                                             <option value="${org.id}" ${article?.organization_id == org.id ? 'selected' : ''}>
-                                                ${org.name}
+                                                ${escAttr(org.name)}
                                             </option>
                                         `).join('')}
                                     </select>
@@ -3687,7 +3697,7 @@ class HolwertAdmin {
                                     <button type="button" class="editor-btn" onclick="adminFormatText('newsArticleContent','link')" title="Link invoegen">&#128279;</button>
                                 </div>
                                 <textarea id="newsArticleContent" name="content" rows="10" 
-                                    placeholder="De volledige inhoud van het artikel..." required>${article?.content || ''}</textarea>
+                                    placeholder="De volledige inhoud van het artikel..." required>${escTextarea(article?.content || '')}</textarea>
                                 <small class="form-hint">Selecteer tekst en klik een knop om op te maken. HTML-tags worden opgeslagen en getoond in de app. De eerste regels verschijnen automatisch in het nieuwsoverzicht.</small>
                             </div>
 
@@ -3719,7 +3729,7 @@ class HolwertAdmin {
                         <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">
                             Annuleren
                         </button>
-                        <button class="btn btn-primary" onclick="admin.saveNews(${newsId ? `'${newsId}'` : 'null'})">
+                        <button type="button" class="btn btn-primary" onclick="admin.saveNews(${newsId ? `'${newsId}'` : 'null'}, this)">
                             ${buttonText}
                         </button>
                     </div>
@@ -3849,31 +3859,36 @@ class HolwertAdmin {
         });
     }
 
-    async saveNews(newsId) {
+    async saveNews(newsId, triggerEl) {
         try {
             // Parse newsId correct (kan 'null' string zijn)
             const actualNewsId = newsId && newsId !== 'null' && newsId !== null ? parseInt(newsId) : null;
+            const overlay =
+                (triggerEl && triggerEl.closest && triggerEl.closest('.modal-overlay')) ||
+                document.querySelector('#newsForm')?.closest('.modal-overlay') ||
+                document;
+            const field = (id) => overlay.querySelector(`#${id}`);
             
-            const title = (document.getElementById('newsTitle').value || '').trim();
-            const content = (document.getElementById('newsArticleContent').value || '').trim();
-            const category = document.getElementById('newsCategory')?.value || 'dorpsnieuws';
+            const title = (field('newsTitle')?.value || '').trim();
+            const content = (field('newsArticleContent')?.value || '').trim();
+            const category = field('newsCategory')?.value || 'dorpsnieuws';
             const custom_category = category === 'overig'
-                ? ((document.getElementById('newsCustomCategory')?.value || '').trim() || null)
+                ? ((field('newsCustomCategory')?.value || '').trim() || null)
                 : null;
-            const organization_id_val = document.getElementById('newsOrganization')?.value;
+            const organization_id_val = field('newsOrganization')?.value;
             const organization_id = (organization_id_val && organization_id_val !== '' && organization_id_val !== '0') 
                 ? parseInt(organization_id_val) 
                 : null;
 
-            const pubDateVal = (document.getElementById('newsPubDate')?.value || '').trim();
-            const pubTimeRaw = (document.getElementById('newsPubTime')?.value || '').trim() || '12:00';
+            const pubDateVal = (field('newsPubDate')?.value || '').trim();
+            const pubTimeRaw = (field('newsPubTime')?.value || '').trim() || '12:00';
             const timeParts = pubTimeRaw.split(':');
             const hh = String(Math.min(23, Math.max(0, parseInt(timeParts[0], 10) || 0))).padStart(2, '0');
             const mm = String(Math.min(59, Math.max(0, parseInt(timeParts[1], 10) || 0))).padStart(2, '0');
             const published_at = pubDateVal ? `${pubDateVal} ${hh}:${mm}:00` : undefined;
             
             // Handle image upload
-            const uploadedFile = document.getElementById('newsImage')?.files[0];
+            const uploadedFile = field('newsImage')?.files[0];
             let imageUrl = null;
             
             if (uploadedFile) {
@@ -3937,7 +3952,7 @@ class HolwertAdmin {
                 category,
                 custom_category,
                 organization_id,
-                is_published: document.getElementById('newsPublished').checked
+                is_published: field('newsPublished')?.checked === true
             };
             if (published_at !== undefined) {
                 body.published_at = published_at;
@@ -3949,13 +3964,13 @@ class HolwertAdmin {
             }
 
             // YouTube-link meesturen (altijd, ook als leeg om te wissen)
-            body.youtube_url = (document.getElementById('newsYoutubeUrl')?.value || '').trim() || null;
+            body.youtube_url = (field('newsYoutubeUrl')?.value || '').trim() || null;
             // Bronvermelding
-            body.source_name = (document.getElementById('newsSourceName')?.value || '').trim() || null;
-            body.source_url  = (document.getElementById('newsSourceUrl')?.value  || '').trim() || null;
+            body.source_name = (field('newsSourceName')?.value || '').trim() || null;
+            body.source_url  = (field('newsSourceUrl')?.value  || '').trim() || null;
 
-            const pdfFile = document.getElementById('newsPdfFile')?.files?.[0];
-            const removePdf = document.getElementById('newsPdfRemove')?.value === '1';
+            const pdfFile = field('newsPdfFile')?.files?.[0];
+            const removePdf = field('newsPdfRemove')?.value === '1';
             if (pdfFile) {
                 try {
                     body.pdf_url = await this.uploadPdfFile(pdfFile, organization_id);
@@ -5934,7 +5949,7 @@ class HolwertAdmin {
                     : sendPush
                         ? 'Dorpsomroeper opgeslagen — geen push (geen tokens)'
                         : 'Dorpsomroeper opgeslagen';
-            this.showNotification(note, sendPush && !(data.pushSent > 0) && enabled ? 'error' : 'success');
+            this.showNotification(note, sendPush && enabled && !(data.pushSent > 0) ? 'error' : 'success');
         } catch (error) {
             if (msgEl) {
                 msgEl.textContent = 'Opslaan mislukt: ' + (error.message || error);
