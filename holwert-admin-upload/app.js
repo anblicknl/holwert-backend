@@ -3658,7 +3658,7 @@ class HolwertAdmin {
                                 <label for="newsImage">Afbeelding</label>
                                 <input type="file" id="newsImage" accept="image/*" class="file-input"
                                     onchange="admin.previewNewsImage(this)">
-                                <small class="form-hint">Of laat leeg om huidige afbeelding te behouden</small>
+                                <small class="form-hint">JPG, PNG of WebP — wordt als WebP opgeslagen (JPEG als fallback). Leeg laten behoudt de huidige afbeelding.</small>
                                 <div id="newsImagePreview" class="image-preview" style="display: none;">
                                     <img id="newsImagePreviewImg" src="" alt="Preview">
                                     <button type="button" class="btn-remove-image" 
@@ -3806,6 +3806,78 @@ class HolwertAdmin {
         document.getElementById('newsImagePreview').style.display = 'none';
     }
 
+    canvasSupportsWebp() {
+        try {
+            const c = document.createElement('canvas');
+            c.width = 1;
+            c.height = 1;
+            return c.toDataURL('image/webp').indexOf('data:image/webp') === 0;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    mimeFromDataUrl(dataUrl) {
+        const m = String(dataUrl || '').match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/i);
+        return m ? m[1].toLowerCase() : 'image/jpeg';
+    }
+
+    extFromImageMime(mime) {
+        if (mime === 'image/webp') return 'webp';
+        if (mime === 'image/png') return 'png';
+        if (mime === 'image/gif') return 'gif';
+        return 'jpg';
+    }
+
+    /** Foto voor nieuws/agenda: WebP als de browser het kan, anders JPEG. Logo's blijven JPEG. */
+    compressPhotoImage(file, { maxSize = 1200, quality = 0.72 } = {}) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    let width = img.width;
+                    let height = img.height;
+                    if (width > height && width > maxSize) {
+                        height = (height / width) * maxSize;
+                        width = maxSize;
+                    } else if (height > maxSize) {
+                        width = (width / height) * maxSize;
+                        height = maxSize;
+                    }
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+
+                    let mime = this.canvasSupportsWebp() ? 'image/webp' : 'image/jpeg';
+                    let q = quality;
+                    let compressed = canvas.toDataURL(mime, q);
+                    if (this.mimeFromDataUrl(compressed) !== mime) {
+                        mime = 'image/jpeg';
+                        compressed = canvas.toDataURL(mime, q);
+                    }
+                    const maxBytes = 3 * 1024 * 1024;
+                    while (compressed.length > maxBytes && q > 0.3) {
+                        q -= 0.1;
+                        compressed = canvas.toDataURL(mime, q);
+                    }
+                    const actualMime = this.mimeFromDataUrl(compressed);
+                    resolve({
+                        dataUrl: compressed,
+                        mime: actualMime,
+                        ext: this.extFromImageMime(actualMime),
+                    });
+                };
+                img.onerror = reject;
+                img.src = e.target.result;
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
+    }
+
     async compressNewsImage(file) {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -3893,10 +3965,10 @@ class HolwertAdmin {
             
             if (uploadedFile) {
                 try {
-                    const compressedBase64 = await this.compressNewsImage(uploadedFile);
-                    console.log('News image compressed (temp base64), length:', compressedBase64.length);
+                    const compressed = await this.compressPhotoImage(uploadedFile, { maxSize: 800, quality: 0.72 });
+                    console.log('News image compressed (temp base64), length:', compressed.dataUrl.length, compressed.mime);
                     
-                    if (compressedBase64.length > 4 * 1024 * 1024) {
+                    if (compressed.dataUrl.length > 4 * 1024 * 1024) {
                         this.showNotification('Afbeelding is te groot. Kies een kleinere afbeelding.', 'error');
                         return;
                     }
@@ -3909,8 +3981,8 @@ class HolwertAdmin {
                             'Authorization': `Bearer ${this.token}`
                         },
                         body: JSON.stringify({
-                            imageData: compressedBase64,
-                            filename: `news-image-${Date.now()}.jpg`,
+                            imageData: compressed.dataUrl,
+                            filename: `news-image-${Date.now()}.${compressed.ext}`,
                             organizationId: organization_id != null ? organization_id : undefined
                         })
                     });
@@ -6759,44 +6831,9 @@ class HolwertAdmin {
         });
     }
 
-    compressEventImage(file) {
-        return new Promise((resolve, reject) => {
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            const img = new Image();
-            
-            img.onload = () => {
-                // Calculate new dimensions (max 1200px width/height for events)
-                const maxSize = 1200;
-                let { width, height } = img;
-                
-                if (width > height) {
-                    if (width > maxSize) {
-                        height = (height * maxSize) / width;
-                        width = maxSize;
-                    }
-                } else {
-                    if (height > maxSize) {
-                        width = (width * maxSize) / height;
-                        height = maxSize;
-                    }
-                }
-                
-                // Set canvas dimensions
-                canvas.width = width;
-                canvas.height = height;
-                
-                // Draw and compress
-                ctx.drawImage(img, 0, 0, width, height);
-                
-                // Convert to base64 with good compression (0.7 quality for events)
-                const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
-                resolve(compressedBase64);
-            };
-            
-            img.onerror = () => reject(new Error('Failed to load image'));
-            img.src = URL.createObjectURL(file);
-        });
+    async compressEventImage(file) {
+        const compressed = await this.compressPhotoImage(file, { maxSize: 1200, quality: 0.7 });
+        return compressed.dataUrl;
     }
 
     async previewEventImage(input) {
@@ -7313,6 +7350,7 @@ class HolwertAdmin {
                                 <div class="form-group">
                                     <label>Afbeelding (optioneel)</label>
                                     <input type="file" id="evImage" accept="image/*">
+                                    <small class="form-hint">JPG, PNG of WebP — wordt als WebP opgeslagen (JPEG als fallback).</small>
                                     <div id="evImagePreview" class="image-preview-box" style="display: none;">
                                         <img id="evImagePreviewImg" src="" alt="Preview">
                                         <button type="button" class="btn btn-sm btn-secondary" id="evImageClearBtn" style="margin-top: 0.5rem;">Verwijder afbeelding</button>
@@ -7429,10 +7467,10 @@ class HolwertAdmin {
             
             if (uploadedFile) {
                 try {
-                    const compressedBase64 = await this.compressEventImage(uploadedFile);
-                    console.log('Event image compressed (temp base64), length:', compressedBase64.length);
+                    const compressed = await this.compressPhotoImage(uploadedFile, { maxSize: 1200, quality: 0.7 });
+                    console.log('Event image compressed (temp base64), length:', compressed.dataUrl.length, compressed.mime);
                     
-                    if (compressedBase64.length > 4 * 1024 * 1024) {
+                    if (compressed.dataUrl.length > 4 * 1024 * 1024) {
                         this.showNotification('Afbeelding is te groot. Kies een kleinere afbeelding.', 'error');
                         return;
                     }
@@ -7445,8 +7483,8 @@ class HolwertAdmin {
                             'Authorization': `Bearer ${this.token}`
                         },
                         body: JSON.stringify({
-                            imageData: compressedBase64,
-                            filename: `event-image-${Date.now()}.jpg`,
+                            imageData: compressed.dataUrl,
+                            filename: `event-image-${Date.now()}.${compressed.ext}`,
                             organizationId: organization_id != null ? organization_id : undefined
                         })
                     });
@@ -7465,6 +7503,7 @@ class HolwertAdmin {
             } else {
                 const existingImage = document.querySelector('#evImagePreviewImg')?.src;
                 if (existingImage && existingImage.startsWith('data:image')) {
+                    const previewExt = this.extFromImageMime(this.mimeFromDataUrl(existingImage));
                     const uploadRes = await fetch(`${this.apiBaseUrl}/upload/image`, {
                         method: 'POST',
                         headers: {
@@ -7473,7 +7512,7 @@ class HolwertAdmin {
                         },
                         body: JSON.stringify({
                             imageData: existingImage,
-                            filename: `event-image-${Date.now()}.jpg`,
+                            filename: `event-image-${Date.now()}.${previewExt}`,
                             organizationId: organization_id != null ? organization_id : undefined
                         })
                     });

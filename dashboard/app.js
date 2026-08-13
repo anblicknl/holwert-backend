@@ -615,6 +615,98 @@
         return { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
     }
 
+    function canvasSupportsWebp() {
+        try {
+            const c = document.createElement('canvas');
+            c.width = 1;
+            c.height = 1;
+            return c.toDataURL('image/webp').indexOf('data:image/webp') === 0;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function dataUrlToBlob(dataUrl) {
+        const m = String(dataUrl).match(/^data:([^;]+);base64,(.+)$/);
+        if (!m) throw new Error('Ongeldige afbeelding');
+        const mime = m[1];
+        const bin = atob(m[2]);
+        const arr = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+        return { blob: new Blob([arr], { type: mime }), mime };
+    }
+
+    /** Foto voor nieuws/agenda: WebP als de browser het kan, anders JPEG. */
+    function compressPhotoImage(file, { maxSize = 1200, quality = 0.72 } = {}) {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            const objectUrl = URL.createObjectURL(file);
+            img.onload = () => {
+                URL.revokeObjectURL(objectUrl);
+                let { width, height } = img;
+                if (width > height && width > maxSize) {
+                    height = (height / width) * maxSize;
+                    width = maxSize;
+                } else if (height > maxSize) {
+                    width = (width / height) * maxSize;
+                    height = maxSize;
+                }
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+                let mime = canvasSupportsWebp() ? 'image/webp' : 'image/jpeg';
+                let q = quality;
+                let dataUrl = canvas.toDataURL(mime, q);
+                if (!dataUrl.startsWith(`data:${mime}`)) {
+                    mime = 'image/jpeg';
+                    dataUrl = canvas.toDataURL(mime, q);
+                }
+                const maxBytes = 3 * 1024 * 1024;
+                while (dataUrl.length > maxBytes && q > 0.3) {
+                    q -= 0.1;
+                    dataUrl = canvas.toDataURL(mime, q);
+                }
+                try {
+                    resolve(dataUrlToBlob(dataUrl));
+                } catch (err) {
+                    reject(err);
+                }
+            };
+            img.onerror = () => {
+                URL.revokeObjectURL(objectUrl);
+                reject(new Error('Afbeelding kon niet worden geladen'));
+            };
+            img.src = objectUrl;
+        });
+    }
+
+    async function uploadNewsOrEventImage(file, prefix) {
+        if (!file || !file.type.startsWith('image/')) {
+            throw new Error('Kies een afbeeldingsbestand (JPG, PNG of WebP).');
+        }
+        if (file.size > 9 * 1024 * 1024) {
+            throw new Error('Bestand te groot (max. 9 MB).');
+        }
+        const compressed = await compressPhotoImage(file);
+        const ext = compressed.mime === 'image/webp' ? 'webp' : 'jpg';
+        const filename = `${prefix}-${Date.now()}.${ext}`;
+        const fd = new FormData();
+        fd.append('image', compressed.blob, filename);
+        const r = await fetch(`${apiBase}/upload`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}` },
+            body: fd
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) {
+            throw new Error(j.message || j.error || `Upload mislukt (${r.status})`);
+        }
+        const url = j.imageUrl || j.url;
+        if (!url) throw new Error('Geen afbeeldings-URL van server');
+        return url;
+    }
+
     /** Multipart naar backend; organisatiemap komt uit JWT (client kan die niet overschrijven). */
     async function uploadImageFile(file) {
         if (!file || !file.type.startsWith('image/')) {
@@ -1074,7 +1166,7 @@
             const imageEditable = !isPreview
                 ? `${imgPreview}
                             <input type="file" id="newsImageFile" accept="image/*">
-                            <p class="form-hint">Optioneel: JPG/PNG, max. 9 MB. Wordt in jullie organisatiemap geplaatst.</p>
+                            <p class="form-hint">Optioneel: JPG, PNG of WebP, max. 9 MB. Wordt als WebP opgeslagen (JPEG als fallback).</p>
                             <div class="form-group__sub">
                                 <label for="newsImageUrlInput">Of afbeeldings-URL (https)</label>
                                 <input type="url" id="newsImageUrlInput" placeholder="https://..." value="${escapeHtml(article?.image_url || '')}">
@@ -1180,7 +1272,7 @@
                         btn.disabled = true;
                         btn.textContent = 'Uploaden…';
                         try {
-                            if (file) imageUrl = await uploadImageFile(file);
+                            if (file) imageUrl = await uploadNewsOrEventImage(file, 'news-image');
                             if (pdfFile) pdfUrl = await uploadPdfFile(pdfFile);
                         } catch (err) {
                             alert(err.message || 'Upload mislukt');
@@ -1423,7 +1515,7 @@
             const imageEditable = !isView
                 ? `${evImg}
                             <input type="file" id="eventImageFile" accept="image/*">
-                            <p class="form-hint">Optioneel, max. 9 MB.</p>
+                            <p class="form-hint">Optioneel: JPG, PNG of WebP, max. 9 MB. Wordt als WebP opgeslagen (JPEG als fallback).</p>
                             <div class="form-group__sub">
                                 <label for="eventImageUrlInput">Of URL</label>
                                 <input type="url" id="eventImageUrlInput" placeholder="https://..." value="${escapeHtml(event?.image_url || '')}">
@@ -1548,7 +1640,7 @@
                         btn.disabled = true;
                         btn.textContent = 'Uploaden…';
                         try {
-                            if (file) imageUrl = await uploadImageFile(file);
+                            if (file) imageUrl = await uploadNewsOrEventImage(file, 'event-image');
                             if (pdfFile) pdfUrl = await uploadPdfFile(pdfFile);
                         } catch (err) {
                             alert(err.message || 'Upload mislukt');

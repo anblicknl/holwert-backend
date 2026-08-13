@@ -1381,6 +1381,38 @@ function folderSegmentForOrgUpload(orgIdNum) {
   return String(Math.floor(orgIdNum)).padStart(2, '0');
 }
 
+const ALLOWED_UPLOAD_IMAGE_MIMES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+
+function normalizeImageMime(mime) {
+  const raw = String(mime || '').toLowerCase().trim();
+  if (raw === 'image/jpg') return 'image/jpeg';
+  return raw;
+}
+
+function extFromImageMime(mime) {
+  if (mime === 'image/webp') return 'webp';
+  if (mime === 'image/png') return 'png';
+  if (mime === 'image/gif') return 'gif';
+  return 'jpg';
+}
+
+function parseImageDataUrl(imageData) {
+  const raw = String(imageData || '');
+  const m = raw.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/i);
+  const mime = normalizeImageMime(m ? m[1] : 'image/jpeg');
+  if (!ALLOWED_UPLOAD_IMAGE_MIMES.has(mime)) return null;
+  return { mime, base64Data: m ? m[2] : raw.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/i, '') };
+}
+
+function filenameWithImageMimeExt(filename, mime) {
+  const ext = extFromImageMime(mime);
+  const name = String(filename || `image-${Date.now()}`).trim() || `image-${Date.now()}`;
+  if (/\.(jpe?g|png|gif|webp)$/i.test(name)) {
+    return name.replace(/\.(jpe?g|png|gif|webp)$/i, `.${ext}`);
+  }
+  return `${name}.${ext}`;
+}
+
 /** Upload bestand naar holwert.appenvloed.com/upload (org-submap: twee cijfers, bv. 07 of 00). */
 async function uploadFileBufferToSharedHosting(buffer, originalname, mimetype, orgFolderTwoDigits) {
   const form = new FormData();
@@ -1554,7 +1586,11 @@ app.post('/api/upload/image', authenticateToken, async (req, res) => {
       organizationId: organizationId ?? 'none'
     });
 
-    const base64Data = imageData.replace(/^data:image\/[a-z]+;base64,/, '');
+    const parsed = parseImageDataUrl(imageData);
+    if (!parsed) {
+      return res.status(400).json({ error: 'Ongeldige afbeeldingsdata' });
+    }
+    const { mime, base64Data } = parsed;
     if (base64Data.length > 14 * 1024 * 1024) {
       return res.status(400).json({ error: 'Afbeelding te groot', message: 'Maximaal ongeveer 10 MB na base64.' });
     }
@@ -1568,13 +1604,16 @@ app.post('/api/upload/image', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Afbeelding te groot of leeg' });
     }
 
-    const uniqueFilename = filename || `image-${Date.now()}-${Math.round(Math.random() * 1E9)}.jpg`;
+    const uniqueFilename = filenameWithImageMimeExt(
+      filename || `image-${Date.now()}-${Math.round(Math.random() * 1E9)}`,
+      mime,
+    );
     const resolvedOrg = resolveUploadOrganizationIdForRequest(req, organizationId);
     const orgFolder = folderSegmentForOrgUpload(resolvedOrg);
     const imageUrl = await uploadImageBufferToSharedHosting(
       buffer,
       uniqueFilename,
-      'image/jpeg',
+      mime,
       orgFolder,
     );
 
