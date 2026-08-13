@@ -4012,12 +4012,13 @@ class HolwertAdmin {
             }
 
             const savedJson = await res.json().catch(() => ({}));
-            const shareOnFacebook = document.getElementById('newsShareFacebook')?.checked;
-            const isPublished = document.getElementById('newsPublished')?.checked;
+            const shareOnFacebook = field('newsShareFacebook')?.checked;
+            const isPublished = field('newsPublished')?.checked;
             const savedId = savedJson.article?.id || savedJson.articleId || actualNewsId;
 
             this.showNotification('Nieuws artikel opgeslagen', 'success');
-            document.getElementById('newsTitle')?.closest('.modal-overlay')?.remove();
+            if (overlay && overlay !== document) overlay.remove();
+            else document.getElementById('newsTitle')?.closest('.modal-overlay')?.remove();
             this.loadNews();
 
             if (isPublished && shareOnFacebook && savedId) {
