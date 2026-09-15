@@ -3545,7 +3545,13 @@ async function sendMailViaHosting({ toEmail, subject, html, text }) {
   }
 }
 
-async function sendOrgDashboardWelcomeEmailViaHosting({ toEmail, orgName, loginEmail, temporaryPassword }) {
+async function sendOrgDashboardWelcomeEmailViaHosting({
+  toEmail,
+  orgName,
+  loginEmail,
+  temporaryPassword,
+  variant = 'approved',
+}) {
   const esc = (s) =>
     String(s)
       .replace(/&/g, '&amp;')
@@ -3555,25 +3561,35 @@ async function sendOrgDashboardWelcomeEmailViaHosting({ toEmail, orgName, loginE
 
   const dashUrl = getOrgDashboardPublicBaseUrl();
   const orgLabel = orgName ? String(orgName).trim() : 'jullie organisatie';
-  const subject = 'Holwert: jullie organisatie-dashboard is goedgekeurd';
-  const html = `<p>Goed nieuws: <strong>${esc(orgLabel)}</strong> is goedgekeurd voor de Holwert-app.</p>
-<p>Je kunt nu inloggen op het <strong>organisatie-dashboard</strong> om jullie profiel, nieuws en agenda te beheren.</p>
+  const isCreated = variant === 'created';
+  const subject = isCreated
+    ? 'Holwert: inloggegevens voor jullie organisatie-dashboard'
+    : 'Holwert: jullie organisatie-dashboard is goedgekeurd';
+  const introHtml = isCreated
+    ? `<p>Er is een inlog aangemaakt voor <strong>${esc(orgLabel)}</strong> op het organisatie-dashboard van Holwert.</p>
+<p>Je kunt daarmee jullie profiel, nieuws en agenda beheren.</p>`
+    : `<p>Goed nieuws: <strong>${esc(orgLabel)}</strong> is goedgekeurd voor de Holwert-app.</p>
+<p>Je kunt nu inloggen op het <strong>organisatie-dashboard</strong> om jullie profiel, nieuws en agenda te beheren.</p>`;
+  const introText = isCreated
+    ? `Er is een inlog aangemaakt voor ${orgLabel} op het organisatie-dashboard van Holwert.`
+    : `Goed nieuws: ${orgLabel} is goedgekeurd voor de Holwert-app.`;
+  const html = `${introHtml}
 <p><a href="${esc(dashUrl)}">Open het dashboard</a></p>
 <p><strong>Inloggegevens</strong></p>
 <ul>
   <li>E-mail: <strong>${esc(loginEmail)}</strong></li>
-  <li>Tijdelijk wachtwoord: <strong>${esc(temporaryPassword)}</strong></li>
+  <li>Wachtwoord: <strong>${esc(temporaryPassword)}</strong></li>
 </ul>
 <p>Wijzig dit wachtwoord na de eerste inlog. Bewaar deze gegevens veilig; deel ze niet via openbare kanalen.</p>
 <p>Heb je vragen? Neem contact op met de beheerder van Holwert.</p>`;
-  const text = `Goed nieuws: ${orgLabel} is goedgekeurd voor de Holwert-app.
+  const text = `${introText}
 
-Je kunt nu inloggen op het organisatie-dashboard:
+Je kunt inloggen op het organisatie-dashboard:
 ${dashUrl}
 
 Inloggegevens:
 E-mail: ${loginEmail}
-Tijdelijk wachtwoord: ${temporaryPassword}
+Wachtwoord: ${temporaryPassword}
 
 Wijzig dit wachtwoord na de eerste inlog.`;
 
@@ -6777,22 +6793,63 @@ app.post('/api/admin/users', authenticateToken, requireAdmin, async (req, res) =
         });
       }
 
+      let credentials_email_sent = false;
+      let credentials_email_error = null;
+      if (String(password).length >= 6) {
+        const mailResult = await sendOrgDashboardWelcomeEmailViaHosting({
+          toEmail: emailTrim,
+          orgName,
+          loginEmail: emailTrim,
+          temporaryPassword: String(password),
+          variant: 'created',
+        });
+        credentials_email_sent = !!mailResult.ok;
+        if (!mailResult.ok) {
+          credentials_email_error = mailResult.reason || 'Mail versturen mislukt';
+          console.warn(
+            '[admin create org-dashboard user] credentials mail mislukt:',
+            credentials_email_error,
+            'naar',
+            emailTrim,
+          );
+        }
+      }
+
+      const mailSuffix = credentials_email_sent
+        ? ' Inloggegevens zijn per e-mail verstuurd.'
+        : credentials_email_error
+          ? ` Kon inloggegevens niet per e-mail versturen (${credentials_email_error}).`
+          : '';
+
       const user = await fetchAdminUserById(dashResult.userId);
+      const basePayload = {
+        linked: dashResult.linked,
+        created: dashResult.created,
+        ...(credentials_email_sent ? { credentials_email_sent: true } : {}),
+        ...(credentials_email_error ? { credentials_email_error } : {}),
+      };
+
       if (!user) {
         return res.status(201).json({
           user: { id: dashResult.userId, email: emailTrim, organization_id: orgId },
-          linked: dashResult.linked,
-          created: dashResult.created,
+          ...basePayload,
+          message: `Dashboard-account aangemaakt.${mailSuffix}`.trim(),
         });
+      }
+
+      let message;
+      if (dashResult.linked) {
+        message = `Bestaand account gekoppeld aan de organisatie (zelfde e-mail als contactadres mag).${mailSuffix}`;
+      } else if (dashResult.created) {
+        message = `Dashboard-account aangemaakt.${mailSuffix}`;
+      } else {
+        message = `Dashboard-account bijgewerkt.${mailSuffix}`;
       }
 
       return res.status(dashResult.created ? 201 : 200).json({
         user,
-        linked: dashResult.linked,
-        created: dashResult.created,
-        ...(dashResult.linked
-          ? { message: 'Bestaand account gekoppeld aan de organisatie (zelfde e-mail als contactadres mag).' }
-          : {}),
+        ...basePayload,
+        message: message.trim(),
       });
     }
 

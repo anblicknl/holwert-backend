@@ -447,11 +447,17 @@ class HolwertAdmin {
         const organizationsListWrap = document.getElementById('organizationsListWrap');
         if (organizationsListWrap) {
             organizationsListWrap.addEventListener('click', (e) => {
+                const viewBtn = e.target.closest('.organization-view-btn');
                 const editBtn = e.target.closest('.organization-edit-btn');
                 const blocksBtn = e.target.closest('.organization-blocks-btn');
                 const deleteBtn = e.target.closest('.organization-delete-btn');
                 const approveBtn = e.target.closest('.organization-approve-btn');
-                if (blocksBtn && blocksBtn.dataset.orgId) {
+                if (viewBtn && viewBtn.dataset.orgId) {
+                    const orgId = parseInt(viewBtn.dataset.orgId, 10);
+                    if (!isNaN(orgId)) {
+                        void this.viewOrganization(orgId);
+                    }
+                } else if (blocksBtn && blocksBtn.dataset.orgId) {
                     const orgId = parseInt(blocksBtn.dataset.orgId, 10);
                     const orgName = decodeURIComponent(blocksBtn.getAttribute('data-org-name') || '');
                     if (!isNaN(orgId)) {
@@ -1967,7 +1973,7 @@ class HolwertAdmin {
                 </div>
                 <div class="modal-body">
                     <form id="createOrgDashUserForm" class="edit-form">
-                        ${this.modalIntro('Inlog voor <strong>/dashboard</strong>. Je mag hetzelfde e-mailadres gebruiken als het contactadres van de organisatie — dat is de bedoeling.')}
+                        ${this.modalIntro('Inlog voor <strong>/dashboard</strong>. Je mag hetzelfde e-mailadres gebruiken als het contactadres van de organisatie — dat is de bedoeling. Na aanmaken gaat er een e-mail met inloggegevens naar dit adres.')}
                         ${
                             !hasOrgs
                                 ? this.modalIntro('Er is nog geen organisatie. Maak eerst een organisatie aan (knop hieronder), daarna kun je het account koppelen.', { warn: true })
@@ -2063,11 +2069,16 @@ class HolwertAdmin {
             const data = await res.json().catch(() => ({}));
             if (res.ok) {
                 const linked = data.linked === true;
-                const msg = data.message ||
+                let msg = data.message ||
                     (linked
                         ? 'Bestaand account gekoppeld aan de organisatie (zelfde e-mail als contactadres).'
                         : 'Dashboard-account aangemaakt');
-                this.showNotification(msg, 'success');
+                if (data.credentials_email_sent && !String(msg).includes('e-mail')) {
+                    msg = `${msg} Inloggegevens zijn per e-mail verstuurd.`;
+                } else if (data.credentials_email_error && !String(msg).includes('e-mail')) {
+                    msg = `${msg} E-mail versturen mislukt: ${data.credentials_email_error}.`;
+                }
+                this.showNotification(msg, data.credentials_email_error && !data.credentials_email_sent ? 'warning' : 'success');
                 document.getElementById('createOrgDashEmail')?.closest('.modal-overlay')?.remove();
                 this.loadUsers();
                 if (typeof this.loadOrganizations === 'function') this.loadOrganizations();
@@ -2083,6 +2094,7 @@ class HolwertAdmin {
     // Organization management
     organizationActionButtonsHtml(org) {
         return `
+            <button type="button" class="btn-icon btn-view organization-view-btn" data-org-id="${org.id}" title="Bekijken"><i class="fas fa-eye"></i></button>
             ${!org.is_approved ? `<button type="button" class="btn-icon btn-approve organization-approve-btn" data-org-id="${org.id}" title="Goedkeuren"><i class="fas fa-check"></i></button>` : ''}
             <button class="btn-icon btn-edit organization-edit-btn" data-org-id="${org.id}" title="Bewerken"><i class="fas fa-edit"></i></button>
             <button type="button" class="btn-icon organization-blocks-btn" data-org-id="${org.id}" data-org-name="${encodeURIComponent(org.name || '')}" title="Profielblokken"><i class="fas fa-th-large"></i></button>
@@ -6286,7 +6298,7 @@ class HolwertAdmin {
                     <div class="moderation-item__actions">
                         ${
                             t === 'organization'
-                                ? `<button type="button" class="btn btn-secondary btn-sm" onclick="admin.previewOrganizationFromModeration(${item.id})" title="Volledig organisatieprofiel bekijken">
+                                ? `<button type="button" class="btn btn-secondary btn-sm" onclick="admin.viewOrganization(${item.id})" title="Volledig organisatieprofiel bekijken">
                             <i class="fas fa-eye"></i> Preview
                         </button>`
                                 : ''
@@ -6325,8 +6337,13 @@ class HolwertAdmin {
         `;
     }
 
-    /** Volledig organisatieprofiel tonen (moderatie, zonder naar tab Organisaties te gaan). */
+    /** Alias voor moderatie — zelfde view als bij Organisaties. */
     async previewOrganizationFromModeration(id) {
+        return this.viewOrganization(id);
+    }
+
+    /** Organisatie bekijken: gegevens, volgers, nieuws en agenda. */
+    async viewOrganization(id) {
         try {
             const response = await fetch(`${this.apiBaseUrl}/admin/organizations/${id}`, {
                 headers: { Authorization: `Bearer ${this.token}` },
@@ -6341,6 +6358,12 @@ class HolwertAdmin {
                 this.showNotification('Geen organisatiegegevens ontvangen', 'error');
                 return;
             }
+
+            const listOrg = Array.isArray(this.organizationsList)
+                ? this.organizationsList.find((o) => Number(o.id) === Number(org.id))
+                : null;
+            const followersHint = listOrg?.followers_count;
+
             const h = (s) => this.escHtml(s == null ? '' : String(s));
             const escAttr = (s) =>
                 String(s ?? '')
@@ -6370,6 +6393,37 @@ class HolwertAdmin {
             const created = org.created_at
                 ? new Date(org.created_at).toLocaleString('nl-NL', { dateStyle: 'medium', timeStyle: 'short' })
                 : '—';
+            const orgId = Number(org.id);
+            const followersLabel =
+                typeof followersHint === 'number'
+                    ? `Volgers (${followersHint})`
+                    : 'Volgers';
+
+            const profileHtml = `
+                <div class="moderation-org-preview-grid">
+                    ${block('Status', `<span class="status-badge ${org.is_approved ? 'status-published' : 'status-draft'}">${h(statusNl)}</span>`)}
+                    ${block('Aangemeld', h(created))}
+                    ${block('Naam', textOrDash(org.name))}
+                    ${block('Categorie', textOrDash(orgCategoryLabel(org.category)))}
+                    ${block('Ondernemer', org.is_ondernemer ? 'Ja' : 'Nee')}
+                    ${block('Beschrijving', textOrDash(org.description))}
+                    ${block('Bio', textOrDash(org.bio))}
+                    ${block('E-mail', textOrDash(org.email))}
+                    ${block('Website', linkOrDash(org.website))}
+                    ${block('Telefoon', textOrDash(org.phone))}
+                    ${block('WhatsApp', textOrDash(org.whatsapp))}
+                    ${block('Adres', textOrDash(org.address))}
+                    ${block('Facebook', linkOrDash(org.facebook))}
+                    ${block('Instagram', linkOrDash(org.instagram))}
+                    ${block('Twitter / X', linkOrDash(org.twitter))}
+                    ${block('LinkedIn', linkOrDash(org.linkedin))}
+                    ${block('Brandkleur', brand)}
+                </div>
+                ${logoSection}
+                <div class="form-group" style="margin-top:1rem;">
+                    <label>Privacyverklaring</label>
+                    ${textOrDash(org.privacy_statement)}
+                </div>`;
 
             const modal = document.createElement('div');
             modal.className = 'modal-overlay';
@@ -6377,48 +6431,46 @@ class HolwertAdmin {
             modal.innerHTML = `
                 <div class="modal-content modal-large moderation-org-preview-modal">
                     <div class="modal-header">
-                        <h3><i class="fas fa-eye" style="margin-right:8px;"></i> Organisatie preview</h3>
+                        <h3><i class="fas fa-eye" style="margin-right:8px;"></i> ${h(org.name || 'Organisatie')}</h3>
                         <button type="button" class="modal-close" data-org-preview-close aria-label="Sluiten"><i class="fas fa-times"></i></button>
                     </div>
                     <div class="modal-body" style="max-height:72vh;overflow-y:auto;">
-                        <p class="text-muted" style="margin-bottom:1rem;font-size:0.9rem;">Ter controle bij moderatie (ID ${h(String(org.id))}).</p>
-                        <div class="moderation-org-preview-grid">
-                            ${block('Status', `<span class="status-badge ${org.is_approved ? 'status-published' : 'status-draft'}">${h(statusNl)}</span>`)}
-                            ${block('Aangemeld', h(created))}
-                            ${block('Naam', textOrDash(org.name))}
-                            ${block('Categorie', textOrDash(orgCategoryLabel(org.category)))}
-                            ${block('Beschrijving', textOrDash(org.description))}
-                            ${block('Bio', textOrDash(org.bio))}
-                            ${block('E-mail', textOrDash(org.email))}
-                            ${block('Website', linkOrDash(org.website))}
-                            ${block('Telefoon', textOrDash(org.phone))}
-                            ${block('WhatsApp', textOrDash(org.whatsapp))}
-                            ${block('Adres', textOrDash(org.address))}
-                            ${block('Facebook', linkOrDash(org.facebook))}
-                            ${block('Instagram', linkOrDash(org.instagram))}
-                            ${block('Twitter / X', linkOrDash(org.twitter))}
-                            ${block('LinkedIn', linkOrDash(org.linkedin))}
-                            ${block('Brandkleur', brand)}
+                        <p class="text-muted" style="margin-bottom:0.75rem;font-size:0.9rem;">ID ${h(String(org.id))}</p>
+                        <div class="org-view-tabs" role="tablist">
+                            <button type="button" class="org-tab-btn active" data-org-tab="profile" data-org-id="${orgId}">Gegevens</button>
+                            <button type="button" class="org-tab-btn" data-org-tab="followers" data-org-id="${orgId}">${h(followersLabel)}</button>
+                            <button type="button" class="org-tab-btn" data-org-tab="news" data-org-id="${orgId}">Nieuws</button>
+                            <button type="button" class="org-tab-btn" data-org-tab="events" data-org-id="${orgId}">Agenda</button>
                         </div>
-                        ${logoSection}
-                        <div class="form-group" style="margin-top:1rem;">
-                            <label>Privacyverklaring</label>
-                            ${textOrDash(org.privacy_statement)}
-                        </div>
+                        <div id="org-tab-profile" class="org-tab-pane active">${profileHtml}</div>
+                        <div id="org-tab-followers" class="org-tab-pane"></div>
+                        <div id="org-tab-news" class="org-tab-pane"></div>
+                        <div id="org-tab-events" class="org-tab-pane"></div>
                     </div>
                     <div class="modal-footer">
-                        <button type="button" class="btn btn-primary" data-org-preview-close>Sluiten</button>
+                        <button type="button" class="btn btn-secondary" data-org-preview-close>Sluiten</button>
+                        <button type="button" class="btn btn-primary" data-org-preview-edit data-org-id="${orgId}">Bewerken</button>
                     </div>
                 </div>`;
             document.body.appendChild(modal);
             const close = () => modal.remove();
             modal.querySelectorAll('[data-org-preview-close]').forEach((el) => el.addEventListener('click', close));
+            modal.querySelector('[data-org-preview-edit]')?.addEventListener('click', () => {
+                close();
+                void this.editOrganization(orgId);
+            });
             modal.addEventListener('click', (e) => {
                 if (e.target === modal) close();
             });
             modal.querySelector('.modal-content')?.addEventListener('click', (e) => e.stopPropagation());
+            modal.querySelectorAll('.org-tab-btn').forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    const tab = btn.getAttribute('data-org-tab');
+                    if (tab) this.switchOrgTab(tab, orgId, modal);
+                });
+            });
         } catch (error) {
-            console.error('previewOrganizationFromModeration:', error);
+            console.error('viewOrganization:', error);
             this.showNotification('Fout bij laden van organisatie', 'error');
         }
     }
@@ -6973,23 +7025,26 @@ class HolwertAdmin {
     }
 
     // ===== ORGANIZATION TAB MANAGEMENT =====
-    switchOrgTab(tabName, orgId) {
-        // Remove active class from all tabs and panes
-        document.querySelectorAll('.org-tab-btn').forEach(btn => btn.classList.remove('active'));
-        document.querySelectorAll('.org-tab-pane').forEach(pane => pane.classList.remove('active'));
-        
-        // Add active class to selected tab and pane
-        document.querySelector(`[onclick="admin.switchOrgTab('${tabName}', ${orgId})"]`).classList.add('active');
-        document.getElementById(`org-tab-${tabName}`).classList.add('active');
-        
-        // Load content for the selected tab
-        this.loadOrgTabContent(tabName, orgId);
+    switchOrgTab(tabName, orgId, root = document) {
+        const scope = root || document;
+        scope.querySelectorAll('.org-tab-btn').forEach((btn) => btn.classList.remove('active'));
+        scope.querySelectorAll('.org-tab-pane').forEach((pane) => pane.classList.remove('active'));
+
+        const tabBtn = scope.querySelector(`.org-tab-btn[data-org-tab="${tabName}"]`);
+        const tabPane = scope.querySelector(`#org-tab-${tabName}`);
+        tabBtn?.classList.add('active');
+        tabPane?.classList.add('active');
+
+        this.loadOrgTabContent(tabName, orgId, tabPane);
     }
 
-    async loadOrgTabContent(tabName, orgId) {
-        const tabPane = document.getElementById(`org-tab-${tabName}`);
-        
-        switch(tabName) {
+    async loadOrgTabContent(tabName, orgId, tabPane) {
+        if (!tabPane) {
+            tabPane = document.getElementById(`org-tab-${tabName}`);
+        }
+        if (!tabPane) return;
+
+        switch (tabName) {
             case 'news':
                 await this.loadOrgNews(orgId, tabPane);
                 break;
@@ -7001,7 +7056,6 @@ class HolwertAdmin {
                 break;
             case 'profile':
             default:
-                // Profile tab is already loaded
                 break;
         }
     }
