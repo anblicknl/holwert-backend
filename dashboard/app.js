@@ -1556,9 +1556,14 @@
                             </div>
                             <div class="form-group">
                                 <label>Prijs</label>
-                                <input type="number" id="eventPrice" min="0" step="0.01" placeholder="0.00 = gratis" value="${event?.price != null ? event.price : ''}" ${ro}>
-                                <p class="form-hint">Leeg laten of 0 = gratis toegang.</p>
+                                <input type="number" id="eventPrice" min="0" step="0.01" placeholder="bijv. 12.50" value="${event?.price != null ? event.price : ''}" ${ro}>
+                                <p class="form-hint">Leeg laten als er geen prijs is.</p>
                             </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Voorverkoop (optioneel)</label>
+                            <input type="number" id="eventPresalePrice" min="0" step="0.01" placeholder="bijv. 10.00" value="${event?.presale_price != null ? event.presale_price : ''}" ${ro}>
+                            <p class="form-hint">Alleen zichtbaar in de app als ingevuld.</p>
                         </div>
                         <div class="form-group">
                             <label>Afbeelding</label>
@@ -1655,6 +1660,7 @@
                     }
                     const rawEndDate = document.getElementById('eventEndDate')?.value || '';
                     const rawPrice = document.getElementById('eventPrice')?.value || '';
+                    const rawPresale = document.getElementById('eventPresalePrice')?.value || '';
                     const payload = {
                         title: document.getElementById('eventTitle').value.trim(),
                         description: document.getElementById('eventDescription').value.trim(),
@@ -1662,6 +1668,7 @@
                         event_end_date: rawEndDate || null,
                         location: document.getElementById('eventLocation').value.trim() || null,
                         price: rawPrice !== '' ? parseFloat(rawPrice) : null,
+                        presale_price: rawPresale !== '' ? parseFloat(rawPresale) : null,
                         image_url: imageUrl || null,
                         pdf_url: pdfUrl,
                         ticket_url: (document.getElementById('eventTicketUrl')?.value || '').trim() || null,

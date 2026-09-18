@@ -7258,7 +7258,9 @@ class HolwertAdmin {
                 location: '',
                 organization_id: '',
                 organization_name: '',
-                image_url: ''
+                image_url: '',
+                price: '',
+                presale_price: ''
             };
             
             let organizations = [];
@@ -7357,7 +7359,9 @@ class HolwertAdmin {
                         image_url: ev.image_url || '',
                         pdf_url: ev.pdf_url || '',
                         ticket_url: ev.ticket_url || '',
-                        ticket_label: ev.ticket_label || ''
+                        ticket_label: ev.ticket_label || '',
+                        price: ev.price != null && ev.price !== '' ? ev.price : '',
+                        presale_price: ev.presale_price != null && ev.presale_price !== '' ? ev.presale_price : ''
                     };
                     console.log('Initial data set:', initial);
 
@@ -7484,6 +7488,18 @@ class HolwertAdmin {
                                     <input type="file" id="evPdf" accept="application/pdf,.pdf">
                                     <small class="form-hint">Downloadlink onder het evenement in de app (max 15 MB).</small>
                                     ${this.pdfAttachmentControlsHtml(initial.pdf_url, 'evPdfRemove')}
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label>Prijs (optioneel)</label>
+                                        <input type="number" id="evPrice" min="0" step="0.01" value="${initial.price ?? ''}" placeholder="bijv. 12.50">
+                                        <small class="form-hint">Leeg laten als er geen prijs is.</small>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Voorverkoop (optioneel)</label>
+                                        <input type="number" id="evPresalePrice" min="0" step="0.01" value="${initial.presale_price ?? ''}" placeholder="bijv. 10.00">
+                                        <small class="form-hint">Alleen tonen in de app als ingevuld.</small>
+                                    </div>
                                 </div>
                                 <div class="form-group">
                                     <label>Ticketlink (optioneel)</label>
@@ -7692,6 +7708,10 @@ class HolwertAdmin {
 
             body.ticket_url = (document.getElementById('evTicketUrl')?.value || '').trim() || null;
             body.ticket_label = (document.getElementById('evTicketLabel')?.value || '').trim() || null;
+            const rawPrice = document.getElementById('evPrice')?.value || '';
+            const rawPresale = document.getElementById('evPresalePrice')?.value || '';
+            body.price = rawPrice !== '' ? parseFloat(rawPrice) : null;
+            body.presale_price = rawPresale !== '' ? parseFloat(rawPresale) : null;
 
             // Bepaal URL en method op basis van actualEventId (al gedeclareerd aan het begin)
             const url = actualEventId ? `${this.apiBaseUrl}/admin/events/${actualEventId}` : `${this.apiBaseUrl}/admin/events`;
