@@ -24,6 +24,39 @@ const BLOCK_TYPE_LABELS = {
   notice: 'Mededeling',
 };
 
+/**
+ * Uitbreidbare presets voor blok-headericonen in de app.
+ * `block_types` beperkt waar de keuze getoond wordt; later meer sporten toevoegen.
+ */
+const HEADER_ICON_PRESETS = [
+  {
+    id: 'football',
+    label: 'Voetbal',
+    fa: 'fa-futbol',
+    block_types: ['match_schedule'],
+  },
+  {
+    id: 'volleyball',
+    label: 'Volleybal',
+    fa: 'fa-volleyball',
+    block_types: ['match_schedule'],
+  },
+];
+
+function headerIconPresetsForType(blockType) {
+  const type = String(blockType || '').trim();
+  return HEADER_ICON_PRESETS.filter(
+    (p) => !Array.isArray(p.block_types) || p.block_types.includes(type)
+  );
+}
+
+function normalizeHeaderIcon(value, blockType = 'match_schedule') {
+  const allowed = headerIconPresetsForType(blockType);
+  const id = String(value || '').trim();
+  if (allowed.some((p) => p.id === id)) return id;
+  return allowed[0]?.id || 'football';
+}
+
 const WEEKDAY_LABELS = ['Zondag', 'Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag'];
 /** Weergavevolgorde: maandag t/m zondag (day-index 0 = zondag blijft in data). */
 const WEEKDAY_ORDER_MONDAY_FIRST = [1, 2, 3, 4, 5, 6, 0];
@@ -64,7 +97,10 @@ function defaultDataForType(type) {
     case 'service_schedule':
       return { items: [{ weekday: 0, time: '10:00', title: '', location: '', note: '' }] };
     case 'match_schedule':
-      return { items: [{ date: '', time: '', opponent: '', location: '', is_home: true, competition: '' }] };
+      return {
+        header_icon: 'football',
+        items: [{ date: '', time: '', opponent: '', location: '', is_home: true, competition: '' }],
+      };
     case 'membership':
       return { intro: '', fee: '', contact: '', signup_url: '', items: [] };
     case 'facilities':
@@ -243,6 +279,7 @@ function normalizeBlockData(type, data) {
       };
     case 'match_schedule':
       return {
+        header_icon: normalizeHeaderIcon(raw.header_icon, 'match_schedule'),
         items: (Array.isArray(raw.items) ? raw.items : []).slice(0, 60).map((it) => ({
           date: it?.date ? String(it.date).slice(0, 10) : '',
           time: it?.time ? String(it.time).slice(0, 5) : '',
@@ -338,6 +375,7 @@ function suggestedTypesForCategory(category) {
 module.exports = {
   ORG_PROFILE_BLOCK_TYPES,
   BLOCK_TYPE_LABELS,
+  HEADER_ICON_PRESETS,
   WEEKDAY_LABELS,
   WEEKDAY_ORDER_MONDAY_FIRST,
   CATEGORY_BLOCK_SUGGESTIONS,
@@ -345,6 +383,8 @@ module.exports = {
   defaultTitleForType,
   defaultDataForType,
   normalizeBlockData,
+  normalizeHeaderIcon,
+  headerIconPresetsForType,
   parseJsonData,
   computeOpeningHoursStatus,
   enrichBlocksForPublic,

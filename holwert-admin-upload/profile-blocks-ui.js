@@ -125,7 +125,31 @@
         </div>`;
     }
 
-    function profileBlockFormHtml(blockType, data, weekdayLabels) {
+    function profileBlockHeaderIconPickerHtml(blockType, data, headerIcons) {
+        const fallback = [
+            { id: 'football', label: 'Voetbal', fa: 'fa-futbol', block_types: ['match_schedule'] },
+            { id: 'volleyball', label: 'Volleybal', fa: 'fa-volleyball', block_types: ['match_schedule'] },
+        ];
+        const presets = (Array.isArray(headerIcons) && headerIcons.length ? headerIcons : fallback)
+            .filter((p) => !Array.isArray(p.block_types) || p.block_types.includes(blockType));
+        if (!presets.length) return '';
+        const selected = presets.some((p) => p.id === data?.header_icon) ? data.header_icon : presets[0].id;
+        return `
+            <div class="form-group">
+                <label>Icoon in de app</label>
+                <div class="pb-header-icon-picker" role="radiogroup" aria-label="Icoon">
+                    ${presets.map((p) => `
+                        <label class="pb-header-icon-option">
+                            <input type="radio" name="pb_header_icon" value="${esc(p.id)}" ${p.id === selected ? 'checked' : ''}>
+                            <span class="pb-header-icon-chip"><i class="fas ${esc(p.fa || 'fa-circle')}" aria-hidden="true"></i> ${esc(p.label)}</span>
+                        </label>
+                    `).join('')}
+                </div>
+                <p class="form-hint">Kies welk symbool bij dit blok in de app komt. Later uitbreidbaar met meer sporten.</p>
+            </div>`;
+    }
+
+    function profileBlockFormHtml(blockType, data, weekdayLabels, headerIcons) {
         const days = Array.isArray(data?.days) ? data.days : [];
         const items = Array.isArray(data?.items) ? data.items : [];
         switch (blockType) {
@@ -165,6 +189,7 @@
                     <button type="button" class="btn btn-secondary" id="pb_add_item"><i class="fas fa-plus"></i> Dienst toevoegen</button>`;
             case 'match_schedule':
                 return `
+                    ${profileBlockHeaderIconPickerHtml(blockType, data, headerIcons)}
                     <div id="pb_items_wrap">${items.map((it, i) => profileBlockMatchItemHtml(it, i)).join('')}</div>
                     <button type="button" class="btn btn-secondary" id="pb_add_item"><i class="fas fa-plus"></i> Wedstrijd toevoegen</button>`;
             case 'membership':
@@ -269,6 +294,7 @@
                 };
             case 'match_schedule':
                 return {
+                    header_icon: overlay.querySelector('input[name="pb_header_icon"]:checked')?.value || 'football',
                     items: [...overlay.querySelectorAll('.profile-block-item')].map((el) => ({
                         date: el.querySelector('.pb-date')?.value || '',
                         time: el.querySelector('.pb-time')?.value || '',
@@ -345,6 +371,7 @@
             suggested_types: Array.isArray(rawMeta?.suggested_types) && rawMeta.suggested_types.length
                 ? rawMeta.suggested_types
                 : ['notice', 'links', 'facilities'],
+            header_icons: Array.isArray(rawMeta?.header_icons) ? rawMeta.header_icons : [],
         };
         const existing = existingBlock || null;
         const overlay = document.createElement('div');
@@ -390,7 +417,7 @@
             const data = existing?.data || {};
             const body = overlay.querySelector('#pb_form_body');
             if (body) {
-                body.innerHTML = profileBlockFormHtml(type, data, meta.weekday_labels);
+                body.innerHTML = profileBlockFormHtml(type, data, meta.weekday_labels, meta.header_icons);
                 wireProfileBlockForm(overlay, type, meta);
             }
         };

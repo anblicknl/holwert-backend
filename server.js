@@ -4867,6 +4867,7 @@ app.get('/api/admin/organizations/:id/profile-blocks/meta', authenticateToken, r
       })),
       suggested_types: orgProfileBlocks.suggestedTypesForCategory(category),
       weekday_labels: orgProfileBlocks.WEEKDAY_LABELS,
+      header_icons: orgProfileBlocks.HEADER_ICON_PRESETS,
     });
   } catch (error) {
     console.error('GET /api/admin/organizations/:id/profile-blocks/meta error:', error);
@@ -7119,6 +7120,7 @@ app.get('/api/org/profile-blocks/meta', authenticateToken, requireOrgPortal, asy
       })),
       suggested_types: orgProfileBlocks.suggestedTypesForCategory(category),
       weekday_labels: orgProfileBlocks.WEEKDAY_LABELS,
+      header_icons: orgProfileBlocks.HEADER_ICON_PRESETS,
     });
   } catch (error) {
     console.error('GET /api/org/profile-blocks/meta error:', error);

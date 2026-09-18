@@ -227,6 +227,27 @@ body {
 }
 .login-back-btn i { font-size: 0.8rem; opacity: 0.85; }
 
+.login-register-help {
+    margin-top: 1.25rem;
+    padding-top: 1rem;
+    border-top: 1px solid #e2e8f0;
+    font-size: 0.8125rem;
+    color: #64748b;
+    line-height: 1.55;
+    text-align: center;
+}
+
+.login-register-help a {
+    color: #334155;
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.login-register-help a:hover {
+    color: #0f172a;
+}
+
 .error-message { margin-top: 1rem; font-size: 0.9rem; display: none; }
 .error-message.show { display: block; }
 .hide { display: none !important; }
@@ -325,8 +346,25 @@ body {
     min-width: 0;
     box-sizing: border-box;
 }
-.header-left { display: flex; align-items: center; }
-.header-left h1 { color: #333; font-size: 1.25rem; font-weight: 500; }
+.header-left { display: flex; align-items: center; gap: 0; min-width: 0; }
+.header-left img,
+.header-logo {
+    height: 32px;
+    margin-right: 12px;
+    vertical-align: middle;
+    object-fit: contain;
+    flex-shrink: 0;
+}
+.header-left h1 { color: #333; font-size: 1.25rem; font-weight: 500; margin: 0; }
+.header-subtitle {
+    margin-left: 0.5rem;
+    padding-left: 0.75rem;
+    border-left: 1px solid #e0e0e0;
+    color: #666;
+    font-size: 0.95rem;
+    font-weight: 500;
+    white-space: nowrap;
+}
 .header-right { display: flex; align-items: center; gap: 1rem; }
 .user-info { color: #666; font-size: 0.9rem; }
 
@@ -1085,6 +1123,47 @@ body {
     cursor: not-allowed;
 }
 
+.pb-header-icon-picker {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.pb-header-icon-option {
+    cursor: pointer;
+    margin: 0;
+}
+
+.pb-header-icon-option input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.pb-header-icon-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.45rem 0.75rem;
+    border: 1px solid #d0d7e2;
+    border-radius: 999px;
+    background: #fff;
+    color: #334155;
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.pb-header-icon-option input:checked + .pb-header-icon-chip {
+    border-color: #1e3a8a;
+    background: #eff6ff;
+    color: #1e3a8a;
+}
+
+.pb-header-icon-option input:focus-visible + .pb-header-icon-chip {
+    outline: 2px solid #93c5fd;
+    outline-offset: 2px;
+}
+
 /* Hamburger / mobiel zijbalk */
 .sidebar-toggle {
     display: none;
@@ -1187,6 +1266,13 @@ body {
     }
 
     .header-left h1 {
+        font-size: 1rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .header-subtitle {
         display: none;
     }
 

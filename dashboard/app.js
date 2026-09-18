@@ -2172,6 +2172,7 @@
             suggested_types: Array.isArray(base.suggested_types) && base.suggested_types.length
                 ? base.suggested_types
                 : DEFAULT_PROFILE_BLOCKS_META.suggested_types,
+            header_icons: Array.isArray(base.header_icons) ? base.header_icons : [],
         };
     }
 
@@ -2189,6 +2190,30 @@
         }
         profileBlocksMeta = normalizeProfileBlocksMeta(null);
         return profileBlocksMeta;
+    }
+
+    function profileBlockHeaderIconPickerHtml(blockType, data, headerIcons) {
+        const fallback = [
+            { id: 'football', label: 'Voetbal', fa: 'fa-futbol', block_types: ['match_schedule'] },
+            { id: 'volleyball', label: 'Volleybal', fa: 'fa-volleyball', block_types: ['match_schedule'] },
+        ];
+        const presets = (Array.isArray(headerIcons) && headerIcons.length ? headerIcons : fallback)
+            .filter((p) => !Array.isArray(p.block_types) || p.block_types.includes(blockType));
+        if (!presets.length) return '';
+        const selected = presets.some((p) => p.id === data?.header_icon) ? data.header_icon : presets[0].id;
+        return `
+            <div class="form-group">
+                <label>Icoon in de app</label>
+                <div class="pb-header-icon-picker" role="radiogroup" aria-label="Icoon">
+                    ${presets.map((p) => `
+                        <label class="pb-header-icon-option">
+                            <input type="radio" name="pb_header_icon" value="${escapeHtml(p.id)}" ${p.id === selected ? 'checked' : ''}>
+                            <span class="pb-header-icon-chip"><i class="fas ${escapeHtml(p.fa || 'fa-circle')}" aria-hidden="true"></i> ${escapeHtml(p.label)}</span>
+                        </label>
+                    `).join('')}
+                </div>
+                <p class="form-hint">Kies welk symbool bij dit blok in de app komt. Later uitbreidbaar met meer sporten.</p>
+            </div>`;
     }
 
     document.getElementById('addProfileBlockBtn')?.addEventListener('click', () => {
@@ -2315,7 +2340,7 @@
         }
     }
 
-    function profileBlockFormHtml(blockType, data, weekdayLabels) {
+    function profileBlockFormHtml(blockType, data, weekdayLabels, headerIcons) {
         const days = Array.isArray(data?.days) ? data.days : [];
         const items = Array.isArray(data?.items) ? data.items : [];
         switch (blockType) {
@@ -2353,6 +2378,7 @@
                     <button type="button" class="btn btn-secondary" id="pb_add_item"><i class="fas fa-plus"></i> Dienst toevoegen</button>`;
             case 'match_schedule':
                 return `
+                    ${profileBlockHeaderIconPickerHtml(blockType, data, headerIcons)}
                     <div id="pb_items_wrap">${items.map((it, i) => profileBlockMatchItemHtml(it, i)).join('')}</div>
                     <button type="button" class="btn btn-secondary" id="pb_add_item"><i class="fas fa-plus"></i> Wedstrijd toevoegen</button>`;
             case 'membership':
@@ -2575,6 +2601,7 @@
                 };
             case 'match_schedule':
                 return {
+                    header_icon: overlay.querySelector('input[name="pb_header_icon"]:checked')?.value || 'football',
                     items: [...overlay.querySelectorAll('.profile-block-item')].map((el) => ({
                         date: el.querySelector('.pb-date')?.value || '',
                         time: el.querySelector('.pb-time')?.value || '',
@@ -2668,7 +2695,7 @@
             const data = existing?.data || {};
             const body = overlay.querySelector('#pb_form_body');
             if (body) {
-                body.innerHTML = profileBlockFormHtml(type, data, profileBlocksMeta.weekday_labels);
+                body.innerHTML = profileBlockFormHtml(type, data, profileBlocksMeta.weekday_labels, profileBlocksMeta.header_icons);
                 wireProfileBlockForm(overlay, type);
             }
         };
