@@ -670,7 +670,7 @@ class HolwertAdmin {
             } else {
                 this.stopBadgePolling();
             }
-        }, 30_000); // elke 30 seconden
+        }, 300_000); // elke 5 minuten (was 30s; bespaart Vercel Edge Requests)
     }
 
     stopBadgePolling() {
