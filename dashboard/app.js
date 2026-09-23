@@ -1635,57 +1635,75 @@
             if (!isView) {
                 overlay.querySelector('#eventSaveBtn').addEventListener('click', async () => {
                     const btn = overlay.querySelector('#eventSaveBtn');
-                    const file = document.getElementById('eventImageFile')?.files?.[0];
-                    let imageUrl = (document.getElementById('eventImageUrlInput')?.value || '').trim();
-                    if (!imageUrl && event?.image_url) imageUrl = event.image_url;
-                    let pdfUrl = event?.pdf_url || null;
-                    const pdfFile = document.getElementById('eventPdfFile')?.files?.[0];
-                    const removePdf = document.getElementById('eventPdfRemove')?.value === '1';
-                    if (file || pdfFile) {
-                        btn.disabled = true;
-                        btn.textContent = 'Uploaden…';
-                        try {
-                            if (file) imageUrl = await uploadNewsOrEventImage(file, 'event-image');
-                            if (pdfFile) pdfUrl = await uploadPdfFile(pdfFile);
-                        } catch (err) {
-                            alert(err.message || 'Upload mislukt');
-                            btn.disabled = false;
-                            btn.textContent = 'Opslaan';
+                    const originalBtnText = btn?.textContent || 'Opslaan';
+                    try {
+                        if (btn) {
+                            btn.disabled = true;
+                            btn.textContent = 'Opslaan…';
+                        }
+                        const file = document.getElementById('eventImageFile')?.files?.[0];
+                        let imageUrl = (document.getElementById('eventImageUrlInput')?.value || '').trim();
+                        if (!imageUrl && event?.image_url) imageUrl = event.image_url;
+                        let pdfUrl = event?.pdf_url || null;
+                        const pdfFile = document.getElementById('eventPdfFile')?.files?.[0];
+                        const removePdf = document.getElementById('eventPdfRemove')?.value === '1';
+                        if (file || pdfFile) {
+                            if (btn) btn.textContent = 'Uploaden…';
+                            try {
+                                if (file) imageUrl = await uploadNewsOrEventImage(file, 'event-image');
+                                if (pdfFile) pdfUrl = await uploadPdfFile(pdfFile);
+                            } catch (err) {
+                                alert(err.message || 'Upload mislukt');
+                                return;
+                            }
+                        } else if (removePdf) {
+                            pdfUrl = null;
+                        }
+                        const rawEndDate = document.getElementById('eventEndDate')?.value || '';
+                        const rawPrice = document.getElementById('eventPrice')?.value || '';
+                        const rawPresale = document.getElementById('eventPresalePrice')?.value || '';
+                        const titleVal = (document.getElementById('eventTitle')?.value || '').trim();
+                        const dateVal = document.getElementById('eventDate')?.value || null;
+                        if (!titleVal || !dateVal) {
+                            alert('Titel en begindatum zijn verplicht.');
                             return;
                         }
-                        btn.disabled = false;
-                        btn.textContent = 'Opslaan';
-                    } else if (removePdf) {
-                        pdfUrl = null;
+                        let ticketUrl = (document.getElementById('eventTicketUrl')?.value || '').trim();
+                        if (ticketUrl && !/^https?:\/\//i.test(ticketUrl)) ticketUrl = `https://${ticketUrl}`;
+                        const payload = {
+                            title: titleVal,
+                            description: (document.getElementById('eventDescription')?.value || '').trim(),
+                            event_date: dateVal,
+                            event_end_date: rawEndDate || null,
+                            location: (document.getElementById('eventLocation')?.value || '').trim() || null,
+                            price: rawPrice !== '' ? parseFloat(rawPrice) : null,
+                            presale_price: rawPresale !== '' ? parseFloat(rawPresale) : null,
+                            image_url: imageUrl || null,
+                            pdf_url: pdfUrl,
+                            ticket_url: ticketUrl || null,
+                            ticket_label: (document.getElementById('eventTicketLabel')?.value || '').trim() || null,
+                        };
+                        const url = saveId ? `${apiBase}/org/events/${saveId}` : `${apiBase}/org/events`;
+                        const method = saveId ? 'PUT' : 'POST';
+                        if (btn) btn.textContent = 'Opslaan…';
+                        const r = await fetch(url, { method, headers: authHeaders(), body: JSON.stringify(payload) });
+                        const evSaveJson = await r.json().catch(() => ({}));
+                        if (!r.ok) {
+                            alert(evSaveJson.message || evSaveJson.error || 'Opslaan mislukt');
+                            return;
+                        }
+                        alert('Evenement opgeslagen.');
+                        overlay.remove();
+                        loadEvents();
+                    } catch (err) {
+                        console.error('Event opslaan mislukt:', err);
+                        alert(err.message || 'Opslaan mislukt (netwerk- of serverfout).');
+                    } finally {
+                        if (btn && document.body.contains(btn)) {
+                            btn.disabled = false;
+                            btn.textContent = originalBtnText;
+                        }
                     }
-                    const rawEndDate = document.getElementById('eventEndDate')?.value || '';
-                    const rawPrice = document.getElementById('eventPrice')?.value || '';
-                    const rawPresale = document.getElementById('eventPresalePrice')?.value || '';
-                    const payload = {
-                        title: document.getElementById('eventTitle').value.trim(),
-                        description: document.getElementById('eventDescription').value.trim(),
-                        event_date: document.getElementById('eventDate').value || null,
-                        event_end_date: rawEndDate || null,
-                        location: document.getElementById('eventLocation').value.trim() || null,
-                        price: rawPrice !== '' ? parseFloat(rawPrice) : null,
-                        presale_price: rawPresale !== '' ? parseFloat(rawPresale) : null,
-                        image_url: imageUrl || null,
-                        pdf_url: pdfUrl,
-                        ticket_url: (() => {
-                            let s = (document.getElementById('eventTicketUrl')?.value || '').trim();
-                            if (!s) return null;
-                            if (!/^https?:\/\//i.test(s)) s = `https://${s}`;
-                            return s;
-                        })(),
-                        ticket_label: (document.getElementById('eventTicketLabel')?.value || '').trim() || null,
-                    };
-                    const url = saveId ? `${apiBase}/org/events/${saveId}` : `${apiBase}/org/events`;
-                    const method = saveId ? 'PUT' : 'POST';
-                    const r = await fetch(url, { method, headers: authHeaders(), body: JSON.stringify(payload) });
-                    const evSaveJson = await r.json().catch(() => ({}));
-                    if (!r.ok) { alert(evSaveJson.message || evSaveJson.error || 'Opslaan mislukt'); return; }
-                    overlay.remove();
-                    loadEvents();
                 });
             }
         };

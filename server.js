@@ -1885,12 +1885,8 @@ async function ensureEventColumns() {
       }
     }
   }
-  // Langere ticket-URLs (tracking-params) pasten niet in VARCHAR(500).
-  try {
-    await executeQuery(`ALTER TABLE events MODIFY COLUMN ticket_url VARCHAR(2000)`);
-  } catch (e) {
-    console.warn('[ensureEventColumns] ticket_url widen:', e.message);
-  }
+  // Geen MODIFY hier: ALTER TABLE op shared hosting kan requests laten hangen.
+  // Verruimen via /api/migrate-columns indien nodig.
   _eventColsMigrated = true;
 }
 // ─────────────────────────────────────────────────────────────────────────────
@@ -7814,10 +7810,25 @@ app.put('/api/org/events/:id', authenticateToken, requireOrgPortal, async (req, 
         throw updErr;
       }
     }
+    // Altijd apart zetten: legacy-fallback liet ticketvelden anders stil wegvallen.
+    if (ticket_url !== undefined || ticket_label !== undefined) {
+      try {
+        await executeQuery(
+          'UPDATE events SET ticket_url = ?, ticket_label = ?, updated_at = NOW() WHERE id = ? AND organization_id = ?',
+          [ticketUrlSafe, ticketLabelSafe, id, orgId]
+        );
+      } catch (ticketErr) {
+        console.warn('PUT /api/org/events ticket fields:', ticketErr.message);
+        if (!isMysqlMissingColumnError(ticketErr)) throw ticketErr;
+      }
+    }
     if (oldPdfUrl && oldPdfUrl !== pdfUrlSafe) {
       cleanupHostedPdfIfUnreferenced(oldPdfUrl).catch(() => {});
     }
-    const row = await executeQuery('SELECT id, title, event_date, status, updated_at FROM events WHERE id = ?', [id]);
+    const row = await executeQuery(
+      'SELECT id, title, event_date, status, ticket_url, ticket_label, updated_at FROM events WHERE id = ?',
+      [id]
+    );
     res.json({ event: row.rows[0] });
   } catch (error) {
     console.error('PUT /api/org/events/:id error:', error);
@@ -8869,6 +8880,7 @@ app.get('/api/migrate-columns', async (req, res) => {
     { table: 'events',        column: 'pdf_url',      sql: `ALTER TABLE events ADD COLUMN pdf_url VARCHAR(500)` },
     { table: 'events',        column: 'ticket_url',   sql: `ALTER TABLE events ADD COLUMN ticket_url VARCHAR(500)` },
     { table: 'events',        column: 'ticket_label', sql: `ALTER TABLE events ADD COLUMN ticket_label VARCHAR(255)` },
+    { table: 'events',        column: 'ticket_url_widen', sql: `ALTER TABLE events MODIFY COLUMN ticket_url VARCHAR(2000)` },
     { table: 'organizations', column: 'is_ondernemer', sql: `ALTER TABLE organizations ADD COLUMN is_ondernemer BOOLEAN DEFAULT false` },
   ];
   for (const m of migrations) {
