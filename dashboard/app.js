@@ -39,6 +39,17 @@
         { id: 'overig', label: 'Overig' },
     ].sort((a, b) => a.label.localeCompare(b.label, 'nl'));
 
+    function showToast(message, type = 'success') {
+        const el = document.createElement('div');
+        el.className = `dash-toast dash-toast--${type}`;
+        el.setAttribute('role', 'status');
+        el.innerHTML = `<span>${escapeHtml(String(message || ''))}</span><button type="button" class="dash-toast__close" aria-label="Sluiten">×</button>`;
+        document.body.appendChild(el);
+        const close = () => el.remove();
+        el.querySelector('.dash-toast__close')?.addEventListener('click', close);
+        setTimeout(close, 4500);
+    }
+
     const NEWS_SHARE_BASE_URL = 'https://holwert.appenvloed.com/app-link/';
     /** Publieke pagina met Open Graph op eigen domein — voor Facebook-deelvenster */
     const NEWS_PUBLIC_SHARE_BASE_URL = 'https://holwert.appenvloed.com/nieuws/';
@@ -1653,7 +1664,7 @@
                                 if (file) imageUrl = await uploadNewsOrEventImage(file, 'event-image');
                                 if (pdfFile) pdfUrl = await uploadPdfFile(pdfFile);
                             } catch (err) {
-                                alert(err.message || 'Upload mislukt');
+                                showToast(err.message || 'Upload mislukt', 'error');
                                 return;
                             }
                         } else if (removePdf) {
@@ -1665,7 +1676,7 @@
                         const titleVal = (document.getElementById('eventTitle')?.value || '').trim();
                         const dateVal = document.getElementById('eventDate')?.value || null;
                         if (!titleVal || !dateVal) {
-                            alert('Titel en begindatum zijn verplicht.');
+                            showToast('Titel en begindatum zijn verplicht.', 'error');
                             return;
                         }
                         let ticketUrl = (document.getElementById('eventTicketUrl')?.value || '').trim();
@@ -1689,15 +1700,15 @@
                         const r = await fetch(url, { method, headers: authHeaders(), body: JSON.stringify(payload) });
                         const evSaveJson = await r.json().catch(() => ({}));
                         if (!r.ok) {
-                            alert(evSaveJson.message || evSaveJson.error || 'Opslaan mislukt');
+                            showToast(evSaveJson.message || evSaveJson.error || 'Opslaan mislukt', 'error');
                             return;
                         }
-                        alert('Evenement opgeslagen.');
+                        showToast('Evenement opgeslagen.', 'success');
                         overlay.remove();
                         loadEvents();
                     } catch (err) {
                         console.error('Event opslaan mislukt:', err);
-                        alert(err.message || 'Opslaan mislukt (netwerk- of serverfout).');
+                        showToast(err.message || 'Opslaan mislukt (netwerk- of serverfout).', 'error');
                     } finally {
                         if (btn && document.body.contains(btn)) {
                             btn.disabled = false;

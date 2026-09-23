@@ -1400,3 +1400,37 @@ body {
         grid-template-columns: 1fr;
     }
 }
+
+/* Toast rechtsboven (zoals admin-meldingen) */
+.dash-toast {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    z-index: 10050;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    max-width: min(360px, calc(100vw - 2rem));
+    padding: 0.85rem 1rem;
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
+    color: #0f172a;
+    background: #fff;
+    border-left: 4px solid #0f46ae;
+    font-size: 0.9rem;
+    line-height: 1.4;
+}
+.dash-toast--success { border-left-color: #15803d; background: #f0fdf4; }
+.dash-toast--error { border-left-color: #b91c1c; background: #fef2f2; }
+.dash-toast--info { border-left-color: #0f46ae; background: #eff6ff; }
+.dash-toast__close {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font-size: 1.25rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+    opacity: 0.6;
+}
+.dash-toast__close:hover { opacity: 1; }
