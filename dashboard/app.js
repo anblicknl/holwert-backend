@@ -40,13 +40,54 @@
     ].sort((a, b) => a.label.localeCompare(b.label, 'nl'));
 
     function showToast(message, type = 'success') {
-        const el = document.createElement('div');
-        el.className = `dash-toast dash-toast--${type}`;
-        el.setAttribute('role', 'status');
-        el.innerHTML = `<span>${escapeHtml(String(message || ''))}</span><button type="button" class="dash-toast__close" aria-label="Sluiten">×</button>`;
-        document.body.appendChild(el);
-        const close = () => el.remove();
-        el.querySelector('.dash-toast__close')?.addEventListener('click', close);
+        if (!document.getElementById('dash-notification-styles')) {
+            const style = document.createElement('style');
+            style.id = 'dash-notification-styles';
+            style.textContent = `
+                .notification {
+                    position: fixed;
+                    top: 20px;
+                    right: 20px;
+                    z-index: 100000;
+                    min-width: 280px;
+                    max-width: min(420px, calc(100vw - 2rem));
+                    padding: 16px;
+                    border-radius: 8px;
+                    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+                    animation: dashNotifIn 0.3s ease-out;
+                    font-size: 0.95rem;
+                    line-height: 1.4;
+                }
+                .notification-success { background: #d4edda; border: 1px solid #c3e6cb; color: #155724; }
+                .notification-error { background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; }
+                .notification-info { background: #d1ecf1; border: 1px solid #bee5eb; color: #0c5460; }
+                .notification-content { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+                .notification-close { background: none; border: none; font-size: 18px; cursor: pointer; padding: 0; color: inherit; opacity: 0.7; }
+                .notification-close:hover { opacity: 1; }
+                @keyframes dashNotifIn {
+                    from { transform: translateX(120%); opacity: 0; }
+                    to { transform: translateX(0); opacity: 1; }
+                }
+            `;
+            document.head.appendChild(style);
+        }
+        const safe = String(message || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+        const kind = ['success', 'error', 'info'].includes(type) ? type : 'info';
+        const notification = document.createElement('div');
+        notification.className = `notification notification-${kind}`;
+        notification.innerHTML = `
+            <div class="notification-content">
+                <span class="notification-message">${safe}</span>
+                <button type="button" class="notification-close" aria-label="Sluiten">×</button>
+            </div>
+        `;
+        document.body.appendChild(notification);
+        const close = () => notification.remove();
+        notification.querySelector('.notification-close')?.addEventListener('click', close);
         setTimeout(close, 4500);
     }
 
