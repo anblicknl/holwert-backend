@@ -746,6 +746,17 @@ function normalizeEventPrice(value) {
   return n;
 }
 
+/** Ticket-URL normaliseren: trim, optioneel https://, max lengte. */
+function normalizeTicketUrl(value) {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  let s = String(value).trim();
+  if (!s) return null;
+  if (!/^https?:\/\//i.test(s)) s = `https://${s}`;
+  if (s.length > 2000) s = s.slice(0, 2000);
+  return s;
+}
+
 /** MySQL TEXT ≈ 64KB; te lange image_url (vaak base64) geeft ER_DATA_TOO_LONG → 500 bij opslaan. */
 function sanitizeEventImageUrlForDb(url) {
   if (url == null || url === '') return null;
@@ -1873,6 +1884,12 @@ async function ensureEventColumns() {
         console.warn('[ensureEventColumns]', e.message);
       }
     }
+  }
+  // Langere ticket-URLs (tracking-params) pasten niet in VARCHAR(500).
+  try {
+    await executeQuery(`ALTER TABLE events MODIFY COLUMN ticket_url VARCHAR(2000)`);
+  } catch (e) {
+    console.warn('[ensureEventColumns] ticket_url widen:', e.message);
   }
   _eventColsMigrated = true;
 }
@@ -6036,6 +6053,29 @@ app.get('/api/admin/events', authenticateToken, async (req, res) => {
   }
 });
 
+// Single admin event (voor bewerken; voorkomt fallback op paginalijst zonder ticketvelden)
+app.get('/api/admin/events/:id', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    await ensureEventColumns();
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid event id' });
+    const result = await executeQuery(
+      `SELECT e.*, u.first_name, u.last_name, o.name as organization_name
+       FROM events e
+       LEFT JOIN users u ON e.organizer_id = u.id
+       LEFT JOIN organizations o ON e.organization_id = o.id
+       WHERE e.id = ?
+       LIMIT 1`,
+      [id]
+    );
+    if (!result.rows?.length) return res.status(404).json({ error: 'Event not found' });
+    res.json({ event: result.rows[0] });
+  } catch (error) {
+    console.error('GET /api/admin/events/:id error:', error);
+    res.status(500).json({ error: 'Failed to get event', message: error.message });
+  }
+});
+
 // ===== ADMIN EVENTS CRUD =====
 // Create event
 app.post('/api/admin/events', authenticateToken, requireAdmin, async (req, res) => {
@@ -6050,6 +6090,9 @@ app.post('/api/admin/events', authenticateToken, requireAdmin, async (req, res) 
     if (endRaw && !endSql) return res.status(400).json({ error: 'Invalid event end date' });
     const priceVal = normalizeEventPrice(price);
     const presalePriceVal = normalizeEventPrice(presale_price);
+    const ticketUrlVal = normalizeTicketUrl(ticket_url) ?? null;
+    const ticketLabelVal =
+      ticket_label != null && String(ticket_label).trim() !== '' ? String(ticket_label).trim() : null;
 
     // Organizer mag ontbreken; als user niet bestaat, zet organizer_id op null
     let organizerId = req.user?.userId || null;
@@ -6065,7 +6108,7 @@ app.post('/api/admin/events', authenticateToken, requireAdmin, async (req, res) 
     const insertResult = await executeInsert(
       `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, presale_price, image_url, pdf_url, ticket_url, ticket_label, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-      [title, description || null, eventDateSql, endSql, location || null, organization_id || null, status, organizerId, priceVal, presalePriceVal, image_url || null, pdf_url || null, ticket_url || null, ticket_label || null]
+      [title, description || null, eventDateSql, endSql, location || null, organization_id || null, status, organizerId, priceVal, presalePriceVal, image_url || null, pdf_url || null, ticketUrlVal, ticketLabelVal]
     );
 
     if (!insertResult.insertId) {
@@ -6073,7 +6116,7 @@ app.post('/api/admin/events', authenticateToken, requireAdmin, async (req, res) 
     }
 
     const fetchResult = await executeQuery(
-      `SELECT id, title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, presale_price, image_url, created_at, updated_at
+      `SELECT id, title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, presale_price, image_url, pdf_url, ticket_url, ticket_label, created_at, updated_at
        FROM events WHERE id = ? LIMIT 1`,
       [insertResult.insertId]
     );
@@ -6116,7 +6159,7 @@ app.put('/api/admin/events/:id', authenticateToken, requireAdmin, async (req, re
     if (presale_price !== undefined) sets.push(`presale_price = ${push(normalizeEventPrice(presale_price))}`);
     if (image_url !== undefined) sets.push(`image_url = ${push(image_url)}`);
     if (pdf_url !== undefined) sets.push(`pdf_url = ${push(pdf_url)}`);
-    if (ticket_url !== undefined) sets.push(`ticket_url = ${push(ticket_url || null)}`);
+    if (ticket_url !== undefined) sets.push(`ticket_url = ${push(normalizeTicketUrl(ticket_url))}`);
     if (ticket_label !== undefined) sets.push(`ticket_label = ${push(ticket_label || null)}`);
     if (!sets.length) return res.status(400).json({ error: 'No fields to update' });
     params.push(id);
@@ -6126,7 +6169,7 @@ app.put('/api/admin/events/:id', authenticateToken, requireAdmin, async (req, re
     );
 
     const fetchResult = await executeQuery(
-      `SELECT id, title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, presale_price, image_url, created_at, updated_at
+      `SELECT id, title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, presale_price, image_url, pdf_url, ticket_url, ticket_label, created_at, updated_at
        FROM events WHERE id = ? LIMIT 1`,
       [id]
     );
@@ -7491,7 +7534,7 @@ app.get('/api/org/events', authenticateToken, requireOrgPortal, async (req, res)
     const { page = 1, limit = 20, status } = req.query;
     const offset = (page - 1) * limit;
     const orgId = req.organizationId;
-    let query = `SELECT e.id, e.title, e.description, e.event_date, e.event_end_date, e.location, e.status, e.price, e.presale_price, e.image_url, e.pdf_url, e.organization_id, e.created_at, e.updated_at
+    let query = `SELECT e.id, e.title, e.description, e.event_date, e.event_end_date, e.location, e.status, e.price, e.presale_price, e.image_url, e.pdf_url, e.ticket_url, e.ticket_label, e.organization_id, e.created_at, e.updated_at
       FROM events e WHERE e.organization_id = ?`;
     const params = [orgId];
     if (status === 'scheduled') { query += ` AND (e.status = 'scheduled' OR e.status IS NULL)`; }
@@ -7558,7 +7601,7 @@ app.post('/api/org/events', authenticateToken, requireOrgPortal, async (req, res
     const presalePriceVal = normalizeEventPrice(presale_price);
     const imageUrlSafe = sanitizeEventImageUrlForDb(image_url);
     const pdfUrlSafe = pdf_url != null && String(pdf_url).trim() !== '' ? String(pdf_url).trim() : null;
-    const ticketUrlSafe = ticket_url != null && String(ticket_url).trim() !== '' ? String(ticket_url).trim() : null;
+    const ticketUrlSafe = normalizeTicketUrl(ticket_url) ?? null;
     const ticketLabelSafe = ticket_label != null && String(ticket_label).trim() !== '' ? String(ticket_label).trim() : null;
     const orgCheck = await executeQuery('SELECT is_approved FROM organizations WHERE id = ?', [orgId]);
     const approved =
@@ -7700,7 +7743,7 @@ app.put('/api/org/events/:id', authenticateToken, requireOrgPortal, async (req, 
     const presalePriceVal = normalizeEventPrice(presale_price);
     const imageUrlSafe = sanitizeEventImageUrlForDb(image_url ?? null);
     const pdfUrlSafe = pdf_url != null && String(pdf_url).trim() !== '' ? String(pdf_url).trim() : null;
-    const ticketUrlSafe = ticket_url != null && String(ticket_url).trim() !== '' ? String(ticket_url).trim() : null;
+    const ticketUrlSafe = normalizeTicketUrl(ticket_url) ?? null;
     const ticketLabelSafe = ticket_label != null && String(ticket_label).trim() !== '' ? String(ticket_label).trim() : null;
     const orgAppr = await executeQuery('SELECT is_approved FROM organizations WHERE id = ?', [orgId]);
     const orgApproved =

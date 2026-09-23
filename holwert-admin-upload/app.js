@@ -7503,12 +7503,12 @@ class HolwertAdmin {
                                 </div>
                                 <div class="form-group">
                                     <label>Ticketlink (optioneel)</label>
-                                    <input type="url" id="evTicketUrl" value="${initial.ticket_url || ''}" placeholder="https://… (bijv. MGTickets)">
-                                    <small class="form-hint">Wordt in de app een knop onder de omschrijving.</small>
+                                    <input type="text" inputmode="url" autocomplete="url" id="evTicketUrl" value="${String(initial.ticket_url || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}" placeholder="https://… (bijv. MGTickets)">
+                                    <small class="form-hint">Wordt in de app een knop onder de omschrijving. Mag met of zonder https://.</small>
                                 </div>
                                 <div class="form-group">
                                     <label>Tekst op ticketknop (optioneel)</label>
-                                    <input type="text" id="evTicketLabel" value="${initial.ticket_label || ''}" placeholder="Koop hier de tickets">
+                                    <input type="text" id="evTicketLabel" value="${String(initial.ticket_label || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}" placeholder="Koop hier de tickets">
                                 </div>
                             </form>
                         </div>
@@ -7522,6 +7522,11 @@ class HolwertAdmin {
             overlay.style.display = 'flex';
             document.body.appendChild(overlay);
             this.wirePdfRemoveControl(overlay);
+
+            const eventFormEl = overlay.querySelector('#eventForm');
+            if (eventFormEl) {
+                eventFormEl.addEventListener('submit', (e) => e.preventDefault());
+            }
 
             const closeOverlay = () => overlay.remove();
             overlay.querySelectorAll('.js-event-modal-close').forEach((b) => {
@@ -7706,7 +7711,12 @@ class HolwertAdmin {
                 }
             }
 
-            body.ticket_url = (document.getElementById('evTicketUrl')?.value || '').trim() || null;
+            body.ticket_url = (() => {
+                let s = (document.getElementById('evTicketUrl')?.value || '').trim();
+                if (!s) return null;
+                if (!/^https?:\/\//i.test(s)) s = `https://${s}`;
+                return s;
+            })();
             body.ticket_label = (document.getElementById('evTicketLabel')?.value || '').trim() || null;
             const rawPrice = document.getElementById('evPrice')?.value || '';
             const rawPresale = document.getElementById('evPresalePrice')?.value || '';

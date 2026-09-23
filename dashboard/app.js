@@ -1583,8 +1583,8 @@
                         <div class="form-group">
                             <label>Ticketlink (optioneel)</label>
                             ${!isView
-                                ? `<input type="url" id="eventTicketUrl" placeholder="https://…" value="${escapeHtml(event?.ticket_url || '')}">
-                                   <p class="form-hint">Wordt in de app een knop (bijv. ticketverkoop).</p>`
+                                ? `<input type="text" inputmode="url" autocomplete="url" id="eventTicketUrl" placeholder="https://…" value="${escapeHtml(event?.ticket_url || '')}">
+                                   <p class="form-hint">Wordt in de app een knop (bijv. ticketverkoop). Mag met of zonder https://.</p>`
                                 : (event?.ticket_url
                                     ? `<a href="${escapeHtml(event.ticket_url)}" target="_blank" rel="noopener">${escapeHtml(event.ticket_url)}</a>`
                                     : '<p class="form-hint">Geen ticketlink</p>')
@@ -1671,7 +1671,12 @@
                         presale_price: rawPresale !== '' ? parseFloat(rawPresale) : null,
                         image_url: imageUrl || null,
                         pdf_url: pdfUrl,
-                        ticket_url: (document.getElementById('eventTicketUrl')?.value || '').trim() || null,
+                        ticket_url: (() => {
+                            let s = (document.getElementById('eventTicketUrl')?.value || '').trim();
+                            if (!s) return null;
+                            if (!/^https?:\/\//i.test(s)) s = `https://${s}`;
+                            return s;
+                        })(),
                         ticket_label: (document.getElementById('eventTicketLabel')?.value || '').trim() || null,
                     };
                     const url = saveId ? `${apiBase}/org/events/${saveId}` : `${apiBase}/org/events`;
