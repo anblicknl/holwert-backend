@@ -20,8 +20,8 @@ const PORT = process.env.PORT || 3000;
 // Simple in-memory cache for read queries (performance optimization)
 const cache = new Map();
 const CACHE_TTL = {
-  stats: 30 * 1000, // 30 seconden voor stats
-  moderation: 20 * 1000, // 20 seconden voor moderation count
+  stats: 60 * 1000, // 1 minuut voor stats
+  moderation: 2 * 60 * 1000, // 2 minuten — badges pollen minder vaak
   organizations: 10 * 1000, // 10 seconden voor organizations list
   default: 5 * 1000 // 5 seconden default
 };
@@ -560,10 +560,13 @@ module.exports.pool = pool;
 
 // Helper om query via PHP proxy uit te voeren
 async function executeQueryViaProxy(query, params = [], action = 'execute') {
+  const debugProxy = process.env.DEBUG_DB_PROXY === '1' || process.env.DEBUG_DB_PROXY === 'true';
   try {
-    console.log(`[PHP Proxy] Executing ${action} query via proxy...`);
-    console.log(`[PHP Proxy] Query: ${query.substring(0, 100)}...`);
-    console.log(`[PHP Proxy] Params count: ${params.length}`);
+    if (debugProxy) {
+      console.log(`[PHP Proxy] Executing ${action} query via proxy...`);
+      console.log(`[PHP Proxy] Query: ${query.substring(0, 100)}...`);
+      console.log(`[PHP Proxy] Params count: ${params.length}`);
+    }
     
     const response = await axios.post(PHP_PROXY_URL, {
       action: action,
@@ -577,8 +580,10 @@ async function executeQueryViaProxy(query, params = [], action = 'execute') {
       timeout: 10000 // 10 seconden timeout (verlaagd voor snellere failures)
     });
 
-    console.log(`[PHP Proxy] Response status: ${response.status}`);
-    console.log(`[PHP Proxy] Response data:`, JSON.stringify(response.data).substring(0, 200));
+    if (debugProxy) {
+      console.log(`[PHP Proxy] Response status: ${response.status}`);
+      console.log(`[PHP Proxy] Response data:`, JSON.stringify(response.data).substring(0, 200));
+    }
 
     // Check for error in response
     if (response.data.error) {
@@ -588,7 +593,9 @@ async function executeQueryViaProxy(query, params = [], action = 'execute') {
     if (action === 'insert') {
       const insertId = response.data.insertId ? parseInt(response.data.insertId) : null;
       const affectedRows = response.data.affectedRows || 0;
-      console.log(`[PHP Proxy] Insert result - insertId: ${insertId}, affectedRows: ${affectedRows}`);
+      if (debugProxy) {
+        console.log(`[PHP Proxy] Insert result - insertId: ${insertId}, affectedRows: ${affectedRows}`);
+      }
       
       // insertId kan null zijn bij ON DUPLICATE KEY UPDATE (update in plaats van insert)
       // Dit is normaal en geen error
@@ -4286,10 +4293,8 @@ app.get('/api/admin/dashboard', authenticateToken, async (req, res) => {
     const cacheKey = getCacheKey('/api/admin/dashboard');
     const cached = getCached(cacheKey);
     if (cached) {
-      console.log('[Dashboard] Returning cached data');
       return res.json(cached);
     }
-    console.log('[Dashboard] Fetching fresh data from database');
     const statsRow = await fetchAdminStatsCounts();
     const pendingResult = await executeQuery(`
       SELECT
@@ -4342,15 +4347,12 @@ app.get('/api/admin/stats', authenticateToken, async (req, res) => {
     const cached = getCached(cacheKey);
     
     if (cached) {
-      console.log('[Stats] Returning cached data');
       return res.json(cached);
     }
     
-    console.log('[Stats] Fetching fresh data from database');
     const row = await fetchAdminStatsCounts();
     const stats = mapAdminStatsRow(row);
     
-    // Cache for 30 seconds
     setCache(cacheKey, stats, CACHE_TTL.stats);
     res.json(stats);
   } catch (error) {
@@ -4366,12 +4368,10 @@ app.get('/api/admin/moderation/count', authenticateToken, async (req, res) => {
     const cached = getCached(cacheKey);
     
     if (cached) {
-      console.log('[Moderation Count] Returning cached data');
       res.setHeader('Cache-Control', 'private, no-store');
       return res.json(cached);
     }
     
-    console.log('[Moderation Count] Fetching fresh data from database');
     // Single query to get all pending counts at once
     const result = await executeQuery(`
       SELECT 
@@ -5065,11 +5065,8 @@ app.get('/api/admin/organizations', authenticateToken, requireAdmin, async (req,
     const cached = getCached(cacheKey);
     
     if (cached) {
-      console.log('[Organizations] Returning cached data');
       return res.json(cached);
     }
-    
-    console.log('[Organizations] Fetching fresh data from database');
 
     const followerSelect = liteMode
       ? '0 AS followers_count'

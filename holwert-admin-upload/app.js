@@ -645,7 +645,7 @@ class HolwertAdmin {
             console.error('Main screen element not found!');
         }
 
-        // Start automatische polling van notificatie-badges (elke 30 seconden)
+        // Start automatische polling van notificatie-badges
         this.startBadgePolling();
         this.updateSuperAdminUiVisibility();
 
@@ -664,19 +664,37 @@ class HolwertAdmin {
     startBadgePolling() {
         // Voorkomen dat er meerdere intervals tegelijk lopen
         if (this._badgePollTimer) clearInterval(this._badgePollTimer);
-        this._badgePollTimer = setInterval(() => {
-            if (this.token) {
-                this.loadNotificationCounts();
-            } else {
+        if (this._badgeVisibilityHandler) {
+            document.removeEventListener('visibilitychange', this._badgeVisibilityHandler);
+        }
+
+        const POLL_MS = 10 * 60 * 1000; // 10 minuten; alleen als tab zichtbaar is
+        const tick = () => {
+            if (!this.token) {
                 this.stopBadgePolling();
+                return;
             }
-        }, 300_000); // elke 5 minuten (was 30s; bespaart Vercel Edge Requests)
+            if (typeof document !== 'undefined' && document.hidden) return;
+            this.loadNotificationCounts();
+        };
+
+        this._badgePollTimer = setInterval(tick, POLL_MS);
+        this._badgeVisibilityHandler = () => {
+            if (!document.hidden && this.token) {
+                this.loadNotificationCounts();
+            }
+        };
+        document.addEventListener('visibilitychange', this._badgeVisibilityHandler);
     }
 
     stopBadgePolling() {
         if (this._badgePollTimer) {
             clearInterval(this._badgePollTimer);
             this._badgePollTimer = null;
+        }
+        if (this._badgeVisibilityHandler) {
+            document.removeEventListener('visibilitychange', this._badgeVisibilityHandler);
+            this._badgeVisibilityHandler = null;
         }
     }
 
@@ -1037,18 +1055,21 @@ class HolwertAdmin {
 
     async loadNotificationCounts() {
         try {
-            // Haal notificatie counts op van verschillende endpoints
-            const [moderationCount, pendingOrgsCount, pendingEventsCount] = await Promise.all([
-                this.getModerationCount(),
-                this.getPendingOrganizationsCount(),
-                this.getPendingEventsCount()
-            ]);
+            // Eén endpoint: bevat orgs + events (geen aparte organizations?status=pending-call)
+            const response = await fetch(`${this.apiBaseUrl}/admin/moderation/count`, {
+                headers: { 'Authorization': `Bearer ${this.token}` },
+                cache: 'no-store',
+            });
+            if (!response.ok) return;
+            const data = await response.json();
+            const orgs = parseInt(data.organizations, 10) || 0;
+            const events = parseInt(data.events, 10) || 0;
+            const news = parseInt(data.news, 10) || 0;
+            const moderationTotal = (parseInt(data.count, 10) || 0) || (orgs + news + events);
 
-            // Update notificatie bolletjes
-            this.updateNotificationBadge('moderation', moderationCount);
-            this.updateNotificationBadge('organizations', pendingOrgsCount);
-            this.updateNotificationBadge('events', pendingEventsCount);
-
+            this.updateNotificationBadge('moderation', moderationTotal);
+            this.updateNotificationBadge('organizations', orgs);
+            this.updateNotificationBadge('events', events);
         } catch (error) {
             console.error('Error loading notification counts:', error);
         }
@@ -1062,7 +1083,6 @@ class HolwertAdmin {
             });
             if (response.ok) {
                 const data = await response.json();
-                // Totaal openstaande items (organisaties + nieuws + evenementen)
                 return (parseInt(data.organizations, 10) || 0)
                      + (parseInt(data.news, 10) || 0)
                      + (parseInt(data.events, 10) || 0);
@@ -1074,14 +1094,15 @@ class HolwertAdmin {
     }
 
     async getPendingOrganizationsCount() {
+        // Bewaard voor call-sites die dit nog apart aanroepen; poll gebruikt loadNotificationCounts.
         try {
-            const response = await fetch(`${this.apiBaseUrl}/admin/organizations?status=pending&limit=1`, {
+            const response = await fetch(`${this.apiBaseUrl}/admin/moderation/count`, {
                 headers: { 'Authorization': `Bearer ${this.token}` },
                 cache: 'no-store',
             });
             if (response.ok) {
                 const data = await response.json();
-                return data.pagination?.total ?? (Array.isArray(data.organizations) ? data.organizations.length : 0) ?? 0;
+                return parseInt(data.organizations, 10) || 0;
             }
         } catch (error) {
             console.error('Error getting pending organizations count:', error);
