@@ -89,6 +89,7 @@ if ($apiKey === '' || $incomingKey !== $apiKey) {
 
 // Whitelist tabellen die de backend mag gebruiken (Vercel heeft geen directe MySQL)
 $allowedTables = [
+    'notification_history',
     'bookmarks',
     'push_notification_mutes',
     'follows',

@@ -2889,6 +2889,9 @@ app.get('/api/cron/afval-reminders', async (req, res) => {
   }
 });
 
+// Privacy cleanup is fail-closed: CRON_SECRET is mandatory and the default is dry-run.
+app.get('/api/cron/privacy-cleanup', require('./privacyCleanup').createPrivacyCleanupHandler({ executeQuery }));
+
 // Get user's push tokens (for debugging/management)
 app.get('/api/push/tokens', authenticateToken, async (req, res) => {
   try {

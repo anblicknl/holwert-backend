@@ -3,6 +3,13 @@
     {
       "path": "/api/cron/afval-reminders",
       "schedule": "0 16 * * *"
+    },
+    {
+      "path": "/api/cron/privacy-cleanup",
+      "schedule": "0 3 * * *"
     }
+  ],
+  "regions": [
+    "fra1"
   ]
 }
