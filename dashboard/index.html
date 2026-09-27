@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard - Holwert Dorpsapp</title>
-    <link rel="stylesheet" href="styles.css?v=20260927-org-terms2">
+    <link rel="stylesheet" href="styles.css?v=20260927-org-terms3">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
 <body>
@@ -40,7 +40,7 @@
                     </button>
                 </div>
                 <p class="login-terms-link-wrap">
-                    <a href="#voorwaarden" class="login-terms-link" data-open-org-terms>Voorwaarden voor organisaties</a>
+                    <button type="button" class="login-terms-link" data-open-org-terms>Voorwaarden voor organisaties</button>
                 </p>
             </form>
             <div id="loginError" class="error-message login-feedback"></div>
@@ -190,7 +190,7 @@
                         <input type="checkbox" id="org_reg_terms" name="org_reg_terms" required>
                         <span>
                             Ik ga akkoord met de
-                            <a href="#voorwaarden" class="login-terms-link" data-open-org-terms>Voorwaarden voor organisaties</a>
+                            <button type="button" class="org-terms-inline-link" data-open-org-terms>Voorwaarden voor organisaties</button>
                             en geef toestemming om de door mij ingevoerde organisatiegegevens en inhoud in Dorpsapp Holwert te publiceren.
                         </span>
                     </label>
@@ -302,7 +302,7 @@
     </div>
 
     <!-- Voorwaarden voor organisaties -->
-    <div id="orgTermsModal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="orgTermsModalTitle" hidden>
+    <div id="orgTermsModal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="orgTermsModalTitle">
         <div class="modal-content modal-content--wide org-terms-modal">
             <div class="modal-header">
                 <h3 id="orgTermsModalTitle">Voorwaarden voor organisaties</h3>
@@ -424,6 +424,43 @@
         </div>
     </div>
 
-    <script src="app.js?v=20260927-org-terms2"></script>
+    <script>
+    (function () {
+        var modal = document.getElementById('orgTermsModal');
+        if (!modal) return;
+
+        function openOrgTerms(e) {
+            if (e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            modal.classList.add('show');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeOrgTerms() {
+            modal.classList.remove('show');
+            document.body.style.overflow = '';
+        }
+
+        window.openHolwertOrgTerms = openOrgTerms;
+        window.closeHolwertOrgTerms = closeOrgTerms;
+
+        document.addEventListener('click', function (e) {
+            var trigger = e.target.closest('[data-open-org-terms]');
+            if (trigger) openOrgTerms(e);
+        });
+        document.getElementById('closeOrgTermsModal')?.addEventListener('click', closeOrgTerms);
+        document.getElementById('closeOrgTermsModalBtn')?.addEventListener('click', closeOrgTerms);
+        modal.addEventListener('click', function (e) {
+            if (e.target === modal) closeOrgTerms();
+        });
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && modal.classList.contains('show')) closeOrgTerms();
+        });
+        if (window.location.hash === '#voorwaarden') openOrgTerms();
+    })();
+    </script>
+    <script src="app.js?v=20260927-org-terms3"></script>
 </body>
 </html>

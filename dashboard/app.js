@@ -422,42 +422,41 @@
 
     const orgTermsModal = document.getElementById('orgTermsModal');
 
-    function openOrgTermsModal() {
+    function openOrgTermsModal(e) {
+        if (typeof window.openHolwertOrgTerms === 'function') {
+            window.openHolwertOrgTerms(e);
+            return;
+        }
         if (!orgTermsModal) return;
-        orgTermsModal.hidden = false;
         orgTermsModal.classList.add('show');
         document.body.style.overflow = 'hidden';
     }
 
     function closeOrgTermsModal() {
+        if (typeof window.closeHolwertOrgTerms === 'function') {
+            window.closeHolwertOrgTerms();
+            return;
+        }
         if (!orgTermsModal) return;
         orgTermsModal.classList.remove('show');
-        orgTermsModal.hidden = true;
         document.body.style.overflow = '';
-        if (window.location.hash === '#voorwaarden') {
-            history.replaceState(null, '', window.location.pathname + window.location.search);
-        }
     }
 
-    document.querySelectorAll('[data-open-org-terms]').forEach((el) => {
-        el.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            openOrgTermsModal();
+    // Modal open/close zit ook inline in index.html (werkt zonder nieuwe app.js-upload).
+    // Hier alleen als fallback als inline script ontbreekt.
+    if (typeof window.openHolwertOrgTerms !== 'function') {
+        document.querySelectorAll('[data-open-org-terms]').forEach((el) => {
+            el.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                openOrgTermsModal(e);
+            });
         });
-    });
-    document.getElementById('closeOrgTermsModal')?.addEventListener('click', closeOrgTermsModal);
-    document.getElementById('closeOrgTermsModalBtn')?.addEventListener('click', closeOrgTermsModal);
-    orgTermsModal?.addEventListener('click', (e) => {
-        if (e.target === orgTermsModal) closeOrgTermsModal();
-    });
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && orgTermsModal?.classList.contains('show')) {
-            closeOrgTermsModal();
-        }
-    });
-    if (window.location.hash === '#voorwaarden') {
-        openOrgTermsModal();
+        document.getElementById('closeOrgTermsModal')?.addEventListener('click', closeOrgTermsModal);
+        document.getElementById('closeOrgTermsModalBtn')?.addEventListener('click', closeOrgTermsModal);
+        orgTermsModal?.addEventListener('click', (e) => {
+            if (e.target === orgTermsModal) closeOrgTermsModal();
+        });
     }
 
     document.getElementById('showOrgRegisterBtn')?.addEventListener('click', () => {

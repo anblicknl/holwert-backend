@@ -256,10 +256,17 @@ body {
 }
 
 .login-terms-link {
+    display: inline;
+    background: none;
+    border: none;
+    padding: 0;
     color: #334155;
+    font: inherit;
     font-weight: 600;
+    font-size: 0.8125rem;
     text-decoration: underline;
     text-underline-offset: 2px;
+    cursor: pointer;
 }
 
 .login-terms-link:hover {
@@ -278,8 +285,25 @@ body {
     font-weight: 500;
 }
 
-.org-reg-terms-field .login-terms-link {
+.org-terms-inline-link {
+    display: inline;
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    color: #0f46ae;
+    font: inherit;
     font-weight: 700;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+    vertical-align: baseline;
+}
+
+.org-terms-inline-link:hover,
+.org-terms-inline-link:focus-visible {
+    color: #0a317a;
+    outline: none;
 }
 
 .org-terms-modal {
