@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard - Holwert Dorpsapp</title>
-    <link rel="stylesheet" href="styles.css?v=20260923-toast">
+    <link rel="stylesheet" href="styles.css?v=20260927-org-terms">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
 <body>
@@ -39,6 +39,9 @@
                         <i class="fas fa-building" aria-hidden="true"></i>
                     </button>
                 </div>
+                <p class="login-terms-link-wrap">
+                    <a href="#voorwaarden" class="login-terms-link" data-open-org-terms>Voorwaarden voor organisaties</a>
+                </p>
             </form>
             <div id="loginError" class="error-message login-feedback"></div>
         </div>
@@ -182,6 +185,16 @@
                     <label for="org_reg_privacy">Privacy statement (optioneel)</label>
                     <textarea id="org_reg_privacy" rows="5" maxlength="50000"></textarea>
                 </div>
+                <div class="form-group checkbox-field org-reg-terms-field">
+                    <label class="checkbox-label" for="org_reg_terms">
+                        <input type="checkbox" id="org_reg_terms" name="org_reg_terms" required>
+                        <span>
+                            Ik ga akkoord met de
+                            <a href="#voorwaarden" class="login-terms-link" data-open-org-terms>Voorwaarden voor organisaties</a>
+                            en geef toestemming om de door mij ingevoerde organisatiegegevens en inhoud in Dorpsapp Holwert te publiceren.
+                        </span>
+                    </label>
+                </div>
                 <button type="submit" class="btn btn-primary login-submit" id="orgRegisterSubmitBtn">
                     <i class="fas fa-paper-plane"></i>
                     <span>Aanmelding versturen</span>
@@ -288,6 +301,114 @@
         </main>
     </div>
 
-    <script src="app.js?v=20260923-toast2"></script>
+    <!-- Voorwaarden voor organisaties -->
+    <div id="orgTermsModal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="orgTermsModalTitle" hidden>
+        <div class="modal-content modal-content--wide org-terms-modal">
+            <div class="modal-header">
+                <h3 id="orgTermsModalTitle">Voorwaarden voor organisaties</h3>
+                <button type="button" class="modal-close" id="closeOrgTermsModal" aria-label="Sluiten">&times;</button>
+            </div>
+            <div class="modal-body org-terms-body">
+                <p class="org-terms-lead">
+                    Dorpsapp Holwert is bedoeld om inwoners op één centrale plek te informeren over wat er in Holwert gebeurt.
+                    Verenigingen, stichtingen, bedrijven en andere organisaties kunnen hiervoor een organisatieprofiel beheren
+                    en zelf informatie, nieuws en activiteiten plaatsen.
+                </p>
+                <p>
+                    Door je namens een organisatie aan te melden en gebruik te maken van een organisatieaccount ga je akkoord
+                    met onderstaande voorwaarden.
+                </p>
+
+                <h4>1. Publicatie van informatie</h4>
+                <p>
+                    De gegevens en inhoud die je namens een organisatie invoert, kunnen worden gepubliceerd en zichtbaar
+                    worden gemaakt in Dorpsapp Holwert.
+                </p>
+                <p>
+                    Dit geldt bijvoorbeeld voor de naam en beschrijving van de organisatie, contactgegevens, website, logo,
+                    afbeeldingen, nieuwsberichten en activiteiten.
+                </p>
+                <p>
+                    Door deze informatie aan te leveren, geef je Dorpsbelang Holwert toestemming om deze binnen de dorpsapp
+                    te tonen en te gebruiken voor het functioneren en onder de aandacht brengen van de dorpsapp.
+                </p>
+
+                <h4>2. Verantwoordelijkheid voor de inhoud</h4>
+                <p>
+                    De organisatie is zelf verantwoordelijk voor de informatie die via het organisatieaccount wordt geplaatst
+                    en voor het actueel houden daarvan.
+                </p>
+                <p>
+                    Degene die het organisatieaccount beheert, verklaart bevoegd te zijn om namens de betreffende organisatie
+                    informatie te plaatsen.
+                </p>
+
+                <h4>3. Foto's, teksten en ander materiaal</h4>
+                <p>
+                    Plaats alleen teksten, foto's, logo's en ander materiaal dat je zelf mag gebruiken en publiceren.
+                </p>
+                <p>
+                    Wanneer op foto's of in berichten andere personen herkenbaar worden afgebeeld of persoonsgegevens van
+                    anderen worden vermeld, is de organisatie zelf verantwoordelijk voor het verkrijgen van eventuele
+                    benodigde toestemming en voor een zorgvuldige omgang met deze gegevens.
+                </p>
+
+                <h4>4. Gebruik van de dorpsapp</h4>
+                <p>
+                    De dorpsapp is bedoeld voor informatie die relevant is voor Holwert en zijn inwoners.
+                </p>
+                <p>
+                    Inhoud die onrechtmatig, misleidend, discriminerend, beledigend of anderszins ongepast is, is niet
+                    toegestaan. Ook mag de dorpsapp niet worden gebruikt voor spam of andere vormen van misbruik.
+                </p>
+                <p>
+                    Dorpsbelang Holwert behoudt zich het recht voor om inhoud te verwijderen of niet langer zichtbaar te
+                    maken wanneer deze niet past binnen het doel van de dorpsapp of in strijd is met deze voorwaarden.
+                </p>
+                <p>
+                    Bij ernstig of herhaald misbruik kan de toegang tot een organisatieaccount worden beperkt of beëindigd.
+                </p>
+
+                <h4>5. Beschikbaarheid en wijzigingen</h4>
+                <p>
+                    Dorpsbelang Holwert doet zijn best om Dorpsapp Holwert goed en betrouwbaar te laten functioneren.
+                    Er kan echter niet worden gegarandeerd dat de app altijd beschikbaar is of zonder fouten functioneert.
+                </p>
+                <p>
+                    Functionaliteiten kunnen in de toekomst worden gewijzigd, toegevoegd of verwijderd.
+                </p>
+
+                <h4>6. Beëindigen van deelname</h4>
+                <p>
+                    Een organisatie kan verzoeken haar organisatieprofiel en toegang tot de dorpsapp te beëindigen.
+                </p>
+                <p>
+                    Dorpsbelang Holwert kan een organisatieprofiel beëindigen wanneer de organisatie niet meer bestaat,
+                    langdurig niet meer actief is of wanneer sprake is van misbruik van de dorpsapp.
+                </p>
+
+                <h4>7. Persoonsgegevens</h4>
+                <p>
+                    Voor het beheer van een organisatieaccount kunnen persoonsgegevens worden verwerkt, bijvoorbeeld de
+                    naam en het e-mailadres van de beheerder.
+                </p>
+                <p>
+                    In de privacyverklaring van Dorpsapp Holwert staat beschreven welke persoonsgegevens worden verwerkt,
+                    waarvoor deze worden gebruikt en hoe daarmee wordt omgegaan.
+                </p>
+
+                <h4>8. Akkoord</h4>
+                <p>
+                    Door een organisatieaccount aan te maken of te activeren verklaar je dat je deze voorwaarden hebt
+                    gelezen en ermee akkoord gaat.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" id="closeOrgTermsModalBtn">Sluiten</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js?v=20260927-org-terms"></script>
 </body>
 </html>

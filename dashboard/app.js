@@ -420,6 +420,46 @@
         orgRegisterError.classList.add('show');
     }
 
+    const orgTermsModal = document.getElementById('orgTermsModal');
+
+    function openOrgTermsModal() {
+        if (!orgTermsModal) return;
+        orgTermsModal.hidden = false;
+        orgTermsModal.classList.add('show');
+        document.body.style.overflow = 'hidden';
+    }
+
+    function closeOrgTermsModal() {
+        if (!orgTermsModal) return;
+        orgTermsModal.classList.remove('show');
+        orgTermsModal.hidden = true;
+        document.body.style.overflow = '';
+        if (window.location.hash === '#voorwaarden') {
+            history.replaceState(null, '', window.location.pathname + window.location.search);
+        }
+    }
+
+    document.querySelectorAll('[data-open-org-terms]').forEach((el) => {
+        el.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            openOrgTermsModal();
+        });
+    });
+    document.getElementById('closeOrgTermsModal')?.addEventListener('click', closeOrgTermsModal);
+    document.getElementById('closeOrgTermsModalBtn')?.addEventListener('click', closeOrgTermsModal);
+    orgTermsModal?.addEventListener('click', (e) => {
+        if (e.target === orgTermsModal) closeOrgTermsModal();
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && orgTermsModal?.classList.contains('show')) {
+            closeOrgTermsModal();
+        }
+    });
+    if (window.location.hash === '#voorwaarden') {
+        openOrgTermsModal();
+    }
+
     document.getElementById('showOrgRegisterBtn')?.addEventListener('click', () => {
         showAuthPanel('register');
         if (loginError) loginError.classList.remove('show', 'login-feedback--success', 'login-feedback--error');
@@ -561,6 +601,12 @@
         const name = (document.getElementById('org_reg_name')?.value || '').trim();
         if (!name) {
             showOrgRegisterError('Vul de organisatienaam in.');
+            return;
+        }
+        const termsOk = document.getElementById('org_reg_terms')?.checked;
+        if (!termsOk) {
+            showOrgRegisterError('Je moet akkoord gaan met de Voorwaarden voor organisaties om je aan te melden.');
+            document.getElementById('org_reg_terms')?.focus();
             return;
         }
         const bcRaw = (document.getElementById('org_reg_brand_color')?.value || '').trim();
