@@ -2146,7 +2146,17 @@
             const published  = allNews.filter(n => n.is_published !== false).length;
             const drafts     = allNews.length - published;
             const now        = new Date();
-            const upcoming   = allEvents.filter(e => new Date(e.start_date || e.date) >= now).length;
+            // API levert event_date / event_end_date (niet start_date/date)
+            const eventMoment = (e) => {
+                const raw = e?.event_end_date || e?.event_date || e?.start_date || e?.date;
+                if (!raw) return null;
+                const d = new Date(raw);
+                return Number.isNaN(d.getTime()) ? null : d;
+            };
+            const upcoming   = allEvents.filter(e => {
+                const d = eventMoment(e);
+                return d && d >= now;
+            }).length;
             const past       = allEvents.length - upcoming;
 
             updateFollowersNavDot(followers);
@@ -2159,15 +2169,29 @@
 
             // Eerstvolgende evenementen (max 5, vroegste eerst)
             const nextEvents = allEvents
-                .filter(e => new Date(e.start_date || e.date) >= now)
-                .sort((a, b) => new Date(a.start_date || a.date) - new Date(b.start_date || b.date))
+                .filter(e => {
+                    const d = eventMoment(e);
+                    return d && d >= now;
+                })
+                .sort((a, b) => (eventMoment(a) - eventMoment(b)))
                 .slice(0, 5);
 
             // Voorbije evenementen (max 5, meest recent eerst)
             const pastEvents = allEvents
-                .filter(e => new Date(e.start_date || e.date) < now)
-                .sort((a, b) => new Date(b.start_date || b.date) - new Date(a.start_date || a.date))
+                .filter(e => {
+                    const d = eventMoment(e);
+                    return !d || d < now;
+                })
+                .sort((a, b) => (eventMoment(b) || 0) - (eventMoment(a) || 0))
                 .slice(0, 5);
+
+            const formatEventDay = (e) => {
+                const raw = e?.event_date || e?.start_date || e?.date;
+                if (!raw) return '';
+                const d = new Date(raw);
+                if (Number.isNaN(d.getTime())) return '';
+                return d.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' });
+            };
 
             const orgName = escapeHtml(organization?.name || 'Jouw organisatie');
 
@@ -2223,7 +2247,7 @@
                         <ul class="overview-list">
                             ${nextEvents.map(e => `<li>
                                 <span class="overview-list-title">${escapeHtml(e.title || '')}</span>
-                                <span class="overview-list-date">${e.start_date || e.date ? new Date(e.start_date || e.date).toLocaleDateString('nl-NL', {day:'numeric',month:'short',year:'numeric'}) : ''}</span>
+                                <span class="overview-list-date">${formatEventDay(e)}</span>
                             </li>`).join('')}
                         </ul>
                     </div>` : '<div class="overview-section"><p class="form-hint">Geen komende evenementen.</p></div>'}
@@ -2233,7 +2257,7 @@
                         <ul class="overview-list overview-list-past">
                             ${pastEvents.map(e => `<li>
                                 <span class="overview-list-title">${escapeHtml(e.title || '')}</span>
-                                <span class="overview-list-date">${e.start_date || e.date ? new Date(e.start_date || e.date).toLocaleDateString('nl-NL', {day:'numeric',month:'short',year:'numeric'}) : ''}</span>
+                                <span class="overview-list-date">${formatEventDay(e)}</span>
                             </li>`).join('')}
                         </ul>
                     </div>` : ''}
