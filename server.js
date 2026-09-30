@@ -7681,14 +7681,49 @@ app.post('/api/org/events', authenticateToken, requireOrgPortal, async (req, res
       }
     }
     const id = result.insertId || (result.rows && result.rows[0] && result.rows[0].id);
+    // Zelfde patroon als PUT: als de insert via legacy-fallback ging, zet prijsvelden expliciet.
+    if (id && (price !== undefined || presale_price !== undefined)) {
+      try {
+        await executeQuery(
+          'UPDATE events SET price = ?, presale_price = ?, updated_at = NOW() WHERE id = ? AND organization_id = ?',
+          [priceVal, presalePriceVal, id, orgId]
+        );
+      } catch (priceErr) {
+        if (isMysqlMissingColumnError(priceErr)) {
+          try {
+            await executeQuery(
+              'UPDATE events SET price = ?, updated_at = NOW() WHERE id = ? AND organization_id = ?',
+              [priceVal, id, orgId]
+            );
+          } catch (_) { /* kolom ontbreekt */ }
+        } else {
+          console.warn('POST /api/org/events price fields:', priceErr.message);
+        }
+      }
+    }
+    if (id && (ticket_url !== undefined || ticket_label !== undefined)) {
+      try {
+        await executeQuery(
+          'UPDATE events SET ticket_url = ?, ticket_label = ?, updated_at = NOW() WHERE id = ? AND organization_id = ?',
+          [ticketUrlSafe, ticketLabelSafe, id, orgId]
+        );
+      } catch (ticketErr) {
+        if (!isMysqlMissingColumnError(ticketErr)) {
+          console.warn('POST /api/org/events ticket fields:', ticketErr.message);
+        }
+      }
+    }
     const finalStatus = status || 'scheduled';
     if (finalStatus === 'scheduled' && orgId && id && title) {
       notifyFollowersOfEvent(orgId, id, title, event_date).catch(err =>
         console.error('Push notification error:', err)
       );
     }
-    const row = await executeQuery('SELECT id, title, event_date, organization_id, created_at FROM events WHERE id = ?', [id]);
-    res.status(201).json({ event: row.rows[0] });
+    const row = await executeQuery(
+      'SELECT id, title, event_date, organization_id, price, presale_price, ticket_url, ticket_label, created_at FROM events WHERE id = ?',
+      [id]
+    );
+    res.status(201).json({ event: normalizePublicEventRow(row.rows[0]) });
   } catch (error) {
     console.error('POST /api/org/events error:', error);
     res.status(500).json({ error: 'Failed to create event', message: error.message });
@@ -7810,7 +7845,7 @@ app.put('/api/org/events/:id', authenticateToken, requireOrgPortal, async (req, 
         throw updErr;
       }
     }
-    // Altijd apart zetten: legacy-fallback liet ticketvelden anders stil wegvallen.
+    // Altijd apart zetten: legacy-fallback liet ticket-/prijsvelden anders stil wegvallen.
     if (ticket_url !== undefined || ticket_label !== undefined) {
       try {
         await executeQuery(
@@ -7822,14 +7857,37 @@ app.put('/api/org/events/:id', authenticateToken, requireOrgPortal, async (req, 
         if (!isMysqlMissingColumnError(ticketErr)) throw ticketErr;
       }
     }
+    if (price !== undefined || presale_price !== undefined) {
+      try {
+        await executeQuery(
+          'UPDATE events SET price = ?, presale_price = ?, updated_at = NOW() WHERE id = ? AND organization_id = ?',
+          [priceVal, presalePriceVal, id, orgId]
+        );
+      } catch (priceErr) {
+        console.warn('PUT /api/org/events price fields:', priceErr.message);
+        if (isMysqlMissingColumnError(priceErr)) {
+          try {
+            await executeQuery(
+              'UPDATE events SET price = ?, updated_at = NOW() WHERE id = ? AND organization_id = ?',
+              [priceVal, id, orgId]
+            );
+          } catch (priceErr2) {
+            console.warn('PUT /api/org/events price only:', priceErr2.message);
+            if (!isMysqlMissingColumnError(priceErr2)) throw priceErr2;
+          }
+        } else {
+          throw priceErr;
+        }
+      }
+    }
     if (oldPdfUrl && oldPdfUrl !== pdfUrlSafe) {
       cleanupHostedPdfIfUnreferenced(oldPdfUrl).catch(() => {});
     }
     const row = await executeQuery(
-      'SELECT id, title, event_date, status, ticket_url, ticket_label, updated_at FROM events WHERE id = ?',
+      'SELECT id, title, event_date, status, price, presale_price, ticket_url, ticket_label, updated_at FROM events WHERE id = ?',
       [id]
     );
-    res.json({ event: row.rows[0] });
+    res.json({ event: normalizePublicEventRow(row.rows[0]) });
   } catch (error) {
     console.error('PUT /api/org/events/:id error:', error);
     res.status(500).json({ error: 'Failed to update event', message: error.message });

@@ -1609,6 +1609,11 @@
                     : 'Nieuw evenement';
             const ro = isView ? 'readonly' : '';
             const dis = isView ? 'disabled' : '';
+            const formatPriceInput = (v) => {
+                if (v == null || v === '') return '';
+                const n = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.'));
+                return Number.isFinite(n) ? String(n) : '';
+            };
             const imageEditable = !isView
                 ? `${evImg}
                             <input type="file" id="eventImageFile" accept="image/*">
@@ -1653,13 +1658,13 @@
                             </div>
                             <div class="form-group">
                                 <label>Prijs</label>
-                                <input type="number" id="eventPrice" min="0" step="0.01" placeholder="bijv. 12.50" value="${event?.price != null ? event.price : ''}" ${ro}>
+                                <input type="number" id="eventPrice" min="0" step="0.01" placeholder="bijv. 12.50" value="${formatPriceInput(event?.price)}" ${ro}>
                                 <p class="form-hint">Leeg laten als er geen prijs is.</p>
                             </div>
                         </div>
                         <div class="form-group">
                             <label>Voorverkoop (optioneel)</label>
-                            <input type="number" id="eventPresalePrice" min="0" step="0.01" placeholder="bijv. 10.00" value="${event?.presale_price != null ? event.presale_price : ''}" ${ro}>
+                            <input type="number" id="eventPresalePrice" min="0" step="0.01" placeholder="bijv. 10.00" value="${formatPriceInput(event?.presale_price)}" ${ro}>
                             <p class="form-hint">Alleen zichtbaar in de app als ingevuld.</p>
                         </div>
                         <div class="form-group">
@@ -1756,29 +1761,35 @@
                         } else if (removePdf) {
                             pdfUrl = null;
                         }
-                        const rawEndDate = document.getElementById('eventEndDate')?.value || '';
-                        const rawPrice = document.getElementById('eventPrice')?.value || '';
-                        const rawPresale = document.getElementById('eventPresalePrice')?.value || '';
-                        const titleVal = (document.getElementById('eventTitle')?.value || '').trim();
-                        const dateVal = document.getElementById('eventDate')?.value || null;
+                        const rawEndDate = overlay.querySelector('#eventEndDate')?.value || '';
+                        const rawPrice = overlay.querySelector('#eventPrice')?.value ?? '';
+                        const rawPresale = overlay.querySelector('#eventPresalePrice')?.value ?? '';
+                        const titleVal = (overlay.querySelector('#eventTitle')?.value || '').trim();
+                        const dateVal = overlay.querySelector('#eventDate')?.value || null;
                         if (!titleVal || !dateVal) {
                             showToast('Titel en begindatum zijn verplicht.', 'error');
                             return;
                         }
-                        let ticketUrl = (document.getElementById('eventTicketUrl')?.value || '').trim();
+                        let ticketUrl = (overlay.querySelector('#eventTicketUrl')?.value || '').trim();
                         if (ticketUrl && !/^https?:\/\//i.test(ticketUrl)) ticketUrl = `https://${ticketUrl}`;
+                        const parsePrice = (raw) => {
+                            const s = String(raw ?? '').trim();
+                            if (!s) return null;
+                            const n = parseFloat(s.replace(',', '.'));
+                            return Number.isFinite(n) ? n : null;
+                        };
                         const payload = {
                             title: titleVal,
-                            description: (document.getElementById('eventDescription')?.value || '').trim(),
+                            description: (overlay.querySelector('#eventDescription')?.value || '').trim(),
                             event_date: dateVal,
                             event_end_date: rawEndDate || null,
-                            location: (document.getElementById('eventLocation')?.value || '').trim() || null,
-                            price: rawPrice !== '' ? parseFloat(rawPrice) : null,
-                            presale_price: rawPresale !== '' ? parseFloat(rawPresale) : null,
+                            location: (overlay.querySelector('#eventLocation')?.value || '').trim() || null,
+                            price: parsePrice(rawPrice),
+                            presale_price: parsePrice(rawPresale),
                             image_url: imageUrl || null,
                             pdf_url: pdfUrl,
                             ticket_url: ticketUrl || null,
-                            ticket_label: (document.getElementById('eventTicketLabel')?.value || '').trim() || null,
+                            ticket_label: (overlay.querySelector('#eventTicketLabel')?.value || '').trim() || null,
                         };
                         const url = saveId ? `${apiBase}/org/events/${saveId}` : `${apiBase}/org/events`;
                         const method = saveId ? 'PUT' : 'POST';
