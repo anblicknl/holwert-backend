@@ -2894,14 +2894,17 @@ app.get('/api/push/muted-organizations', authenticateToken, async (req, res) => 
 app.get('/api/cron/afval-reminders', async (req, res) => {
   try {
     const cronSecret = process.env.CRON_SECRET;
+    const auth = req.headers.authorization || '';
+    const isVercelCron = String(req.headers['x-vercel-cron'] || '') === '1';
     if (cronSecret) {
-      const auth = req.headers.authorization || '';
-      if (auth !== `Bearer ${cronSecret}`) {
+      const authOk = auth === `Bearer ${cronSecret}`;
+      if (!authOk && !isVercelCron) {
         return res.status(401).json({ error: 'Unauthorized' });
       }
     }
     const force = req.query.force === '1';
     const result = await runAfvalReminderJob({ force });
+    console.log('[afval-reminders]', JSON.stringify(result));
     res.json(result);
   } catch (error) {
     console.error('Afval reminder cron error:', error);
@@ -8545,24 +8548,28 @@ async function sendPracticalReminderToSubscribers(config) {
 
 async function runAfvalReminderJob(options = {}) {
   const force = !!options.force;
-  if (!force && amsterdamHour() !== 18) {
-    return { skipped: true, reason: 'not_18_amsterdam', hour: amsterdamHour() };
+  const hour = amsterdamHour();
+  // Hobby-cron kan ±1 uur uitlopen; accepteer 18–19 Amsterdam
+  if (!force && hour !== 18 && hour !== 19) {
+    return { skipped: true, reason: 'not_18_amsterdam', hour };
   }
   const config = await loadAfvalkalenderConfig();
   const tomorrowStr = amsterdamTomorrowStr();
   const hasOud = isOudPapierOnDate(config, tomorrowStr);
   const hasContainer = !!getContainerOnDate(config, tomorrowStr);
   if (!hasOud && !hasContainer) {
-    return { skipped: true, reason: 'nothing_tomorrow' };
+    return { skipped: true, reason: 'nothing_tomorrow', tomorrow: tomorrowStr, hour };
   }
   const sampleNotification = buildTomorrowAfvalReminder(config);
   if (!force && (await alreadySentPracticalReminderToday())) {
-    return { skipped: true, reason: 'already_sent', title: sampleNotification?.title ?? null };
+    return { skipped: true, reason: 'already_sent', title: sampleNotification?.title ?? null, tomorrow: tomorrowStr };
   }
   const sendResult = await sendPracticalReminderToSubscribers(config);
   return {
     skipped: false,
     title: sampleNotification?.title ?? null,
+    tomorrow: tomorrowStr,
+    hour,
     sent: sendResult.sent ?? 0,
     success: sendResult.success !== false,
   };
