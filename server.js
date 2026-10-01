@@ -8317,10 +8317,25 @@ function getContainerOnDate(config, dateStr) {
 }
 
 function containerLabelNl(label) {
-  if (label === 'groen') return 'groene container';
-  if (label === 'grijs') return 'grijze container';
-  if (label === 'extra') return 'extra container';
-  return 'containers';
+  const key = String(label || '').toLowerCase().trim();
+  if (key === 'groen' || key === 'groene') return 'groene container';
+  if (key === 'grijs' || key === 'grijze') return 'grijze container';
+  if (key === 'extra') return 'extra container';
+  return 'container';
+}
+
+function afvalReminderBody(parts) {
+  const text = (parts || []).join(' ');
+  if (/container/i.test(text) && /oud papier/i.test(text)) {
+    return 'Zet de container en het oud papier op tijd klaar aan de straat.';
+  }
+  if (/container/i.test(text)) {
+    return 'Zet de container op tijd klaar aan de straat.';
+  }
+  if (/oud papier/i.test(text)) {
+    return 'Zet het oud papier op tijd klaar aan de straat.';
+  }
+  return 'Zet het op tijd klaar aan de straat.';
 }
 
 async function loadAfvalkalenderConfig() {
@@ -8351,7 +8366,7 @@ function buildTomorrowAfvalReminder(config) {
   const subject = parts.join(' en ');
   return {
     title: `Morgen ${subject}`,
-    body: 'Zet het op tijd klaar aan de straat.',
+    body: afvalReminderBody(parts),
     data: { type: 'practical', screen: 'praktisch' },
   };
 }
@@ -8511,7 +8526,7 @@ async function sendPracticalReminderToSubscribers(config) {
 
     const notification = {
       title: `Morgen ${parts.join(' en ')}`,
-      body: 'Zet het op tijd klaar aan de straat.',
+      body: afvalReminderBody(parts),
       data: { type: 'practical', screen: 'praktisch' },
     };
 
