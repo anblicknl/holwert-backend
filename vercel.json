@@ -10,7 +10,7 @@
     },
     {
       "path": "/api/cron/rss-news-sync",
-      "schedule": "0 * * * *"
+      "schedule": "0 7 * * *"
     }
   ],
   "regions": [
