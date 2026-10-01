@@ -1843,19 +1843,23 @@ async function ensureNewsColumns() {
 let _orgColsMigrated = false;
 async function ensureOrgColumns() {
   if (_orgColsMigrated) return;
+  // Flag alleen na succesvolle ronde, zodat een mislukte ALTER later opnieuw wordt geprobeerd.
   const cols = [
     { name: 'show_email', sql: `ALTER TABLE organizations ADD COLUMN show_email BOOLEAN DEFAULT true` },
     { name: 'is_ondernemer', sql: `ALTER TABLE organizations ADD COLUMN is_ondernemer BOOLEAN DEFAULT false` },
     { name: 'rss_feed_url', sql: `ALTER TABLE organizations ADD COLUMN rss_feed_url VARCHAR(2000) NULL` },
     { name: 'rss_last_synced_at', sql: `ALTER TABLE organizations ADD COLUMN rss_last_synced_at DATETIME NULL` },
   ];
+  let allOk = true;
   for (const col of cols) {
     try {
       await executeQuery(col.sql);
       console.log(`[ensureOrgColumns] organizations.${col.name} toegevoegd`);
     } catch (e) {
-      if (!String(e.message).includes('Duplicate column') && !String(e.message).includes('1060')) {
+      const msg = String(e.message || '');
+      if (!msg.includes('Duplicate column') && !msg.includes('1060')) {
         console.warn(`[ensureOrgColumns] ${col.name}:`, e.message);
+        allOk = false;
       }
     }
   }
@@ -1872,7 +1876,7 @@ async function ensureOrgColumns() {
   } catch (e) {
     console.warn('[ensureOrgColumns] sync is_ondernemer:', e.message);
   }
-  _orgColsMigrated = true;
+  if (allOk) _orgColsMigrated = true;
 }
 
 let _eventColsMigrated = false;
@@ -5371,13 +5375,30 @@ app.post('/api/admin/organizations/:id/rss-sync', authenticateToken, requireAdmi
     await ensureOrgColumns();
     const id = parseInt(req.params.id, 10);
     if (Number.isNaN(id)) return res.status(400).json({ error: 'Invalid organization ID' });
+
+    // Optioneel: feed-URL meeleveren zodat sync werkt zonder aparte PUT
+    const bodyUrl = req.body && req.body.rss_feed_url !== undefined
+      ? (req.body.rss_feed_url == null || String(req.body.rss_feed_url).trim() === ''
+          ? null
+          : String(req.body.rss_feed_url).trim().slice(0, 2000))
+      : undefined;
+    if (bodyUrl !== undefined) {
+      await executeQuery(
+        'UPDATE organizations SET rss_feed_url = ?, updated_at = NOW() WHERE id = ?',
+        [bodyUrl, id],
+      );
+    }
+
     const org = await executeQuery(
       'SELECT id, rss_feed_url FROM organizations WHERE id = ? LIMIT 1',
       [id],
     );
     if (!org.rows?.length) return res.status(404).json({ error: 'Organization not found' });
     if (!org.rows[0].rss_feed_url || !String(org.rows[0].rss_feed_url).trim()) {
-      return res.status(400).json({ error: 'Geen RSS-feed-URL ingesteld voor deze organisatie' });
+      return res.status(400).json({
+        error: 'Geen RSS-feed-URL ingesteld',
+        message: 'Vul een RSS-URL in en probeer opnieuw.',
+      });
     }
     const { runRssNewsSync } = require('./rssNewsSync');
     const result = await runRssNewsSync({

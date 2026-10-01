@@ -2828,46 +2828,35 @@ class HolwertAdmin {
             rssSyncBtn?.addEventListener('click', async () => {
                 const urlNow = (rssUrlInput?.value || '').trim();
                 if (!urlNow) {
-                    this.showNotification('Vul eerst een RSS-URL in en sla op.', 'error');
+                    this.showNotification('Vul eerst een RSS-URL in.', 'error');
                     return;
                 }
-                // Sla URL eerst op als die gewijzigd is t.o.v. geladen waarde
-                if (urlNow !== String(org.rss_feed_url || '').trim()) {
-                    const saveRes = await fetch(`${this.apiBaseUrl}/admin/organizations/${id}`, {
-                        method: 'PUT',
+                const orig = rssSyncBtn.innerHTML;
+                rssSyncBtn.disabled = true;
+                rssSyncBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Bezig…';
+                try {
+                    // URL + sync in één request (geen aparte PUT die op oude API faalt)
+                    const syncRes = await fetch(`${this.apiBaseUrl}/admin/organizations/${id}/rss-sync`, {
+                        method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
                             'Authorization': `Bearer ${this.token}`,
                         },
                         body: JSON.stringify({ rss_feed_url: urlNow }),
                     });
-                    if (!saveRes.ok) {
-                        const err = await saveRes.json().catch(() => ({}));
-                        this.showNotification(err.error || 'RSS-URL opslaan mislukt', 'error');
+                    const syncData = await syncRes.json().catch(() => ({}));
+                    if (!syncRes.ok) {
+                        this.showNotification(syncData.message || syncData.error || 'RSS-sync mislukt', 'error');
                         return;
                     }
                     org.rss_feed_url = urlNow;
-                }
-                const orig = rssSyncBtn.innerHTML;
-                rssSyncBtn.disabled = true;
-                rssSyncBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Bezig…';
-                try {
-                    const syncRes = await fetch(`${this.apiBaseUrl}/admin/organizations/${id}/rss-sync`, {
-                        method: 'POST',
-                        headers: { 'Authorization': `Bearer ${this.token}` },
-                    });
-                    const syncData = await syncRes.json().catch(() => ({}));
-                    if (!syncRes.ok) {
-                        this.showNotification(syncData.error || syncData.message || 'RSS-sync mislukt', 'error');
-                        return;
-                    }
-                    const d = syncData.details?.[0] || syncData;
+                    if (rssUrlInput) rssUrlInput.value = urlNow;
                     this.showNotification(
                         `RSS-sync klaar: ${syncData.created || 0} nieuw, ${syncData.updated || 0} bijgewerkt, ${syncData.skipped || 0} overgeslagen` +
                           (syncData.errors?.length ? ` (${syncData.errors.length} fout)` : ''),
                         syncData.errors?.length ? 'error' : 'success',
                     );
-                    if (d?.error) console.warn('[RSS sync]', d.error);
+                    if (syncData.errors?.length) console.warn('[RSS sync]', syncData.errors);
                 } catch (e) {
                     this.showNotification(e.message || 'RSS-sync mislukt', 'error');
                 } finally {
