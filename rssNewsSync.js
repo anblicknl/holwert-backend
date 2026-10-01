@@ -62,6 +62,88 @@ function absolutizeHtmlUrls(html, baseUrl) {
   );
 }
 
+/** Drupal/gemeente-HTML opschonen tot leesbare paragrafen, koppen en afbeeldingen. */
+function cleanRssHtml(html, baseUrl) {
+  let s = String(html || '');
+  if (!s.trim()) return '';
+
+  s = absolutizeHtmlUrls(s, baseUrl);
+
+  // Verwijder scripts/styles en verborgen koppen
+  s = s.replace(/<script[\s\S]*?<\/script>/gi, '');
+  s = s.replace(/<style[\s\S]*?<\/style>/gi, '');
+  s = s.replace(/<h[1-6][^>]*class="[^"]*visually-hidden[^"]*"[^>]*>[\s\S]*?<\/h[1-6]>/gi, '');
+
+  // <picture>…<img>… → alleen img
+  s = s.replace(/<picture\b[^>]*>([\s\S]*?)<\/picture>/gi, (_, inner) => {
+    const img = inner.match(/<img\b[^>]*>/i);
+    return img ? img[0] : '';
+  });
+
+  // Colorbox-links: behoud img (cover zit al in enclosure; body-foto's blijven zichtbaar)
+  s = s.replace(/<a\b[^>]*class="[^"]*colorbox[^"]*"[^>]*>([\s\S]*?)<\/a>/gi, (_, inner) => {
+    const img = inner.match(/<img\b[^>]*>/i);
+    return img ? img[0] : '';
+  });
+
+  // Span-wrappers eraf
+  for (let i = 0; i < 4; i += 1) {
+    s = s.replace(/<\/?span\b[^>]*>/gi, '');
+  }
+
+  // Losse komma's/whitespace tussen blokken (komt voor in deze feed)
+  s = s.replace(/>\s*,\s*</g, '><');
+
+  // Img: alleen src + alt bewaren, absolute URL
+  s = s.replace(/<img\b([^>]*)\/?>/gi, (full, attrs) => {
+    const srcM = attrs.match(/\bsrc=["']([^"']+)["']/i);
+    if (!srcM) return '';
+    const src = resolveUrl(srcM[1], baseUrl) || srcM[1];
+    // Gallery thumbs overslaan als enclosure de cover is — kleine thumbs houden we wel
+    const altM = attrs.match(/\balt=["']([^"']*)["']/i);
+    const alt = altM ? altM[1].replace(/"/g, '&quot;') : '';
+    return `<p><img src="${src}" alt="${alt}" loading="lazy"></p>`;
+  });
+
+  // Toegestane block-tags: unwrap overige divs naar hun inhoud
+  for (let i = 0; i < 8; i += 1) {
+    s = s.replace(/<div\b[^>]*>([\s\S]*?)<\/div>/gi, '$1');
+  }
+
+  // Lege paragrafen / nbsp
+  s = s.replace(/<p\b[^>]*>\s*(?:&nbsp;|\u00a0|\s)*<\/p>/gi, '');
+  s = s.replace(/<p\b[^>]*>\s*<br\s*\/?>\s*<\/p>/gi, '');
+
+  // Heading/paragraph: strip class/style/id
+  s = s.replace(/<(p|h[1-6]|ul|ol|li|blockquote|strong|em|br)\b([^>]*)>/gi, (_, tag, attrs) => {
+    if (tag.toLowerCase() === 'br') return '<br>';
+    const href = attrs && attrs.match(/\bhref=["'][^"']+["']/i);
+    return href ? `<${tag} ${href[0]}>` : `<${tag}>`;
+  });
+
+  // Ankers: alleen href
+  s = s.replace(/<a\b([^>]*)>/gi, (_, attrs) => {
+    const hrefM = attrs.match(/\bhref=["']([^"']+)["']/i);
+    if (!hrefM) return '<a>';
+    const href = resolveUrl(hrefM[1], baseUrl) || hrefM[1];
+    return `<a href="${href}">`;
+  });
+
+  // Whitespace netjes
+  s = s.replace(/\r\n/g, '\n');
+  s = s.replace(/[ \t]+\n/g, '\n');
+  s = s.replace(/\n{3,}/g, '\n\n');
+  s = s.replace(/(<\/p>|<\/h[1-6]>|<\/li>|<\/blockquote>)\s*/gi, '$1\n');
+  s = s.replace(/\s{2,}/g, ' ');
+  s = s.replace(/>\s+</g, '>\n<');
+  s = s.trim();
+
+  // Als er alleen lege rommel overblijft
+  if (!stripTags(s)) return '';
+
+  return s;
+}
+
 function extractTag(block, tagName) {
   const re = new RegExp(
     `<${tagName}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tagName}>`,
@@ -116,7 +198,7 @@ function parseRssItems(xml) {
     const enclosure = extractEnclosureImage(block);
 
     const rawHtml = contentEncoded || description || '';
-    const html = absolutizeHtmlUrls(rawHtml, baseUrl || link);
+    const html = cleanRssHtml(rawHtml, baseUrl || link);
     const imageUrl = resolveUrl(enclosure, baseUrl || link);
 
     items.push({
@@ -126,7 +208,7 @@ function parseRssItems(xml) {
       pubDate: pubDate || null,
       imageUrl,
       html,
-      excerpt: stripTags(description || contentEncoded || '').slice(0, 280),
+      excerpt: stripTags(description || html || '').slice(0, 280),
     });
   }
 
@@ -189,6 +271,59 @@ async function findAuthorId(executeQuery, orgId) {
   }
 }
 
+let _rssSuppressTableReady = false;
+
+async function ensureRssSuppressedTable(executeQuery) {
+  if (_rssSuppressTableReady) return;
+  try {
+    await executeQuery(`
+      CREATE TABLE IF NOT EXISTS rss_suppressed (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        organization_id INT NOT NULL,
+        source_url VARCHAR(2000) NOT NULL,
+        suppressed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_rss_suppress_org_url (organization_id, source_url(500)),
+        KEY idx_rss_suppress_org (organization_id)
+      )
+    `);
+    _rssSuppressTableReady = true;
+  } catch (e) {
+    console.warn('[rss-sync] ensureRssSuppressedTable:', e.message);
+  }
+}
+
+async function suppressRssSourceUrl(executeQuery, organizationId, sourceUrl) {
+  const orgId = parseInt(organizationId, 10);
+  const url = sourceUrl != null ? String(sourceUrl).trim() : '';
+  if (!orgId || Number.isNaN(orgId) || !url) return false;
+  await ensureRssSuppressedTable(executeQuery);
+  try {
+    await executeQuery(
+      `INSERT INTO rss_suppressed (organization_id, source_url, suppressed_at)
+       VALUES (?, ?, NOW())
+       ON DUPLICATE KEY UPDATE suppressed_at = NOW()`,
+      [orgId, url.slice(0, 2000)],
+    );
+    return true;
+  } catch (e) {
+    console.warn('[rss-sync] suppressRssSourceUrl:', e.message);
+    return false;
+  }
+}
+
+async function loadSuppressedUrls(executeQuery, orgId) {
+  await ensureRssSuppressedTable(executeQuery);
+  try {
+    const r = await executeQuery(
+      'SELECT source_url FROM rss_suppressed WHERE organization_id = ?',
+      [orgId],
+    );
+    return new Set((r.rows || []).map((row) => String(row.source_url || '').trim()).filter(Boolean));
+  } catch {
+    return new Set();
+  }
+}
+
 /**
  * @param {object} deps
  * @param {Function} deps.executeQuery
@@ -213,6 +348,7 @@ async function runRssNewsSync(deps) {
 
   if (typeof ensureOrgColumns === 'function') await ensureOrgColumns();
   if (typeof ensureNewsColumns === 'function') await ensureNewsColumns();
+  await ensureRssSuppressedTable(executeQuery);
 
   let orgs;
   if (organizationId != null) {
@@ -235,6 +371,7 @@ async function runRssNewsSync(deps) {
     created: 0,
     updated: 0,
     skipped: 0,
+    suppressed: 0,
     errors: [],
     details: [],
   };
@@ -243,18 +380,33 @@ async function runRssNewsSync(deps) {
     const orgId = org.id;
     const feedUrl = String(org.rss_feed_url || '').trim();
     const sourceName = String(org.name || 'RSS').trim() || 'RSS';
-    const detail = { organization_id: orgId, feed_url: feedUrl, created: 0, updated: 0, skipped: 0, error: null };
+    const detail = {
+      organization_id: orgId,
+      feed_url: feedUrl,
+      created: 0,
+      updated: 0,
+      skipped: 0,
+      suppressed: 0,
+      error: null,
+    };
 
     try {
       const xml = await fetchFeedXml(feedUrl);
       const { items } = parseRssItems(xml);
       const authorId = await findAuthorId(executeQuery, orgId);
+      const suppressed = await loadSuppressedUrls(executeQuery, orgId);
 
       for (const item of items) {
         const sourceUrl = item.link;
         if (!sourceUrl) {
           detail.skipped += 1;
           summary.skipped += 1;
+          continue;
+        }
+
+        if (suppressed.has(sourceUrl)) {
+          detail.suppressed += 1;
+          summary.suppressed += 1;
           continue;
         }
 
@@ -404,4 +556,7 @@ module.exports = {
   createRssNewsSyncHandler,
   parseRssItems,
   decodeXmlEntities,
+  cleanRssHtml,
+  suppressRssSourceUrl,
+  ensureRssSuppressedTable,
 };

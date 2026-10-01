@@ -4834,8 +4834,20 @@ app.post('/api/admin/news/:id/publish', authenticateToken, requireAdmin, async (
 app.delete('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const prev = await executeQuery('SELECT pdf_url FROM news WHERE id = ? LIMIT 1', [id]);
-    const oldPdfUrl = prev.rows?.[0]?.pdf_url || null;
+    const prev = await executeQuery(
+      'SELECT pdf_url, source_url, organization_id FROM news WHERE id = ? LIMIT 1',
+      [id],
+    );
+    const row = prev.rows?.[0];
+    const oldPdfUrl = row?.pdf_url || null;
+    if (row?.source_url && row?.organization_id) {
+      try {
+        const { suppressRssSourceUrl } = require('./rssNewsSync');
+        await suppressRssSourceUrl(executeQuery, row.organization_id, row.source_url);
+      } catch (e) {
+        console.warn('[rss-suppress] admin delete:', e.message);
+      }
+    }
     const result = await executeQuery('DELETE FROM news WHERE id = ?', [id]);
     if (!result.rowCount) {
       return res.status(404).json({ error: 'Article not found' });
@@ -7613,8 +7625,20 @@ app.delete('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req,
     const orgId = req.organizationId;
     const id = parseInt(req.params.id, 10);
     if (Number.isNaN(id)) return res.status(400).json({ error: 'Ongeldig id' });
-    const prev = await executeQuery('SELECT pdf_url FROM news WHERE id = ? AND organization_id = ? LIMIT 1', [id, orgId]);
-    const oldPdfUrl = prev.rows?.[0]?.pdf_url || null;
+    const prev = await executeQuery(
+      'SELECT pdf_url, source_url FROM news WHERE id = ? AND organization_id = ? LIMIT 1',
+      [id, orgId],
+    );
+    const row = prev.rows?.[0];
+    const oldPdfUrl = row?.pdf_url || null;
+    if (row?.source_url) {
+      try {
+        const { suppressRssSourceUrl } = require('./rssNewsSync');
+        await suppressRssSourceUrl(executeQuery, orgId, row.source_url);
+      } catch (e) {
+        console.warn('[rss-suppress] org delete:', e.message);
+      }
+    }
     const del = await executeQuery('DELETE FROM news WHERE id = ? AND organization_id = ?', [id, orgId]);
     const n = del.rowCount ?? del.rows?.length ?? 0;
     if (!n) return res.status(404).json({ error: 'Artikel niet gevonden' });
