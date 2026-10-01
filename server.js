@@ -5185,8 +5185,49 @@ app.get('/api/admin/organizations', authenticateToken, requireAdmin, async (req,
       )
     ]);
 
+    const organizations = result.rows || [];
+
+    // Dashboard-accounts (users.organization_id) — niet in lite-modus (dropdowns)
+    if (!liteMode && organizations.length > 0) {
+      try {
+        const orgIds = organizations.map((o) => o.id);
+        const placeholders = orgIds.map(() => '?').join(',');
+        const accountsRes = await executeQuery(
+          `SELECT id, email, first_name, last_name, is_active, organization_id, role
+           FROM users
+           WHERE organization_id IN (${placeholders})
+             AND LOWER(TRIM(COALESCE(role, ''))) NOT IN ('admin', 'superadmin', 'editor')
+           ORDER BY email ASC`,
+          orgIds,
+        );
+        const byOrg = new Map();
+        for (const row of accountsRes.rows || []) {
+          const oid = row.organization_id;
+          if (!byOrg.has(oid)) byOrg.set(oid, []);
+          byOrg.get(oid).push({
+            id: row.id,
+            email: row.email || '',
+            first_name: row.first_name || '',
+            last_name: row.last_name || '',
+            is_active: row.is_active === true || row.is_active === 1 || row.is_active === '1',
+          });
+        }
+        for (const org of organizations) {
+          const list = byOrg.get(org.id) || [];
+          org.dashboard_accounts = list;
+          org.dashboard_accounts_count = list.length;
+        }
+      } catch (e) {
+        console.warn('[GET /api/admin/organizations] dashboard accounts:', e.message);
+        for (const org of organizations) {
+          org.dashboard_accounts = org.dashboard_accounts || [];
+          org.dashboard_accounts_count = org.dashboard_accounts_count ?? 0;
+        }
+      }
+    }
+
     const response = {
-      organizations: result.rows,
+      organizations,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),

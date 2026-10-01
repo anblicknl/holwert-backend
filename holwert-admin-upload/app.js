@@ -2132,7 +2132,7 @@ class HolwertAdmin {
         }
 
         if (!organizations || organizations.length === 0) {
-            container.innerHTML = '<tr><td colspan="6" class="empty-message">Geen organisaties gevonden</td></tr>';
+            container.innerHTML = '<tr><td colspan="7" class="empty-message">Geen organisaties gevonden</td></tr>';
             if (mobileList) mobileList.innerHTML = '<p class="empty-message">Geen organisaties gevonden</p>';
             return;
         }
@@ -2152,6 +2152,7 @@ class HolwertAdmin {
                 </td>
                 <td>${org.name || '-'}</td>
                 <td>${orgCategoryLabel(org.category)}${org.is_ondernemer ? ' <span class="status-badge status-published" title="Ondernemer">Ondernemer</span>' : ''}</td>
+                <td>${this._orgDashboardAccountsHtml(org)}</td>
                 <td>${org.followers_count ?? 0}</td>
                 <td>
                     <span class="status-badge ${org.is_approved ? 'status-published' : 'status-draft'}">
@@ -2180,6 +2181,7 @@ class HolwertAdmin {
                         <span class="list-card-meta-sep" aria-hidden="true">·</span>
                         <span class="list-card-status ${statusClass}">${statusLabel}</span>
                     </div>
+                    <div class="list-card-meta" style="margin-top:6px;">${this._orgDashboardAccountsHtml(org)}</div>
                     <div class="list-card-actions action-buttons">
                         ${this.organizationActionButtonsHtml(org)}
                     </div>
@@ -2188,8 +2190,71 @@ class HolwertAdmin {
         }
     }
 
+    _orgDashboardAccountsHtml(org) {
+        const accounts = Array.isArray(org.dashboard_accounts) ? org.dashboard_accounts : [];
+        const count = org.dashboard_accounts_count != null ? Number(org.dashboard_accounts_count) : accounts.length;
+        if (!count) {
+            return '<span class="status-badge status-draft" title="Geen dashboard-inlog gekoppeld">Geen account</span>';
+        }
+        const emails = accounts
+            .map((a) => {
+                const email = this.escHtml(a.email || '—');
+                const inactive = a.is_active === false ? ' (inactief)' : '';
+                return `<div class="org-account-email" title="${email}${inactive}">${email}${inactive}</div>`;
+            })
+            .join('');
+        const badgeClass = count > 1 ? 'status-draft' : 'status-published';
+        const badgeLabel = count > 1 ? `${count} accounts` : '1 account';
+        const badgeTitle = count > 1 ? 'Meerdere dashboard-accounts gekoppeld' : 'Eén dashboard-account';
+        return `<div class="org-accounts-cell">
+            <span class="status-badge ${badgeClass}" title="${badgeTitle}">${badgeLabel}</span>
+            ${emails}
+        </div>`;
+    }
+
+    _filterOrganizationsList() {
+        const all = this.organizationsList || [];
+        const q = (document.getElementById('orgSearch')?.value || '').trim().toLowerCase();
+        const cat = document.getElementById('orgCategoryFilter')?.value || '';
+        const accountFilter = document.getElementById('orgAccountFilter')?.value || '';
+
+        const filtered = all.filter((org) => {
+            if (cat) {
+                const orgCat = resolveOrgCategoryId(org.category);
+                if (orgCat !== cat && String(org.category || '').toLowerCase() !== cat) return false;
+            }
+            const count = Array.isArray(org.dashboard_accounts)
+                ? org.dashboard_accounts.length
+                : Number(org.dashboard_accounts_count) || 0;
+            if (accountFilter === 'none' && count !== 0) return false;
+            if (accountFilter === 'one' && count !== 1) return false;
+            if (accountFilter === 'multi' && count < 2) return false;
+            if (q) {
+                const name = String(org.name || '').toLowerCase();
+                const emails = (org.dashboard_accounts || []).map((a) => String(a.email || '').toLowerCase()).join(' ');
+                if (!name.includes(q) && !emails.includes(q)) return false;
+            }
+            return true;
+        });
+        this.displayOrganizations(filtered);
+    }
+
+    _wireOrganizationFilters() {
+        if (this._orgFiltersWired) return;
+        this._orgFiltersWired = true;
+        const search = document.getElementById('orgSearch');
+        const cat = document.getElementById('orgCategoryFilter');
+        const account = document.getElementById('orgAccountFilter');
+        const run = () => this._filterOrganizationsList();
+        if (search) search.addEventListener('input', run);
+        if (cat) cat.addEventListener('change', run);
+        if (account) account.addEventListener('change', run);
+    }
+
     async loadOrganizations() {
         try {
+            this._wireOrganizationFilters();
+            populateOrgCategoryFilterSelect();
             console.log('Loading organizations from:', this._adminOrganizationsUrl());
             console.log('Token exists:', !!this.token);
             
@@ -2210,7 +2275,7 @@ class HolwertAdmin {
                 if (data.organizations && data.organizations.length > 0) {
                     const sorted = this._sortOrganizationsByName(data.organizations);
                     this.organizationsList = sorted;
-                    this.displayOrganizations(sorted);
+                    this._filterOrganizationsList();
                     if (!this._logoMigrateDone) {
                         this._logoMigrateDone = true;
                         void this.migrateEmbeddedLogos({ silent: true });
@@ -2220,7 +2285,7 @@ class HolwertAdmin {
                     this.organizationsList = [];
                     const container = document.getElementById('organizationsTableBody');
                     if (container) {
-                        container.innerHTML = '<tr><td colspan="5" class="empty-message">Geen organisaties gevonden</td></tr>';
+                        container.innerHTML = '<tr><td colspan="7" class="empty-message">Geen organisaties gevonden</td></tr>';
                     }
                 }
             } else {
@@ -2238,7 +2303,7 @@ class HolwertAdmin {
                 
                 const container = document.getElementById('organizationsTableBody');
                 if (container) {
-                    container.innerHTML = `<tr><td colspan="5" class="empty-message">Fout: ${errorData.message || errorData.error || response.statusText}</td></tr>`;
+                    container.innerHTML = `<tr><td colspan="7" class="empty-message">Fout: ${errorData.message || errorData.error || response.statusText}</td></tr>`;
                 }
             }
         } catch (error) {
@@ -2247,7 +2312,7 @@ class HolwertAdmin {
             
             const container = document.getElementById('organizationsTableBody');
             if (container) {
-                container.innerHTML = `<tr><td colspan="5" class="empty-message">Fout: ${error.message}</td></tr>`;
+                container.innerHTML = `<tr><td colspan="7" class="empty-message">Fout: ${error.message}</td></tr>`;
             }
         }
     }
