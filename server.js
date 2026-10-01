@@ -4458,9 +4458,12 @@ app.get('/api/admin/pending', authenticateToken, async (req, res) => {
 app.get('/api/admin/news', authenticateToken, async (req, res) => {
   try {
     await ensureNewsColumns();
-    const { page = 1, limit = 20, status, category, minimal } = req.query;
+    const { page = 1, limit = 20, status, category, minimal, organization_id } = req.query;
     const offset = (page - 1) * limit;
     const isMinimal = minimal === '1' || minimal === 'true';
+    const orgIdFilter = organization_id != null && String(organization_id).trim() !== ''
+      ? parseInt(organization_id, 10)
+      : null;
 
     const contentField = isMinimal ? 'NULL as content' : 'n.content';
     const imageField = isMinimal ? 'n.image_url' : 'n.image_url';
@@ -4475,6 +4478,11 @@ app.get('/api/admin/news', authenticateToken, async (req, res) => {
       WHERE 1=1
     `;
     const params = [];
+
+    if (orgIdFilter && !Number.isNaN(orgIdFilter)) {
+      params.push(orgIdFilter);
+      query += ` AND n.organization_id = ?`;
+    }
 
     if (status) {
       params.push(status);
@@ -4496,6 +4504,11 @@ app.get('/api/admin/news', authenticateToken, async (req, res) => {
     // Get total count
     let countQuery = 'SELECT COUNT(*) as total FROM news n WHERE 1=1';
     const countParams = [];
+
+    if (orgIdFilter && !Number.isNaN(orgIdFilter)) {
+      countParams.push(orgIdFilter);
+      countQuery += ` AND n.organization_id = ?`;
+    }
     
     if (status) {
       countParams.push(status);
@@ -5997,8 +6010,11 @@ app.get('/api/events/:id', async (req, res) => {
 // Get all events (admin)
 app.get('/api/admin/events', authenticateToken, async (req, res) => {
   try {
-    const { page = 1, limit = 20, status } = req.query;
+    const { page = 1, limit = 20, status, organization_id } = req.query;
     const offset = (page - 1) * limit;
+    const orgIdFilter = organization_id != null && String(organization_id).trim() !== ''
+      ? parseInt(organization_id, 10)
+      : null;
 
     let query = `
       SELECT e.*, u.first_name, u.last_name, o.name as organization_name
@@ -6008,6 +6024,11 @@ app.get('/api/admin/events', authenticateToken, async (req, res) => {
       WHERE 1=1
     `;
     const params = [];
+
+    if (orgIdFilter && !Number.isNaN(orgIdFilter)) {
+      params.push(orgIdFilter);
+      query += ` AND e.organization_id = ?`;
+    }
 
     if (status) {
       params.push(status);
@@ -6022,6 +6043,11 @@ app.get('/api/admin/events', authenticateToken, async (req, res) => {
     // Get total count
     let countQuery = 'SELECT COUNT(*) as total FROM events e WHERE 1=1';
     const countParams = [];
+
+    if (orgIdFilter && !Number.isNaN(orgIdFilter)) {
+      countParams.push(orgIdFilter);
+      countQuery += ` AND e.organization_id = ?`;
+    }
     
     if (status) {
       countParams.push(status);

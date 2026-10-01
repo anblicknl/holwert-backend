@@ -7090,7 +7090,7 @@ class HolwertAdmin {
                 </div>
             `;
 
-            const response = await fetch(`${this.apiBaseUrl}/admin/news?organization_id=${orgId}`, {
+            const response = await fetch(`${this.apiBaseUrl}/admin/news?organization_id=${orgId}&limit=100`, {
                 headers: {
                     'Authorization': `Bearer ${this.token}`
                 }
@@ -7117,7 +7117,7 @@ class HolwertAdmin {
                 </div>
             `;
 
-            const response = await fetch(`${this.apiBaseUrl}/admin/events?organization_id=${orgId}`, {
+            const response = await fetch(`${this.apiBaseUrl}/admin/events?organization_id=${orgId}&limit=100`, {
                 headers: {
                     'Authorization': `Bearer ${this.token}`
                 }
