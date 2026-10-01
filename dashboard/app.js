@@ -1937,7 +1937,7 @@
                 <div class="form-group">
                     <label for="profile_rss_feed_url">RSS-feed-URL</label>
                     <input type="url" id="profile_rss_feed_url" placeholder="https://…/feed/rss/nieuws" value="${escapeHtml(org.rss_feed_url || '')}">
-                    <p class="form-hint">Optioneel. Berichten uit deze feed worden automatisch geïmporteerd en gepubliceerd (elk uur). Je kunt daarnaast zelf nieuws blijven plaatsen.</p>
+                    <p class="form-hint">Optioneel. Berichten uit deze feed worden automatisch geïmporteerd en gepubliceerd (dagelijks). Je kunt daarnaast zelf nieuws blijven plaatsen.</p>
                     ${org.rss_last_synced_at ? `<p class="form-hint">Laatst gesynchroniseerd: ${escapeHtml(new Date(org.rss_last_synced_at).toLocaleString('nl-NL'))}</p>` : ''}
                 </div>
 

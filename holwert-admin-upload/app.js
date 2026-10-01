@@ -2787,7 +2787,7 @@ class HolwertAdmin {
                             <div class="form-group">
                                 <label for="editOrgRssFeedUrl">RSS-feed-URL</label>
                                 <input type="url" id="editOrgRssFeedUrl" value="${escQ(org.rss_feed_url || '')}" placeholder="https://…/feed/rss/nieuws">
-                                <p class="form-hint">Optioneel. Nieuws uit deze feed wordt elk uur geïmporteerd en direct gepubliceerd. Handmatige berichten blijven mogelijk.</p>
+                                <p class="form-hint">Optioneel. Nieuws uit deze feed wordt dagelijks geïmporteerd en direct gepubliceerd. Handmatige berichten blijven mogelijk. Gebruik «Nu synchroniseren» voor een directe import.</p>
                                 ${org.rss_last_synced_at ? `<p class="form-hint">Laatst gesynchroniseerd: ${escTA(new Date(org.rss_last_synced_at).toLocaleString('nl-NL'))}</p>` : ''}
                             </div>
                             <div class="form-group">
