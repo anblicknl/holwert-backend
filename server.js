@@ -7153,6 +7153,7 @@ app.get('/api/org/me', authenticateToken, requireOrgPortal, async (req, res) => 
 
 app.get('/api/org/profile', authenticateToken, requireOrgPortal, async (req, res) => {
   try {
+    await ensureOrgColumns();
     const orgId = req.organizationId;
     const result = await executeQuery(
       `SELECT id, name, category, description, bio, website, email, show_email, phone, whatsapp, address,
@@ -7170,6 +7171,7 @@ app.get('/api/org/profile', authenticateToken, requireOrgPortal, async (req, res
 
 app.put('/api/org/profile', authenticateToken, requireOrgPortal, async (req, res) => {
   try {
+    await ensureOrgColumns();
     const orgId = req.organizationId;
     const raw = req.body || {};
     /** Zelfde inhoudelijke velden als superadmin (`PUT /admin/organizations/:id`), behalve `is_approved` (alleen beheerder). */
