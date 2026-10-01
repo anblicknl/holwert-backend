@@ -1933,6 +1933,14 @@
                     <textarea id="profile_privacy_statement" rows="6" placeholder="Optioneel">${escapeHtml(org.privacy_statement || '')}</textarea>
                 </div>
 
+                <h3 class="profile-subheading"><i class="fas fa-rss"></i> RSS-nieuws (automatisch)</h3>
+                <div class="form-group">
+                    <label for="profile_rss_feed_url">RSS-feed-URL</label>
+                    <input type="url" id="profile_rss_feed_url" placeholder="https://…/feed/rss/nieuws" value="${escapeHtml(org.rss_feed_url || '')}">
+                    <p class="form-hint">Optioneel. Berichten uit deze feed worden automatisch geïmporteerd en gepubliceerd (elk uur). Je kunt daarnaast zelf nieuws blijven plaatsen.</p>
+                    ${org.rss_last_synced_at ? `<p class="form-hint">Laatst gesynchroniseerd: ${escapeHtml(new Date(org.rss_last_synced_at).toLocaleString('nl-NL'))}</p>` : ''}
+                </div>
+
                 <h3 class="profile-subheading">Account (dashboard-inlog)</h3>
                 <p class="section-description">Wachtwoord voor <strong>dit dashboard</strong>, los van het contact-e-mailadres hierboven.</p>
                 <div class="form-group">
@@ -2067,6 +2075,7 @@
             twitter: norm('profile_twitter'),
             linkedin: norm('profile_linkedin'),
             privacy_statement: norm('profile_privacy_statement'),
+            rss_feed_url: norm('profile_rss_feed_url'),
         };
         if (brand_color !== undefined) payload.brand_color = brand_color;
         if (logo_url !== undefined) payload.logo_url = logo_url;

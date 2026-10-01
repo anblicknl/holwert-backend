@@ -1846,6 +1846,8 @@ async function ensureOrgColumns() {
   const cols = [
     { name: 'show_email', sql: `ALTER TABLE organizations ADD COLUMN show_email BOOLEAN DEFAULT true` },
     { name: 'is_ondernemer', sql: `ALTER TABLE organizations ADD COLUMN is_ondernemer BOOLEAN DEFAULT false` },
+    { name: 'rss_feed_url', sql: `ALTER TABLE organizations ADD COLUMN rss_feed_url VARCHAR(2000) NULL` },
+    { name: 'rss_last_synced_at', sql: `ALTER TABLE organizations ADD COLUMN rss_last_synced_at DATETIME NULL` },
   ];
   for (const col of cols) {
     try {
@@ -2891,6 +2893,19 @@ app.get('/api/cron/afval-reminders', async (req, res) => {
 
 // Privacy cleanup is fail-closed: CRON_SECRET is mandatory and the default is dry-run.
 app.get('/api/cron/privacy-cleanup', require('./privacyCleanup').createPrivacyCleanupHandler({ executeQuery }));
+
+// RSS nieuws-import voor organisaties met rss_feed_url
+app.get(
+  '/api/cron/rss-news-sync',
+  require('./rssNewsSync').createRssNewsSyncHandler({
+    executeQuery,
+    executeInsert,
+    ensureOrgColumns,
+    ensureNewsColumns,
+    invalidatePublicNewsCaches,
+    notifyFollowersOfNewsArticle,
+  }),
+);
 
 // Get user's push tokens (for debugging/management)
 app.get('/api/push/tokens', authenticateToken, async (req, res) => {
@@ -5048,7 +5063,7 @@ app.get('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (
     
     const result = await executeQuery(
       `SELECT id, name, category, description, bio, is_approved, is_ondernemer, website, email, show_email, phone, whatsapp, address, 
-              facebook, instagram, twitter, linkedin, brand_color, logo_url, privacy_statement, created_at, updated_at
+              facebook, instagram, twitter, linkedin, brand_color, logo_url, privacy_statement, rss_feed_url, rss_last_synced_at, created_at, updated_at
        FROM organizations 
        WHERE id = $1`,
       [id]
@@ -5279,7 +5294,7 @@ app.put('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (
     const { id } = req.params;
     const wasApprovedBefore = await wasOrganizationApproved(id);
     const { name, category, description, bio, is_approved, is_ondernemer, website, email, show_email, phone, whatsapp, address,
-            facebook, instagram, twitter, linkedin, brand_color, logo_url, privacy_statement } = req.body;
+            facebook, instagram, twitter, linkedin, brand_color, logo_url, privacy_statement, rss_feed_url } = req.body;
     const sets = [];
     const params = [];
     const push = (v) => { params.push(v); return '?'; }; // MySQL uses ? instead of $1, $2, etc.
@@ -5306,6 +5321,12 @@ app.put('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (
     if (brand_color !== undefined) sets.push(`brand_color = ${push(brand_color)}`);
     if (logo_url !== undefined) sets.push(`logo_url = ${push(logo_url)}`);
     if (privacy_statement !== undefined) sets.push(`privacy_statement = ${push(privacy_statement)}`);
+    if (rss_feed_url !== undefined) {
+      const rss = rss_feed_url == null || String(rss_feed_url).trim() === ''
+        ? null
+        : String(rss_feed_url).trim().slice(0, 2000);
+      sets.push(`rss_feed_url = ${push(rss)}`);
+    }
     if (!sets.length) return res.status(400).json({ error: 'No fields to update' });
     params.push(id);
     
@@ -5318,7 +5339,7 @@ app.put('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (
     // Fetch the updated organization
     const result = await executeQuery(
       `SELECT id, name, category, description, bio, is_approved, is_ondernemer, website, email, phone, whatsapp, address, 
-              facebook, instagram, twitter, linkedin, brand_color, logo_url, created_at, updated_at
+              facebook, instagram, twitter, linkedin, brand_color, logo_url, privacy_statement, rss_feed_url, rss_last_synced_at, created_at, updated_at
        FROM organizations WHERE id = ?`,
       [id]
     );
@@ -5341,6 +5362,38 @@ app.put('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (
   } catch (error) {
     console.error('Update organization error:', error);
     res.status(500).json({ error: 'Failed to update organization', message: error.message });
+  }
+});
+
+// Handmatige RSS-sync voor één organisatie (admin)
+app.post('/api/admin/organizations/:id/rss-sync', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    await ensureOrgColumns();
+    const id = parseInt(req.params.id, 10);
+    if (Number.isNaN(id)) return res.status(400).json({ error: 'Invalid organization ID' });
+    const org = await executeQuery(
+      'SELECT id, rss_feed_url FROM organizations WHERE id = ? LIMIT 1',
+      [id],
+    );
+    if (!org.rows?.length) return res.status(404).json({ error: 'Organization not found' });
+    if (!org.rows[0].rss_feed_url || !String(org.rows[0].rss_feed_url).trim()) {
+      return res.status(400).json({ error: 'Geen RSS-feed-URL ingesteld voor deze organisatie' });
+    }
+    const { runRssNewsSync } = require('./rssNewsSync');
+    const result = await runRssNewsSync({
+      executeQuery,
+      executeInsert,
+      ensureOrgColumns,
+      ensureNewsColumns,
+      invalidatePublicNewsCaches,
+      notifyFollowersOfNewsArticle,
+      organizationId: id,
+    });
+    invalidateCache('/api/admin/organizations');
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    console.error('POST /api/admin/organizations/:id/rss-sync error:', error);
+    res.status(500).json({ error: 'RSS sync mislukt', message: error.message });
   }
 });
 
@@ -7063,12 +7116,13 @@ app.delete('/api/admin/users/:id', authenticateToken, requireAdmin, async (req, 
 
 app.get('/api/org/me', authenticateToken, requireOrgPortal, async (req, res) => {
   try {
+    await ensureOrgColumns();
     const orgId = req.organizationId;
     let orgResult;
     try {
       orgResult = await executeQuery(
         `SELECT id, name, category, description, bio, is_approved, website, email, phone, whatsapp, address,
-         facebook, instagram, twitter, linkedin, brand_color, logo_url, privacy_statement, created_at, updated_at
+         facebook, instagram, twitter, linkedin, brand_color, logo_url, privacy_statement, rss_feed_url, rss_last_synced_at, created_at, updated_at
          FROM organizations WHERE id = ?`,
         [orgId]
       );
@@ -7102,7 +7156,7 @@ app.get('/api/org/profile', authenticateToken, requireOrgPortal, async (req, res
     const orgId = req.organizationId;
     const result = await executeQuery(
       `SELECT id, name, category, description, bio, website, email, show_email, phone, whatsapp, address,
-       facebook, instagram, twitter, linkedin, brand_color, logo_url, privacy_statement, is_approved, created_at, updated_at
+       facebook, instagram, twitter, linkedin, brand_color, logo_url, privacy_statement, rss_feed_url, rss_last_synced_at, is_approved, created_at, updated_at
        FROM organizations WHERE id = ?`,
       [orgId]
     );
@@ -7137,6 +7191,7 @@ app.put('/api/org/profile', authenticateToken, requireOrgPortal, async (req, res
       'brand_color',
       'logo_url',
       'privacy_statement',
+      'rss_feed_url',
     ];
     if (raw.name !== undefined) {
       const nm = raw.name != null ? String(raw.name).trim() : '';
@@ -7152,6 +7207,9 @@ app.put('/api/org/profile', authenticateToken, requireOrgPortal, async (req, res
         if (key === 'name') v = String(v).trim();
         if (key === 'category') v = normalizeOrgCategory(v);
         if (key === 'show_email') v = !!v; // zorg dat het altijd een boolean is
+        if (key === 'rss_feed_url') {
+          v = v == null || String(v).trim() === '' ? null : String(v).trim().slice(0, 2000);
+        }
         sets.push(`${key} = ?`);
         values.push(v);
       }
@@ -7161,7 +7219,7 @@ app.put('/api/org/profile', authenticateToken, requireOrgPortal, async (req, res
     await executeQuery(`UPDATE organizations SET ${sets.join(', ')}, updated_at = NOW() WHERE id = ?`, values);
     const updated = await executeQuery(
       `SELECT id, name, category, description, bio, website, email, phone, whatsapp, address,
-       facebook, instagram, twitter, linkedin, brand_color, logo_url, privacy_statement, is_approved, updated_at
+       facebook, instagram, twitter, linkedin, brand_color, logo_url, privacy_statement, rss_feed_url, rss_last_synced_at, is_approved, updated_at
        FROM organizations WHERE id = ?`,
       [orgId]
     );

@@ -7,6 +7,10 @@
     {
       "path": "/api/cron/privacy-cleanup",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/rss-news-sync",
+      "schedule": "0 * * * *"
     }
   ],
   "regions": [

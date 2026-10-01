@@ -2783,6 +2783,18 @@ class HolwertAdmin {
                                 <textarea id="editOrgPrivacy" rows="4" placeholder="Optioneel">${escTA(org.privacy_statement)}</textarea>
                             </div>
                             ${this.checkboxFieldHtml('editOrgApproved', 'Goedgekeurd (zichtbaar in app)', { checked: !!org.is_approved })}
+                            <p class="form-section-title">RSS-nieuws (automatisch)</p>
+                            <div class="form-group">
+                                <label for="editOrgRssFeedUrl">RSS-feed-URL</label>
+                                <input type="url" id="editOrgRssFeedUrl" value="${escQ(org.rss_feed_url || '')}" placeholder="https://…/feed/rss/nieuws">
+                                <p class="form-hint">Optioneel. Nieuws uit deze feed wordt elk uur geïmporteerd en direct gepubliceerd. Handmatige berichten blijven mogelijk.</p>
+                                ${org.rss_last_synced_at ? `<p class="form-hint">Laatst gesynchroniseerd: ${escTA(new Date(org.rss_last_synced_at).toLocaleString('nl-NL'))}</p>` : ''}
+                            </div>
+                            <div class="form-group">
+                                <button type="button" class="btn btn-secondary" id="editOrgRssSyncBtn" ${org.rss_feed_url ? '' : 'disabled'}>
+                                    <i class="fas fa-rss"></i> Nu synchroniseren
+                                </button>
+                            </div>
                         </form>
                     </div>
                     <div class="modal-footer">
@@ -2807,6 +2819,63 @@ class HolwertAdmin {
             });
             modal.querySelector('.modal-content').addEventListener('click', (e) => e.stopPropagation());
             modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+
+            const rssUrlInput = modal.querySelector('#editOrgRssFeedUrl');
+            const rssSyncBtn = modal.querySelector('#editOrgRssSyncBtn');
+            rssUrlInput?.addEventListener('input', () => {
+                if (rssSyncBtn) rssSyncBtn.disabled = !(rssUrlInput.value || '').trim();
+            });
+            rssSyncBtn?.addEventListener('click', async () => {
+                const urlNow = (rssUrlInput?.value || '').trim();
+                if (!urlNow) {
+                    this.showNotification('Vul eerst een RSS-URL in en sla op.', 'error');
+                    return;
+                }
+                // Sla URL eerst op als die gewijzigd is t.o.v. geladen waarde
+                if (urlNow !== String(org.rss_feed_url || '').trim()) {
+                    const saveRes = await fetch(`${this.apiBaseUrl}/admin/organizations/${id}`, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${this.token}`,
+                        },
+                        body: JSON.stringify({ rss_feed_url: urlNow }),
+                    });
+                    if (!saveRes.ok) {
+                        const err = await saveRes.json().catch(() => ({}));
+                        this.showNotification(err.error || 'RSS-URL opslaan mislukt', 'error');
+                        return;
+                    }
+                    org.rss_feed_url = urlNow;
+                }
+                const orig = rssSyncBtn.innerHTML;
+                rssSyncBtn.disabled = true;
+                rssSyncBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Bezig…';
+                try {
+                    const syncRes = await fetch(`${this.apiBaseUrl}/admin/organizations/${id}/rss-sync`, {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${this.token}` },
+                    });
+                    const syncData = await syncRes.json().catch(() => ({}));
+                    if (!syncRes.ok) {
+                        this.showNotification(syncData.error || syncData.message || 'RSS-sync mislukt', 'error');
+                        return;
+                    }
+                    const d = syncData.details?.[0] || syncData;
+                    this.showNotification(
+                        `RSS-sync klaar: ${syncData.created || 0} nieuw, ${syncData.updated || 0} bijgewerkt, ${syncData.skipped || 0} overgeslagen` +
+                          (syncData.errors?.length ? ` (${syncData.errors.length} fout)` : ''),
+                        syncData.errors?.length ? 'error' : 'success',
+                    );
+                    if (d?.error) console.warn('[RSS sync]', d.error);
+                } catch (e) {
+                    this.showNotification(e.message || 'RSS-sync mislukt', 'error');
+                } finally {
+                    rssSyncBtn.disabled = !(rssUrlInput?.value || '').trim();
+                    rssSyncBtn.innerHTML = orig;
+                }
+            });
+
             modal.querySelector('#editOrganizationSubmitBtn').addEventListener('click', async () => {
                 console.log('[Admin] editOrganization: Opslaan-knop geklikt');
                 const name = document.getElementById('editOrgName').value.trim();
@@ -2848,6 +2917,7 @@ class HolwertAdmin {
                     brand_color,
                     logo_url,
                     privacy_statement: document.getElementById('editOrgPrivacy').value.trim() || undefined,
+                    rss_feed_url: document.getElementById('editOrgRssFeedUrl')?.value.trim() || null,
                     is_approved: document.getElementById('editOrgApproved').checked,
                     is_ondernemer: document.getElementById('editOrgOndernemer')?.checked === true
                 };
