@@ -191,6 +191,18 @@ if (!JWT_SECRET) {
 /** Optioneel: Personal Access Token van expo.dev/settings/access-tokens als Bearer op de push-API. Vereist als enhanced push security aan staat. */
 const EXPO_PUSH_ACCESS_TOKEN = (process.env.EXPO_PUSH_ACCESS_TOKEN || '').trim();
 
+/**
+ * Push afwachten vóór HTTP-response (Vercel stopt anders vaak te vroeg).
+ * Fouten loggen we wel, maar publicatie/opslaan blijft slagen.
+ */
+async function awaitPushSafe(label, fn) {
+  try {
+    await fn();
+  } catch (err) {
+    console.error(`[push] ${label}:`, err && err.message ? err.message : err);
+  }
+}
+
 // PHP Proxy URL (fallback als direct MySQL niet werkt)
 const PHP_PROXY_URL = process.env.PHP_PROXY_URL || 'https://holwert.appenvloed.com/admin/db-proxy.php';
 const PHP_PROXY_API_KEY = process.env.PHP_PROXY_API_KEY || 'holwert-db-proxy-2026-secure-key-change-in-production';
@@ -3316,8 +3328,8 @@ app.post('/api/news', authenticateToken, async (req, res) => {
     
     // Send push notification if published and has organization
     if (isPublished && organization_id) {
-      notifyFollowersOfNewsArticle(organization_id, newArticle.id, title).catch(err =>
-        console.error('Push notification error:', err)
+      await awaitPushSafe('news create', () =>
+        notifyFollowersOfNewsArticle(organization_id, newArticle.id, title),
       );
     }
 
@@ -4781,8 +4793,8 @@ app.put('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res)
     const orgIdForPush = updatedArticle.organization_id ?? organization_id;
     const nowPublished = !!updatedArticle.is_published;
     if (nowPublished && orgIdForPush && !wasPublished) {
-      notifyFollowersOfNewsArticle(orgIdForPush, updatedArticle.id, updatedArticle.title).catch(err =>
-        console.error('Push notification error:', err)
+      await awaitPushSafe('news update→publish', () =>
+        notifyFollowersOfNewsArticle(orgIdForPush, updatedArticle.id, updatedArticle.title),
       );
     }
 
@@ -4834,11 +4846,13 @@ app.post('/api/admin/news/:id/publish', authenticateToken, requireAdmin, async (
       return res.status(404).json({ error: 'Artikel niet gevonden' });
     }
     if (!wasPublished && prevArticle.organization_id) {
-      notifyFollowersOfNewsArticle(
-        prevArticle.organization_id,
-        id,
-        prevArticle.title
-      ).catch(err => console.error('Push notification error:', err));
+      await awaitPushSafe('news publish', () =>
+        notifyFollowersOfNewsArticle(
+          prevArticle.organization_id,
+          id,
+          prevArticle.title,
+        ),
+      );
     }
     invalidateCache('/api/news');
     invalidateCache(`/api/news/${id}`);
@@ -5351,7 +5365,7 @@ app.post('/api/admin/organizations', authenticateToken, requireAdmin, async (req
     console.log('[POST /api/admin/organizations] Successfully created organization:', orgResult.rows[0].id);
 
     if (is_approved !== false) {
-      queueNewOrganizationPush(result.insertId, false);
+      await queueNewOrganizationPush(result.insertId, false);
     }
     
     // Invalidate cache
@@ -5436,7 +5450,7 @@ app.put('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (
     
     const nowApproved = isOrganizationApprovedValue(result.rows[0]?.is_approved);
     if (nowApproved && !wasApprovedBefore) {
-      queueNewOrganizationPush(id, wasApprovedBefore);
+      await queueNewOrganizationPush(id, wasApprovedBefore);
     }
 
     res.json({ organization: result.rows[0] });
@@ -5734,7 +5748,7 @@ app.post('/api/admin/organizations/:id/approve', authenticateToken, requireAdmin
     invalidateCache('/api/admin/dashboard');
     invalidateCache('/api/admin/pending');
 
-    queueNewOrganizationPush(orgId, wasApprovedBefore);
+    await queueNewOrganizationPush(orgId, wasApprovedBefore);
 
     res.json({
       message: 'Organisatie goedgekeurd',
@@ -6298,8 +6312,8 @@ app.post('/api/admin/events', authenticateToken, requireAdmin, async (req, res) 
     
     // Send push notification if event is scheduled and has organization
     if (status === 'scheduled' && organization_id) {
-      notifyFollowersOfEvent(organization_id, newEvent.id, title, event_date).catch(err =>
-        console.error('Push notification error:', err)
+      await awaitPushSafe('event create', () =>
+        notifyFollowersOfEvent(organization_id, newEvent.id, title, event_date),
       );
     }
     
@@ -6383,12 +6397,14 @@ app.post('/api/admin/events/:id/publish', authenticateToken, requireAdmin, async
     }
     const eventStatus = prevEvent.status || 'scheduled';
     if (!wasPublished && eventStatus === 'scheduled' && prevEvent.organization_id) {
-      notifyFollowersOfEvent(
-        prevEvent.organization_id,
-        id,
-        prevEvent.title,
-        prevEvent.event_date
-      ).catch(err => console.error('Push notification error:', err));
+      await awaitPushSafe('event publish', () =>
+        notifyFollowersOfEvent(
+          prevEvent.organization_id,
+          id,
+          prevEvent.title,
+          prevEvent.event_date,
+        ),
+      );
     }
     invalidateCache('/api/admin/moderation/count');
     invalidateCache('/api/admin/dashboard');
@@ -7615,8 +7631,8 @@ app.post('/api/org/news', authenticateToken, requireOrgPortal, async (req, res) 
       if (id) console.warn('[POST /api/org/news] insertId ontbrak; fallback id=', id);
     }
     if (isPublished && orgId && id) {
-      notifyFollowersOfNewsArticle(orgId, id, title || '').catch(err =>
-        console.error('Push notification error:', err)
+      await awaitPushSafe('org news create', () =>
+        notifyFollowersOfNewsArticle(orgId, id, title || ''),
       );
     }
     invalidatePublicNewsCaches(id);
@@ -7673,8 +7689,8 @@ app.put('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req, re
     }
     const row = await executeQuery('SELECT id, title, excerpt, is_published, COALESCE(published_at, created_at) as published_at, updated_at FROM news WHERE id = ?', [id]);
     if (!wasPublished && nowPublished && orgId) {
-      notifyFollowersOfNewsArticle(orgId, id, title ?? row.rows[0]?.title ?? '').catch(err =>
-        console.error('Push notification error:', err)
+      await awaitPushSafe('org news update→publish', () =>
+        notifyFollowersOfNewsArticle(orgId, id, title ?? row.rows[0]?.title ?? ''),
       );
     }
     invalidatePublicNewsCaches(id);
@@ -7911,8 +7927,8 @@ app.post('/api/org/events', authenticateToken, requireOrgPortal, async (req, res
     }
     const finalStatus = status || 'scheduled';
     if (finalStatus === 'scheduled' && orgId && id && title) {
-      notifyFollowersOfEvent(orgId, id, title, event_date).catch(err =>
-        console.error('Push notification error:', err)
+      await awaitPushSafe('org event create', () =>
+        notifyFollowersOfEvent(orgId, id, title, event_date),
       );
     }
     const row = await executeQuery(
@@ -8445,11 +8461,11 @@ async function notifyAllUsersOfNewOrganization(organizationId) {
   return { success: true, sent };
 }
 
-function queueNewOrganizationPush(organizationId, wasApprovedBefore = false) {
+async function queueNewOrganizationPush(organizationId, wasApprovedBefore = false) {
   if (wasApprovedBefore) return;
-  void notifyAllUsersOfNewOrganization(organizationId).catch((err) => {
-    console.error('[new org push] mislukt:', err.message);
-  });
+  await awaitPushSafe('new organization', () =>
+    notifyAllUsersOfNewOrganization(organizationId),
+  );
 }
 
 async function alreadySentPracticalReminderToday() {

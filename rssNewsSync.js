@@ -500,9 +500,11 @@ async function runRssNewsSync(deps) {
             newsId &&
             typeof notifyFollowersOfNewsArticle === 'function'
           ) {
-            notifyFollowersOfNewsArticle(orgId, newsId, title).catch((err) =>
-              logger.warn('[rss-sync] push:', err.message),
-            );
+            try {
+              await notifyFollowersOfNewsArticle(orgId, newsId, title);
+            } catch (err) {
+              logger.warn('[rss-sync] push:', err.message);
+            }
           }
 
           detail.created += 1;
