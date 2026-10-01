@@ -126,8 +126,10 @@ function formatRichTextForWeb(raw) {
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
+    return s.replace(/\n/g, '<br />');
   }
-  return s.replace(/\n/g, '<br />');
+  // Echte HTML: geen \n→br (voorkomt witruimte tussen tags)
+  return s.replace(/>\s+</g, '><').replace(/>\s*,\s*</g, '><').trim();
 }
 
 function getCacheKey(endpoint, params = {}) {
@@ -3045,6 +3047,27 @@ app.get('/api/news/:id', async (req, res) => {
 
     const article = result.rows[0];
 
+    // RSS/Drupal-HTML: strip witruimte/rommel bij uitleveren (oude app zet \n om naar <br>)
+    let content = article.content || '';
+    if (article.source_url && content) {
+      try {
+        const { cleanRssHtml } = require('./rssNewsSync');
+        const cleaned = cleanRssHtml(content, article.source_url);
+        if (cleaned && cleaned !== content) {
+          content = cleaned;
+          // Self-heal: opslaan zodat volgende sync/lijst ook schoon is
+          executeQuery('UPDATE news SET content = ?, updated_at = NOW() WHERE id = ?', [
+            cleaned,
+            article.id,
+          ]).catch(() => {});
+        }
+      } catch (e) {
+        console.warn('[news] cleanRssHtml on read:', e.message);
+      }
+    } else if (content && /<[a-z][\s\S]*>/i.test(content)) {
+      content = content.replace(/>\s+</g, '><').replace(/>\s*,\s*</g, '><').trim();
+    }
+
     // Use image_url directly - no more base64 processing!
     const imageVariants = {
           original: article.image_url,
@@ -3057,6 +3080,7 @@ app.get('/api/news/:id', async (req, res) => {
     res.json({
       article: {
         ...article,
+        content,
         image_variants: imageVariants
       }
     });

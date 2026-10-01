@@ -129,13 +129,12 @@ function cleanRssHtml(html, baseUrl) {
     return `<a href="${href}">`;
   });
 
-  // Whitespace netjes
+  // Compact: geen newlines tussen tags (oude app-builds zetten \n om naar <br />)
   s = s.replace(/\r\n/g, '\n');
   s = s.replace(/[ \t]+\n/g, '\n');
   s = s.replace(/\n{3,}/g, '\n\n');
-  s = s.replace(/(<\/p>|<\/h[1-6]>|<\/li>|<\/blockquote>)\s*/gi, '$1\n');
   s = s.replace(/\s{2,}/g, ' ');
-  s = s.replace(/>\s+</g, '>\n<');
+  s = s.replace(/>\s+</g, '><');
   s = s.trim();
 
   // Als er alleen lege rommel overblijft
