@@ -317,6 +317,27 @@ body.admin-login-open {
     color: #333;
 }
 
+.filters {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+}
+
+.filters input,
+.filters select {
+    padding: 0.5rem 0.75rem;
+    border: 2px solid #e1e5e9;
+    border-radius: 5px;
+    font-size: 0.9rem;
+    background: #fff;
+}
+
+.filters input {
+    flex: 1;
+    min-width: 200px;
+}
+
 /* Users section tabs (Dorpsbewoners / Organisaties) */
 .users-header-actions {
     display: flex;

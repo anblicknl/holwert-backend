@@ -181,6 +181,7 @@ class HolwertAdmin {
         // Gebruikers-tab state (App-gebruikers / Organisatie-inlog)
         this.currentUsersTab = 'app-gebruikers';
         this.allUsersCache = [];
+        this._usersFiltersWired = false;
 
         // Events-tab state (Actief / Archief)
         this.currentEventsTab = 'actief';
@@ -1657,6 +1658,47 @@ class HolwertAdmin {
         return '<span class="text-muted">Niet gekoppeld</span>';
     }
 
+    _wireUserFilters() {
+        if (this._usersFiltersWired) return;
+        this._usersFiltersWired = true;
+        const registered = document.getElementById('userRegisteredFilter');
+        const sort = document.getElementById('userSortFilter');
+        const run = () => this.updateUsersView();
+        if (registered) registered.addEventListener('change', run);
+        if (sort) sort.addEventListener('change', run);
+    }
+
+    formatUserRegisteredAt(dateString) {
+        if (!dateString) return '—';
+        const date = new Date(dateString);
+        if (Number.isNaN(date.getTime())) return '—';
+        return date.toLocaleDateString('nl-NL', {
+            day: 'numeric',
+            month: 'short',
+            year: 'numeric',
+        });
+    }
+
+    userCreatedAtMs(user) {
+        const t = new Date(user?.created_at || 0).getTime();
+        return Number.isNaN(t) ? 0 : t;
+    }
+
+    userMatchesRegisteredFilter(user, filter) {
+        if (!filter) return true;
+        const created = this.userCreatedAtMs(user);
+        if (!created) return false;
+        const now = Date.now();
+        if (filter === '7d') return created >= now - 7 * 24 * 60 * 60 * 1000;
+        if (filter === '30d') return created >= now - 30 * 24 * 60 * 60 * 1000;
+        if (filter === 'month') {
+            const d = new Date(created);
+            const today = new Date();
+            return d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth();
+        }
+        return true;
+    }
+
     /** App-gebruiker (dorpsbewoner): aangemaakt via de app-registratie met relatie tot Holwert. */
     isAppDorpsbewoner(user) {
         const role = String(user?.role || '').toLowerCase();
@@ -1691,11 +1733,15 @@ class HolwertAdmin {
     }
 
     updateUsersView() {
+        this._wireUserFilters();
         const users = Array.isArray(this.allUsersCache) ? [...this.allUsersCache] : [];
         if (!users.length) {
             this.displayUsers([]);
             return;
         }
+
+        const registeredFilter = document.getElementById('userRegisteredFilter')?.value || '';
+        const sortMode = document.getElementById('userSortFilter')?.value || 'newest';
 
         let filtered;
         if (this.currentUsersTab === 'organisatie-inlog') {
@@ -1706,13 +1752,18 @@ class HolwertAdmin {
             filtered = users.filter((u) => this.isAppDorpsbewoner(u));
         }
 
-        // Sorteer alfabetisch op volledige naam
+        filtered = filtered.filter((u) => this.userMatchesRegisteredFilter(u, registeredFilter));
+
         filtered.sort((a, b) => {
-            const nameA = `${a.first_name || ''} ${a.last_name || ''}`.trim().toLowerCase();
-            const nameB = `${b.first_name || ''} ${b.last_name || ''}`.trim().toLowerCase();
-            if (nameA < nameB) return -1;
-            if (nameA > nameB) return 1;
-            return 0;
+            if (sortMode === 'name') {
+                const nameA = `${a.first_name || ''} ${a.last_name || ''}`.trim().toLowerCase();
+                const nameB = `${b.first_name || ''} ${b.last_name || ''}`.trim().toLowerCase();
+                if (nameA < nameB) return -1;
+                if (nameA > nameB) return 1;
+                return 0;
+            }
+            const diff = this.userCreatedAtMs(a) - this.userCreatedAtMs(b);
+            return sortMode === 'oldest' ? diff : -diff;
         });
 
         this.displayUsers(filtered);
@@ -1748,6 +1799,7 @@ class HolwertAdmin {
                             <th>Profielfoto</th>
                             <th>Naam</th>
                             ${orgHeader}
+                            <th>Aangemeld</th>
                             <th>Rol</th>
                             <th>Status</th>
                             <th>Acties</th>
@@ -1772,6 +1824,7 @@ class HolwertAdmin {
                                     </div>
                                 </td>
                                 ${orgCell(user)}
+                                <td title="${user.created_at ? this.escHtml(String(user.created_at)) : ''}">${this.formatUserRegisteredAt(user.created_at)}</td>
                                 <td>
                                     <span class="role-badge role-${this.userRoleLabel(user)}" data-user-action="role" data-user-id="${user.id}" style="cursor: pointer;" title="Klik om rol te wijzigen">
                                         ${this.userRoleLabel(user)}
@@ -1818,6 +1871,7 @@ class HolwertAdmin {
                                 <div class="user-name">
                                     <strong>${user.first_name} ${user.last_name}</strong>
                                 </div>
+                                <div class="text-muted" style="font-size:0.85rem;margin-top:2px;">Aangemeld: ${this.formatUserRegisteredAt(user.created_at)}</div>
                                 ${showOrgColumn ? `<div class="user-org-mobile">${this.formatUserOrganizationCell(user)}</div>` : ''}
                                 <div class="user-badges">
                                     <span class="role-badge role-${this.userRoleLabel(user)}" data-user-action="role" data-user-id="${user.id}" style="cursor: pointer;" title="Klik om rol te wijzigen">

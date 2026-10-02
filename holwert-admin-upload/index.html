@@ -177,6 +177,19 @@
                         </button>
                     </div>
                 </div>
+                <div class="filters">
+                    <select id="userRegisteredFilter" title="Filter op moment van aanmelding">
+                        <option value="">Alle periodes</option>
+                        <option value="7d">Laatste 7 dagen</option>
+                        <option value="30d">Laatste 30 dagen</option>
+                        <option value="month">Deze maand</option>
+                    </select>
+                    <select id="userSortFilter" title="Sorteer gebruikers">
+                        <option value="newest">Nieuwste eerst</option>
+                        <option value="oldest">Oudste eerst</option>
+                        <option value="name">Naam A–Z</option>
+                    </select>
+                </div>
                 <div id="usersContent">
                     <!-- Users content will be loaded here by JavaScript -->
                 </div>
