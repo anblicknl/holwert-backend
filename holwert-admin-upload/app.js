@@ -4558,7 +4558,8 @@ class HolwertAdmin {
     // Events management
     async loadEvents() {
         try {
-            const response = await fetch(`${this.apiBaseUrl}/admin/events`, {
+            // Hoge limiet: API-default is 20, waardoor nieuwere/dichtbij liggende events uit het overzicht vielen
+            const response = await fetch(`${this.apiBaseUrl}/admin/events?limit=5000`, {
                 headers: {
                     'Authorization': `Bearer ${this.token}`
                 }
@@ -4592,6 +4593,11 @@ class HolwertAdmin {
                 const endDate = new Date(end);
                 return endDate < now;
             });
+            filtered.sort((a, b) => {
+                const da = new Date(a.event_end_date || a.end_date || a.event_date || 0).getTime();
+                const db = new Date(b.event_end_date || b.end_date || b.event_date || 0).getTime();
+                return db - da;
+            });
         } else {
             // Actieve/toekomstige evenementen: geen datum óf einddatum ligt vandaag/in de toekomst
             filtered = events.filter(ev => {
@@ -4599,6 +4605,12 @@ class HolwertAdmin {
                 if (!end) return true;
                 const endDate = new Date(end);
                 return endDate >= now;
+            });
+            // Dichtstbijzijnde eerst — handiger om net geplaatste events te vinden
+            filtered.sort((a, b) => {
+                const da = new Date(a.event_date || a.event_end_date || 0).getTime() || Number.MAX_SAFE_INTEGER;
+                const db = new Date(b.event_date || b.event_end_date || 0).getTime() || Number.MAX_SAFE_INTEGER;
+                return da - db;
             });
         }
 

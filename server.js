@@ -6178,7 +6178,8 @@ app.get('/api/events/:id', async (req, res) => {
 // Get all events (admin)
 app.get('/api/admin/events', authenticateToken, async (req, res) => {
   try {
-    const { page = 1, limit = 20, status, organization_id } = req.query;
+    // Default hoog genoeg voor admin-overzicht (oude default 20 sneed veel events af)
+    const { page = 1, limit = 5000, status, organization_id } = req.query;
     const offset = (page - 1) * limit;
     const orgIdFilter = organization_id != null && String(organization_id).trim() !== ''
       ? parseInt(organization_id, 10)
