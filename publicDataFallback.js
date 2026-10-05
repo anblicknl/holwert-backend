@@ -265,14 +265,6 @@ function sanitizeForSnapshot(kind, payload) {
   return clone;
 }
 
-const MEDIA_URL_KEYS = new Set([
-  'image_url',
-  'logo_url',
-  'organization_logo',
-  'icon',
-  'pdf_url',
-]);
-
 const VDX_HOST_RE = /(^https?:\/\/)?([^/]*\.)?holwert\.appenvloed\.com/i;
 
 function shouldMirrorUrl(url) {
@@ -410,7 +402,8 @@ function contentTypeGuess(ext) {
 }
 
 async function mirrorValue(value, stats, budget) {
-  if (typeof value === 'string' && shouldMirrorUrl(value)) {
+  if (typeof value === 'string') {
+    if (!shouldMirrorUrl(value)) return value;
     stats.seen += 1;
     const next = await mirrorOneUrl(value, budget);
     if (next !== value) stats.mirrored += 1;
@@ -422,15 +415,10 @@ async function mirrorValue(value, stats, budget) {
     return out;
   }
   if (isPlainObject(value)) {
+    // Alle geneste string-URL's (o.a. image_variants.original/full/…) meenemen
     const out = {};
     for (const [k, v] of Object.entries(value)) {
-      if (MEDIA_URL_KEYS.has(k) || k === 'image_variants') {
-        out[k] = await mirrorValue(v, stats, budget);
-      } else if (isPlainObject(v) || Array.isArray(v)) {
-        out[k] = await mirrorValue(v, stats, budget);
-      } else {
-        out[k] = v;
-      }
+      out[k] = await mirrorValue(v, stats, budget);
     }
     return out;
   }
