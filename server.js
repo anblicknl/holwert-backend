@@ -13,6 +13,7 @@ const crypto = require('crypto');
 require('dotenv').config();
 
 const orgProfileBlocks = require('./orgProfileBlocks');
+const publicFallback = require('./publicDataFallback');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -1761,19 +1762,29 @@ app.post('/api/upload/file', authenticateToken, async (req, res) => {
 
 // Bootstrap: news (eerste pagina) + organizations in één request voor snelle app-opstart
 app.get('/api/app/bootstrap', async (req, res) => {
-  try {
-    await ensureBookmarksTable();
-    let userId = null;
-    const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      try {
-        const decoded = jwt.verify(authHeader.substring(7), JWT_SECRET);
-        userId = decoded.userId;
-      } catch (e) { /* ignore */ }
-    }
+  await publicFallback.sendPublicOrFallback(res, {
+    key: 'bootstrap',
+    kind: 'bootstrap',
+    cacheControl: 'public, max-age=30',
+    failBody: {
+      news: [],
+      newsPagination: { page: 1, limit: 10, total: 0, pages: 0 },
+      organizations: [],
+      organizationsPagination: { page: 1, limit: 100, total: 0, pages: 1 },
+    },
+    live: async () => {
+      await ensureBookmarksTable();
+      let userId = null;
+      const authHeader = req.headers.authorization;
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        try {
+          const decoded = jwt.verify(authHeader.substring(7), JWT_SECRET);
+          userId = decoded.userId;
+        } catch (e) { /* ignore */ }
+      }
 
-    const newsParams = [];
-    let newsQuery = `
+      const newsParams = [];
+      let newsQuery = `
       SELECT n.id, n.title, '' as content,
         LEFT(COALESCE(n.content, ''), 2000) as excerpt,
         n.image_url, n.youtube_url, n.source_name, n.source_url, n.pdf_url, n.created_at, n.updated_at,
@@ -1787,46 +1798,43 @@ app.get('/api/app/bootstrap', async (req, res) => {
       ${userId ? 'LEFT JOIN bookmarks b ON b.news_id = n.id AND b.user_id = ?' : ''}
       WHERE n.is_published = true
       ORDER BY COALESCE(n.published_at, n.created_at) DESC LIMIT 10 OFFSET 0`;
-    if (userId) newsParams.push(userId);
+      if (userId) newsParams.push(userId);
 
-    const orgFields = `id, name, description, logo_url, brand_color, category, is_ondernemer,
+      const orgFields = `id, name, description, logo_url, brand_color, category, is_ondernemer,
       CASE WHEN logo_url IS NOT NULL AND logo_url <> '' THEN true ELSE false END as has_logo`;
-    const orgQuery = `SELECT ${orgFields} FROM organizations WHERE is_approved = true ORDER BY name ASC LIMIT 100`;
-    const countNewsQuery = 'SELECT COUNT(*) as total FROM news n WHERE n.is_published = true';
+      const orgQuery = `SELECT ${orgFields} FROM organizations WHERE is_approved = true ORDER BY name ASC LIMIT 100`;
+      const countNewsQuery = 'SELECT COUNT(*) as total FROM news n WHERE n.is_published = true';
 
-    const [newsResult, orgResult, countResult] = await Promise.all([
-      executeQuery(newsQuery, newsParams),
-      executeQuery(orgQuery, []),
-      executeQuery(countNewsQuery, [])
-    ]);
+      const [newsResult, orgResult, countResult] = await Promise.all([
+        executeQuery(newsQuery, newsParams),
+        executeQuery(orgQuery, []),
+        executeQuery(countNewsQuery, [])
+      ]);
 
-    const newsRows = (newsResult.rows || []).map((article) =>
-      sanitizeListNewsItem({
-        ...article,
-        excerpt: stripHtmlForPreview(article.excerpt, 120),
-      }),
-    );
+      const newsRows = (newsResult.rows || []).map((article) =>
+        sanitizeListNewsItem({
+          ...article,
+          excerpt: stripHtmlForPreview(article.excerpt, 120),
+        }),
+      );
 
-    let orgRows = orgResult.rows || [];
-    orgRows = orgRows.map((o) =>
-      sanitizeListOrganization({
-        ...o,
-        description: typeof o.description === 'string' ? o.description.slice(0, 200) : o.description,
-      }),
-    );
+      let orgRows = orgResult.rows || [];
+      orgRows = orgRows.map((o) =>
+        sanitizeListOrganization({
+          ...o,
+          description: typeof o.description === 'string' ? o.description.slice(0, 200) : o.description,
+        }),
+      );
 
-    const totalNews = parseInt(countResult.rows?.[0]?.total || 0);
-    res.set('Cache-Control', 'public, max-age=30');
-    res.json({
-      news: newsRows,
-      newsPagination: { page: 1, limit: 10, total: totalNews, pages: Math.ceil(totalNews / 10) },
-      organizations: orgRows,
-      organizationsPagination: { page: 1, limit: 100, total: orgRows.length, pages: 1 }
-    });
-  } catch (error) {
-    console.error('Bootstrap error:', error);
-    res.status(500).json({ error: 'Bootstrap failed', message: error.message });
-  }
+      const totalNews = parseInt(countResult.rows?.[0]?.total || 0);
+      return {
+        news: newsRows,
+        newsPagination: { page: 1, limit: 10, total: totalNews, pages: Math.ceil(totalNews / 10) },
+        organizations: orgRows,
+        organizationsPagination: { page: 1, limit: 100, total: orgRows.length, pages: 1 }
+      };
+    },
+  });
 });
 
 // ── Lazy migratie voor extra news-kolommen ──────────────────────────────────
@@ -1920,14 +1928,18 @@ async function ensureEventColumns() {
 
 // Get all published news (public, with optional bookmark status if authenticated)
 app.get('/api/news', async (req, res) => {
-  try {
+  const { organization_id, category, search, minimal = false } = req.query;
+  const limit = req.query.limit ?? 20;
+  const page = req.query.page ?? 1;
+  const limitValue = Math.min(parseInt(limit) || 20, 100);
+  const pageValue = Math.max(parseInt(page) || 1, 1);
+  const offset = (pageValue - 1) * limitValue;
+  const minimalMode = minimal === 'true';
+
+  const liveNews = async () => {
     await ensureNewsColumns();
     await ensureBookmarksTable();
-    const { organization_id, category, search, minimal = false } = req.query;
-    const limit = req.query.limit ?? 20;
-    const page = req.query.page ?? 1;
-    
-    // Check if user is authenticated (optional)
+
     let userId = null;
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
@@ -1936,17 +1948,11 @@ app.get('/api/news', async (req, res) => {
         const decoded = jwt.verify(token, JWT_SECRET);
         userId = decoded.userId;
       } catch (e) {
-        // Token invalid, continue without userId
         console.log('Invalid token in /api/news, continuing without auth');
       }
     }
-    
-    const limitValue = Math.min(parseInt(limit) || 20, 100);
-    const pageValue = Math.max(parseInt(page) || 1, 1);
-    const offset = (pageValue - 1) * limitValue;
-    const minimalMode = minimal === 'true';
+
     const params = [];
-    
     let query = `
       SELECT 
         n.id, 
@@ -1969,33 +1975,24 @@ app.get('/api/news', async (req, res) => {
       ${userId ? `LEFT JOIN bookmarks b ON b.news_id = n.id AND b.user_id = ?` : ''}
       WHERE n.is_published = true
     `;
-    
-    if (userId) {
-      params.push(userId);
-    }
-    
-    // Filter by organization_id if provided
+
+    if (userId) params.push(userId);
     if (organization_id) {
       query += ` AND n.organization_id = ?`;
       params.push(parseInt(organization_id));
     }
-
     if (category) {
       query += ` AND (n.category = ? OR n.custom_category = ?)`;
       params.push(category, category);
     }
-
     if (search) {
       const s = `%${String(search)}%`;
       query += ` AND (n.title LIKE ? OR n.excerpt LIKE ? OR n.content LIKE ? OR o.name LIKE ?)`;
       params.push(s, s, s, s);
     }
-    
-    // Sorteer op published_at (publicatiedatum), fallback naar created_at als published_at NULL is
     query += ` ORDER BY COALESCE(n.published_at, n.created_at) DESC LIMIT ? OFFSET ?`;
     params.push(limitValue, offset);
 
-    // Count query (voor pagination)
     const countParams = [];
     let countQuery = `SELECT COUNT(*) as total FROM news n LEFT JOIN organizations o ON n.organization_id = o.id WHERE n.is_published = true`;
     if (organization_id) {
@@ -2018,8 +2015,7 @@ app.get('/api/news', async (req, res) => {
     ]);
     const total = parseInt(countResult.rows?.[0]?.total || 0);
 
-    // Lijst licht houden: bij minimal geen image_variants (app gebruikt image_url)
-    const processedNews = result.rows.map(article => {
+    const processedNews = (result.rows || []).map((article) => {
       const cleanExcerpt = minimalMode
         ? stripHtmlForPreview(article.excerpt, 120)
         : stripHtmlForPreview(article.excerpt, 0);
@@ -2036,8 +2032,7 @@ app.get('/api/news', async (req, res) => {
       return item;
     });
 
-    res.set('Cache-Control', 'public, max-age=30');
-    res.json({
+    return {
       news: processedNews,
       pagination: {
         page: pageValue,
@@ -2045,14 +2040,42 @@ app.get('/api/news', async (req, res) => {
         total: total,
         pages: Math.ceil(total / limitValue)
       }
-    });
+    };
+  };
 
+  const isDefaultSnapshot =
+    pageValue === 1 && !organization_id && !category && !search;
+
+  if (isDefaultSnapshot) {
+    await publicFallback.sendPublicOrFallback(res, {
+      key: minimalMode ? 'news-list-minimal' : 'news-list',
+      kind: 'news-list',
+      cacheControl: 'public, max-age=30',
+      failBody: {
+        news: [],
+        pagination: { page: 1, limit: limitValue, total: 0, pages: 0 },
+      },
+      live: liveNews,
+    });
+    return;
+  }
+
+  try {
+    const payload = await publicFallback.withTimeout(liveNews(), publicFallback.READ_TIMEOUT_MS);
+    if (!publicFallback.isStructurallyValid(payload)) throw new Error('invalid_news_payload');
+    res.set('Cache-Control', 'public, max-age=30');
+    res.json(publicFallback.attachMeta(payload, { fallback: false }));
   } catch (error) {
     console.error('Get news error:', error);
-    res.status(500).json({
-      error: 'Failed to get news',
-      message: error.message
-    });
+    res.status(503).json(
+      publicFallback.attachMeta(
+        {
+          news: [],
+          pagination: { page: pageValue, limit: limitValue, total: 0, pages: 0 },
+        },
+        { fallback: true, error: 'Service temporarily unavailable' }
+      )
+    );
   }
 });
 
@@ -2974,19 +2997,24 @@ app.get('/api/news/count', async (req, res) => {
 
 // Light "head" voor eerste paint – MOET vóór /api/news/:id staan zodat "head" niet als id wordt gezien
 app.get('/api/news/head', async (req, res) => {
-  try {
-    await ensureBookmarksTable();
-    const limit = Math.min(parseInt(req.query.limit, 10) || 7, 20);
-    let userId = null;
-    const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      try {
-        const decoded = jwt.verify(authHeader.substring(7), JWT_SECRET);
-        userId = decoded.userId;
-      } catch (e) { /* ignore */ }
-    }
-    const newsParams = [];
-    const newsQuery = `
+  const limit = Math.min(parseInt(req.query.limit, 10) || 7, 20);
+  await publicFallback.sendPublicOrFallback(res, {
+    key: 'news-head',
+    kind: 'news-head',
+    cacheControl: 'public, max-age=30',
+    failBody: { news: [] },
+    live: async () => {
+      await ensureBookmarksTable();
+      let userId = null;
+      const authHeader = req.headers.authorization;
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        try {
+          const decoded = jwt.verify(authHeader.substring(7), JWT_SECRET);
+          userId = decoded.userId;
+        } catch (e) { /* ignore */ }
+      }
+      const newsParams = [];
+      const newsQuery = `
       SELECT n.id, n.title,
         LEFT(COALESCE(n.content, ''), 500) as excerpt,
         n.image_url, n.created_at, n.updated_at,
@@ -3000,46 +3028,52 @@ app.get('/api/news/head', async (req, res) => {
       ${userId ? 'LEFT JOIN bookmarks b ON b.news_id = n.id AND b.user_id = ?' : ''}
       WHERE n.is_published = true
       ORDER BY COALESCE(n.published_at, n.created_at) DESC LIMIT ?`;
-    if (userId) newsParams.push(userId);
-    newsParams.push(limit);
+      if (userId) newsParams.push(userId);
+      newsParams.push(limit);
 
-    const newsResult = await executeQuery(newsQuery, newsParams);
-    const newsRows = (newsResult.rows || []).map((article) =>
-      sanitizeListNewsItem({
-        ...article,
-        excerpt: stripHtmlForPreview(article.excerpt, 120),
-      }),
-    );
-
-    res.set('Cache-Control', 'public, max-age=30');
-    res.json({ news: newsRows });
-  } catch (error) {
-    console.error('News head error:', error);
-    res.status(500).json({ error: 'News head failed', message: error.message });
-  }
+      const newsResult = await executeQuery(newsQuery, newsParams);
+      const newsRows = (newsResult.rows || []).map((article) =>
+        sanitizeListNewsItem({
+          ...article,
+          excerpt: stripHtmlForPreview(article.excerpt, 120),
+        }),
+      );
+      return { news: newsRows };
+    },
+  });
 });
 
 // Get single published news (public, with optional bookmark status if authenticated)
 app.get('/api/news/:id', async (req, res) => {
-  try {
-    await ensureNewsColumns();
-    await ensureBookmarksTable();
-    const { id } = req.params;
-    
-    // Check if user is authenticated (optional)
-    let userId = null;
-    const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.substring(7);
-      try {
-        const decoded = jwt.verify(token, JWT_SECRET);
-        userId = decoded.userId;
-      } catch (e) {
-        console.log('Invalid token in /api/news/:id, continuing without auth');
+  const { id } = req.params;
+  const newsId = parseInt(id, 10);
+  if (!Number.isFinite(newsId)) {
+    return res.status(400).json({ error: 'Invalid news id' });
+  }
+
+  await publicFallback.sendPublicOrFallback(res, {
+    key: `news/${newsId}`,
+    kind: 'news-detail',
+    failBody: { error: 'Service temporarily unavailable', article: null },
+    isNotFound: (p) => p && p.__notFound === true,
+    notFoundStatus: 404,
+    live: async () => {
+      await ensureNewsColumns();
+      await ensureBookmarksTable();
+
+      let userId = null;
+      const authHeader = req.headers.authorization;
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        const token = authHeader.substring(7);
+        try {
+          const decoded = jwt.verify(token, JWT_SECRET);
+          userId = decoded.userId;
+        } catch (e) {
+          console.log('Invalid token in /api/news/:id, continuing without auth');
+        }
       }
-    }
-    
-    const result = await executeQuery(`
+
+      const result = await executeQuery(`
       SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt,
              n.image_url, n.youtube_url, n.source_name, n.source_url, n.pdf_url,
              n.created_at, n.updated_at, 
@@ -3054,55 +3088,49 @@ app.get('/api/news/:id', async (req, res) => {
       ${userId ? `LEFT JOIN bookmarks b ON b.news_id = n.id AND b.user_id = ${userId}` : ''}
       WHERE n.id = ? AND n.is_published = true
       LIMIT 1
-    `, [id]);
+    `, [newsId]);
 
-    if (!result.rows || result.rows.length === 0) {
-      return res.status(404).json({ error: 'Article not found' });
-    }
+      if (!result.rows || result.rows.length === 0) {
+        return { __notFound: true, error: 'Article not found' };
+      }
 
-    const article = result.rows[0];
-
-    // RSS/Drupal-HTML: strip witruimte/rommel bij uitleveren (oude app zet \n om naar <br>)
-    let content = article.content || '';
-    if (article.source_url && content) {
-      try {
-        const { cleanRssHtml } = require('./rssNewsSync');
-        const cleaned = cleanRssHtml(content, article.source_url);
-        if (cleaned && cleaned !== content) {
-          content = cleaned;
-          // Self-heal: opslaan zodat volgende sync/lijst ook schoon is
-          executeQuery('UPDATE news SET content = ?, updated_at = NOW() WHERE id = ?', [
-            cleaned,
-            article.id,
-          ]).catch(() => {});
+      const article = result.rows[0];
+      let content = article.content || '';
+      if (article.source_url && content) {
+        try {
+          const { cleanRssHtml } = require('./rssNewsSync');
+          const cleaned = cleanRssHtml(content, article.source_url);
+          if (cleaned && cleaned !== content) {
+            content = cleaned;
+            executeQuery('UPDATE news SET content = ?, updated_at = NOW() WHERE id = ?', [
+              cleaned,
+              article.id,
+            ]).catch(() => {});
+          }
+        } catch (e) {
+          console.warn('[news] cleanRssHtml on read:', e.message);
         }
-      } catch (e) {
-        console.warn('[news] cleanRssHtml on read:', e.message);
+      } else if (content && /<[a-z][\s\S]*>/i.test(content)) {
+        content = content.replace(/>\s+</g, '><').replace(/>\s*,\s*</g, '><').trim();
       }
-    } else if (content && /<[a-z][\s\S]*>/i.test(content)) {
-      content = content.replace(/>\s+</g, '><').replace(/>\s*,\s*</g, '><').trim();
-    }
 
-    // Use image_url directly - no more base64 processing!
-    const imageVariants = {
-          original: article.image_url,
-          full: article.image_url,
-          large: article.image_url,
-          medium: article.image_url,
-          thumbnail: article.image_url
-        };
-    
-    res.json({
-      article: {
-        ...article,
-        content,
-        image_variants: imageVariants
-      }
-    });
-  } catch (error) {
-    console.error('Get news item error:', error);
-    res.status(500).json({ error: 'Failed to get news item', message: error.message });
-  }
+      const imageVariants = {
+        original: article.image_url,
+        full: article.image_url,
+        large: article.image_url,
+        medium: article.image_url,
+        thumbnail: article.image_url
+      };
+
+      return {
+        article: {
+          ...article,
+          content,
+          image_variants: imageVariants
+        }
+      };
+    },
+  });
 });
 
 // Public share page for a single news article with Open Graph meta tags
@@ -6050,19 +6078,18 @@ app.get('/api/events/count', async (req, res) => {
 // Zelfde database-pad als org-CRUD (executeQuery): anders schrijft org naar directe MySQL
 // terwijl deze route alleen via de PHP-proxy las → events wel in dashboard, niet in app.
 app.get('/api/events', async (req, res) => {
-  try {
+  const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+  const rawLimit = parseInt(req.query.limit, 10);
+  const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 500) : 20;
+  const { organization_id, status } = req.query;
+  const offset = (page - 1) * limit;
+  const hasOrgScope = organization_id != null && String(organization_id).trim() !== '';
+  const showOnlyUpcoming = hasOrgScope
+    ? req.query.upcoming === 'true'
+    : req.query.upcoming !== 'false';
+
+  const liveEvents = async () => {
     await ensureEventColumns();
-    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
-    const rawLimit = parseInt(req.query.limit, 10);
-    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 500) : 20;
-    const { organization_id, status } = req.query;
-    const offset = (page - 1) * limit;
-    const hasOrgScope = organization_id != null && String(organization_id).trim() !== '';
-    // Org-detail: standaard óók verleden (tenzij upcoming=true). Algemene agenda: alleen komend
-    // tenzij de app upcoming=false meestuurt (zelfde beeld als org-pagina).
-    const showOnlyUpcoming = hasOrgScope
-      ? req.query.upcoming === 'true'
-      : req.query.upcoming !== 'false';
 
     let query = `
       SELECT e.*, o.name as organization_name, o.brand_color as organization_brand_color, o.logo_url as organization_logo
@@ -6083,8 +6110,6 @@ app.get('/api/events', async (req, res) => {
       params.push(status);
     }
     query += sqlPublicEventVisibility('e', 'o');
-    // Sortering: org-detail = meest recent eerst. Algemene lijst upcoming=false: eerst komende (oplopend),
-    // daarna verleden met nieuwste eerst — anders vulden oude jan.-items de LIMIT vóór recent verleden.
     let orderClause = 'ORDER BY e.event_date ASC';
     if (hasOrgScope && !showOnlyUpcoming) {
       orderClause = 'ORDER BY e.event_date DESC';
@@ -6129,7 +6154,7 @@ app.get('/api/events', async (req, res) => {
     const events = (result.rows || []).map(normalizePublicEventRow);
     const total = parseInt(countResult.rows?.[0]?.total ?? 0, 10) || 0;
 
-    res.json({
+    return {
       events,
       pagination: {
         page: parseInt(page, 10),
@@ -6137,42 +6162,73 @@ app.get('/api/events', async (req, res) => {
         total,
         pages: Math.ceil(total / parseInt(limit, 10))
       }
+    };
+  };
+
+  // Snapshot alleen algemene agenda (page 1, geen org-filter)
+  const isDefaultSnapshot = page === 1 && !hasOrgScope && !status && showOnlyUpcoming;
+
+  if (isDefaultSnapshot) {
+    await publicFallback.sendPublicOrFallback(res, {
+      key: 'events-list',
+      kind: 'events-list',
+      failBody: {
+        events: [],
+        pagination: { page: 1, limit, total: 0, pages: 0 },
+      },
+      live: liveEvents,
     });
+    return;
+  }
+
+  try {
+    const payload = await publicFallback.withTimeout(liveEvents(), publicFallback.READ_TIMEOUT_MS);
+    if (!publicFallback.isStructurallyValid(payload)) throw new Error('invalid_events_payload');
+    res.json(publicFallback.attachMeta(payload, { fallback: false }));
   } catch (error) {
     console.error('[GET /api/events] Error:', error);
-    console.error('[GET /api/events] Error stack:', error.stack);
-    // Return empty array instead of error to prevent breaking the app
-    res.json({
-      events: [],
-      pagination: {
-        page: 1,
-        limit: 20,
-        total: 0,
-        pages: 0
-      }
-    });
+    res.status(503).json(
+      publicFallback.attachMeta(
+        {
+          events: [],
+          pagination: { page, limit, total: 0, pages: 0 },
+        },
+        { fallback: true, error: 'Service temporarily unavailable' }
+      )
+    );
   }
 });
 
 // Alias route for single event
 app.get('/api/events/:id', async (req, res) => {
-  try {
-    await ensureEventColumns();
-    const { id } = req.params;
-    const result = await executeQuery(`
+  const { id } = req.params;
+  const eventId = parseInt(id, 10);
+  if (!Number.isFinite(eventId)) {
+    return res.status(400).json({ error: 'Invalid event id' });
+  }
+
+  await publicFallback.sendPublicOrFallback(res, {
+    key: `events/${eventId}`,
+    kind: 'events-detail',
+    failBody: { error: 'Service temporarily unavailable', event: null },
+    isNotFound: (p) => p && p.__notFound === true,
+    notFoundStatus: 404,
+    live: async () => {
+      await ensureEventColumns();
+      const result = await executeQuery(`
       SELECT e.*, o.name as organization_name, o.brand_color as organization_brand_color, o.logo_url as organization_logo
       FROM events e
       LEFT JOIN organizations o ON e.organization_id = o.id
       WHERE e.id = $1
       ${sqlPublicEventVisibility('e', 'o')}
       LIMIT 1
-    `, [parseInt(id)]);
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Event not found' });
-    res.json({ event: normalizePublicEventRow(result.rows[0]) });
-  } catch (error) {
-    console.error('Get event (alias) error:', error);
-    res.status(500).json({ error: 'Failed to get event', message: error.message });
-  }
+    `, [eventId]);
+      if (!result.rows || result.rows.length === 0) {
+        return { __notFound: true, error: 'Event not found' };
+      }
+      return { event: normalizePublicEventRow(result.rows[0]) };
+    },
+  });
 });
 
 // Get all events (admin)
@@ -6702,13 +6758,15 @@ async function notifyAllUsersOfDorpsomroeper(text, bannerId) {
 }
 
 async function handleDorpsomroeperGet(req, res) {
-  try {
-    const banner = await getDorpsomroeperFromDb();
-    res.json(buildPublicDorpsomroeperResponse(banner));
-  } catch (error) {
-    console.error('Get dorpsomroeper error:', error);
-    res.status(500).json({ error: 'Kon mededeling niet ophalen', message: error.message });
-  }
+  await publicFallback.sendPublicOrFallback(res, {
+    key: 'dorpsomroeper',
+    kind: 'dorpsomroeper',
+    failBody: { active: false, text: null, bannerId: null, error: 'Service temporarily unavailable' },
+    live: async () => {
+      const banner = await getDorpsomroeperFromDb();
+      return buildPublicDorpsomroeperResponse(banner);
+    },
+  });
 }
 
 async function handleDorpsomroeperAdminGet(req, res) {
@@ -6785,6 +6843,17 @@ async function handleDorpsomroeperAdminPut(req, res) {
 
 app.get('/api/app/dorpsomroeper', handleDorpsomroeperGet);
 app.get('/api/app/global-banner', handleDorpsomroeperGet);
+
+/** Status van publieke fallback-snapshots (geen secrets; handig om Blob-opslag te controleren). */
+app.get('/api/app/fallback-status', async (req, res) => {
+  try {
+    const summary = await publicFallback.getStatusSummary();
+    res.set('Cache-Control', 'no-store');
+    res.json(summary);
+  } catch (error) {
+    res.status(500).json({ error: 'Kon fallback-status niet ophalen', message: error.message });
+  }
+});
 
 app.get('/api/admin/settings/dorpsomroeper', authenticateToken, requireDorpsomroeperAdmin, handleDorpsomroeperAdminGet);
 app.get('/api/admin/settings/global-banner', authenticateToken, requireDorpsomroeperAdmin, handleDorpsomroeperAdminGet);
@@ -8177,15 +8246,18 @@ app.get('/api/organizations/:id/privacy', async (req, res) => {
 
 // Praktische info (publiek)
 app.get('/api/app/practical-info', async (req, res) => {
-  try {
-    const result = await executeQuery(
-      'SELECT id, title, subtitle, icon, content, type, url, sort_order FROM practical_info WHERE is_active = true ORDER BY sort_order ASC, id ASC'
-    );
-    res.set('Cache-Control', 'public, max-age=60');
-    res.json({ items: result.rows || [] });
-  } catch (error) {
-    res.status(500).json({ error: 'Kon praktische info niet ophalen', items: [] });
-  }
+  await publicFallback.sendPublicOrFallback(res, {
+    key: 'practical-info',
+    kind: 'practical-info',
+    cacheControl: 'public, max-age=60',
+    failBody: { items: [], error: 'Service temporarily unavailable' },
+    live: async () => {
+      const result = await executeQuery(
+        'SELECT id, title, subtitle, icon, content, type, url, sort_order FROM practical_info WHERE is_active = true ORDER BY sort_order ASC, id ASC'
+      );
+      return { items: result.rows || [] };
+    },
+  });
 });
 
 // ----- Afvalkalender (aanpasbare datums: oud papier, containers + extra) -----
@@ -8592,32 +8664,40 @@ async function runAfvalReminderJob(options = {}) {
 }
 
 app.get('/api/app/afvalkalender', async (req, res) => {
-  try {
-    const row = await executeQuery('SELECT config_json FROM afvalkalender_config WHERE id = 1 LIMIT 1').then((r) => r.rows && r.rows[0]);
-    let config = row && row.config_json;
-    if (typeof config === 'string') try { config = JSON.parse(config); } catch (e) { config = null; }
-    if (!config) config = getDefaultAfvalkalenderConfig();
-    const oudPapierDates = computeNextOudPapierDates(config, 8);
-    const containerDates = computeNextContainerDates(config, 8);
-    res.set('Cache-Control', 'public, max-age=300');
-    res.json({
-      config: { oudPapier: config.oudPapier, containers: config.containers },
-      oudPapierDates,
-      containerDates,
-      isTodayOudPapier: isTodayOudPapier(config),
-      isTodayContainer: isTodayContainer(config),
-    });
-  } catch (error) {
-    const def = getDefaultAfvalkalenderConfig();
-    res.set('Cache-Control', 'public, max-age=60');
-    res.json({
-      config: def,
-      oudPapierDates: computeNextOudPapierDates(def, 8),
-      containerDates: computeNextContainerDates(def, 8),
-      isTodayOudPapier: isTodayOudPapier(def),
-      isTodayContainer: isTodayContainer(def),
-    });
-  }
+  await publicFallback.sendPublicOrFallback(res, {
+    key: 'afvalkalender',
+    kind: 'afvalkalender',
+    cacheControl: 'public, max-age=300',
+    failBody: {
+      config: null,
+      oudPapierDates: [],
+      containerDates: [],
+      isTodayOudPapier: false,
+      isTodayContainer: false,
+      error: 'Service temporarily unavailable',
+    },
+    live: async () => {
+      const row = await executeQuery('SELECT config_json FROM afvalkalender_config WHERE id = 1 LIMIT 1').then((r) => r.rows && r.rows[0]);
+      let config = row && row.config_json;
+      if (typeof config === 'string') {
+        try {
+          config = JSON.parse(config);
+        } catch (e) {
+          config = null;
+        }
+      }
+      if (!config) config = getDefaultAfvalkalenderConfig();
+      const oudPapierDates = computeNextOudPapierDates(config, 8);
+      const containerDates = computeNextContainerDates(config, 8);
+      return {
+        config: { oudPapier: config.oudPapier, containers: config.containers },
+        oudPapierDates,
+        containerDates,
+        isTodayOudPapier: isTodayOudPapier(config),
+        isTodayContainer: isTodayContainer(config),
+      };
+    },
+  });
 });
 
 app.get('/api/admin/afvalkalender', authenticateToken, requireAdmin, async (req, res) => {
@@ -8704,15 +8784,22 @@ app.delete('/api/auth/account', authenticateToken, async (req, res) => {
 
 // ===== PUBLIC ORGANIZATIONS DETAIL ENDPOINT =====
 app.get('/api/organizations/:id', async (req, res) => {
-  try {
-    await ensureOrgColumns();
-    const { id } = req.params;
-    if (!id || isNaN(parseInt(id))) {
-      return res.status(400).json({ error: 'Invalid organization ID' });
-    }
+  const { id } = req.params;
+  const orgId = parseInt(id, 10);
+  if (!id || Number.isNaN(orgId)) {
+    return res.status(400).json({ error: 'Invalid organization ID' });
+  }
 
-    const result = await executeQuery(
-      `SELECT 
+  await publicFallback.sendPublicOrFallback(res, {
+    key: `organizations/${orgId}`,
+    kind: 'organizations-detail',
+    failBody: { error: 'Service temporarily unavailable', organization: null },
+    isNotFound: (p) => p && p.__notFound === true,
+    notFoundStatus: 404,
+    live: async () => {
+      await ensureOrgColumns();
+      const result = await executeQuery(
+        `SELECT 
         id, name, category, description, bio, is_ondernemer,
         website,
         CASE WHEN show_email = true OR show_email IS NULL THEN email ELSE NULL END AS email,
@@ -8722,80 +8809,80 @@ app.get('/api/organizations/:id', async (req, res) => {
         created_at, updated_at
        FROM organizations
        WHERE id = ? AND is_approved = true`,
-      [id]
-    );
+        [orgId]
+      );
 
-    if (!result.rows || result.rows.length === 0) {
-      return res.status(404).json({ error: 'Organization not found' });
-    }
-
-    const organization = result.rows[0];
-    if (typeof organization.logo_url === 'string' && organization.logo_url.startsWith('data:image')) {
-      try {
-        organization.logo_url = await migrateOneEmbeddedOrgLogo(organization);
-        invalidateCache('/api/organizations');
-        invalidateCache('/api/admin/organizations');
-      } catch (migrateErr) {
-        console.error('[organizations/:id] logo-migrate', organization.id, migrateErr);
+      if (!result.rows || result.rows.length === 0) {
+        return { __notFound: true, error: 'Organization not found' };
       }
-    }
 
-    res.json({ organization });
-  } catch (error) {
-    console.error('Error fetching organization detail:', error);
-    res.status(500).json({ error: 'Failed to fetch organization detail', message: error.message });
-  }
+      const organization = result.rows[0];
+      if (typeof organization.logo_url === 'string' && organization.logo_url.startsWith('data:image')) {
+        try {
+          organization.logo_url = await migrateOneEmbeddedOrgLogo(organization);
+          invalidateCache('/api/organizations');
+          invalidateCache('/api/admin/organizations');
+        } catch (migrateErr) {
+          console.error('[organizations/:id] logo-migrate', organization.id, migrateErr);
+        }
+      }
+
+      return { organization };
+    },
+  });
 });
 
 app.get('/api/organizations/:id/profile-blocks', async (req, res) => {
-  try {
-    await ensureOrganizationProfileBlocksTable();
-    const orgId = parseInt(req.params.id, 10);
-    if (Number.isNaN(orgId)) return res.status(400).json({ error: 'Invalid organization ID' });
+  const orgId = parseInt(req.params.id, 10);
+  if (Number.isNaN(orgId)) return res.status(400).json({ error: 'Invalid organization ID' });
 
-    const orgCheck = await executeQuery(
-      'SELECT id FROM organizations WHERE id = ? AND is_approved = true LIMIT 1',
-      [orgId]
-    );
-    if (!orgCheck.rows?.length) return res.status(404).json({ error: 'Organization not found' });
+  await publicFallback.sendPublicOrFallback(res, {
+    key: `organizations/${orgId}/profile-blocks`,
+    kind: 'profile-blocks',
+    cacheControl: 'public, max-age=60',
+    failBody: { blocks: [], error: 'Service temporarily unavailable' },
+    isNotFound: (p) => p && p.__notFound === true,
+    notFoundStatus: 404,
+    live: async () => {
+      await ensureOrganizationProfileBlocksTable();
+      const orgCheck = await executeQuery(
+        'SELECT id FROM organizations WHERE id = ? AND is_approved = true LIMIT 1',
+        [orgId]
+      );
+      if (!orgCheck.rows?.length) {
+        return { __notFound: true, error: 'Organization not found' };
+      }
 
-    const cacheKey = getCacheKey(`/api/organizations/${orgId}/profile-blocks`, {});
-    const cached = getCached(cacheKey);
-    if (cached) {
-      res.set('Cache-Control', 'public, max-age=60');
-      return res.json(cached);
-    }
+      const cacheKey = getCacheKey(`/api/organizations/${orgId}/profile-blocks`, {});
+      const cached = getCached(cacheKey);
+      if (cached) return cached;
 
-    const result = await executeQuery(
-      `SELECT id, block_type, title, data_json, sort_order, is_visible
+      const result = await executeQuery(
+        `SELECT id, block_type, title, data_json, sort_order, is_visible
        FROM organization_profile_blocks
        WHERE organization_id = ? AND is_visible = true
        ORDER BY sort_order ASC, id ASC`,
-      [orgId]
-    );
-    const blocks = orgProfileBlocks.enrichBlocksForPublic(result.rows || []);
-    const response = { blocks };
-    setCache(cacheKey, response, 60 * 1000);
-    res.set('Cache-Control', 'public, max-age=60');
-    res.json(response);
-  } catch (error) {
-    console.error('GET /api/organizations/:id/profile-blocks error:', error);
-    if (isProfileBlocksTableDisallowed(error)) {
-      return profileBlocksSetupErrorResponse(res);
-    }
-    res.status(500).json({ error: 'Kon profielblokken niet ophalen', message: error.message, blocks: [] });
-  }
+        [orgId]
+      );
+      const blocks = orgProfileBlocks.enrichBlocksForPublic(result.rows || []);
+      const response = { blocks };
+      setCache(cacheKey, response, 60 * 1000);
+      return response;
+    },
+  });
 });
 
 // ===== PUBLIC ORGANIZATIONS ENDPOINT =====
 app.get('/api/organizations', async (req, res) => {
-  try {
-    await ensureOrgColumns();
-    const { page = 1, limit = 20, category, search, minimal = false } = req.query;
-    const offset = (page - 1) * limit;
+  const { page = 1, limit = 20, category, search, minimal = false } = req.query;
+  const pageValue = Math.max(parseInt(page, 10) || 1, 1);
+  const limitValue = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 200);
+  const offset = (pageValue - 1) * limitValue;
+  const minimalMode = minimal === 'true';
 
-    // For list view, only get essential fields (much faster)
-    const fields = minimal === 'true' ? `
+  const liveOrgs = async () => {
+    await ensureOrgColumns();
+    const fields = minimalMode ? `
       id,
       name,
       description,
@@ -8847,16 +8934,16 @@ app.get('/api/organizations', async (req, res) => {
 
     paramCount++;
     query += ` ORDER BY name ASC LIMIT $${paramCount}`;
-    params.push(parseInt(limit));
-    
+    params.push(limitValue);
+
     paramCount++;
     query += ` OFFSET $${paramCount}`;
-    params.push(parseInt(offset));
+    params.push(offset);
 
     const result = await executeQuery(query, params);
     let rows = result.rows || [];
 
-    if (minimal === 'true') {
+    if (minimalMode) {
       rows = rows.map((o) =>
         sanitizeListOrganization({
           ...o,
@@ -8867,43 +8954,65 @@ app.get('/api/organizations', async (req, res) => {
       rows = rows.map((o) => sanitizeListOrganization(o));
     }
 
-    // Get total count (only if not minimal, to save time)
     let total = rows.length;
-    if (minimal !== 'true') {
-    let countQuery = 'SELECT COUNT(*) as total FROM organizations WHERE is_approved = true';
-    const countParams = [];
-    
-    if (category) {
-      countParams.push(category);
-      countQuery += ` AND category = $${countParams.length}`;
-    }
-
-    if (search) {
-      countParams.push(`%${search}%`);
-      countQuery += ` AND (name ILIKE $${countParams.length} OR description ILIKE $${countParams.length})`;
-    }
-
-    const countResult = await executeQuery(countQuery, countParams);
+    if (!minimalMode) {
+      let countQuery = 'SELECT COUNT(*) as total FROM organizations WHERE is_approved = true';
+      const countParams = [];
+      if (category) {
+        countParams.push(category);
+        countQuery += ` AND category = $${countParams.length}`;
+      }
+      if (search) {
+        countParams.push(`%${search}%`);
+        countQuery += ` AND (name ILIKE $${countParams.length} OR description ILIKE $${countParams.length})`;
+      }
+      const countResult = await executeQuery(countQuery, countParams);
       total = parseInt(countResult.rows[0].total);
     }
 
-    res.set('Cache-Control', 'public, max-age=60');
-    res.json({
+    return {
       organizations: rows,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page: pageValue,
+        limit: limitValue,
         total: total,
-        pages: Math.ceil(total / limit)
+        pages: Math.ceil(total / limitValue)
       }
-    });
+    };
+  };
 
+  const isDefaultSnapshot = pageValue === 1 && !category && !search;
+
+  if (isDefaultSnapshot) {
+    await publicFallback.sendPublicOrFallback(res, {
+      key: minimalMode ? 'organizations-list-minimal' : 'organizations-list',
+      kind: 'organizations-list',
+      cacheControl: 'public, max-age=60',
+      failBody: {
+        organizations: [],
+        pagination: { page: 1, limit: limitValue, total: 0, pages: 0 },
+      },
+      live: liveOrgs,
+    });
+    return;
+  }
+
+  try {
+    const payload = await publicFallback.withTimeout(liveOrgs(), publicFallback.READ_TIMEOUT_MS);
+    if (!publicFallback.isStructurallyValid(payload)) throw new Error('invalid_orgs_payload');
+    res.set('Cache-Control', 'public, max-age=60');
+    res.json(publicFallback.attachMeta(payload, { fallback: false }));
   } catch (error) {
     console.error('Get organizations error:', error);
-    res.status(500).json({
-      error: 'Failed to get organizations',
-      message: error.message
-    });
+    res.status(503).json(
+      publicFallback.attachMeta(
+        {
+          organizations: [],
+          pagination: { page: pageValue, limit: limitValue, total: 0, pages: 0 },
+        },
+        { fallback: true, error: 'Service temporarily unavailable' }
+      )
+    );
   }
 });
 
