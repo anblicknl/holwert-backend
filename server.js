@@ -2067,6 +2067,14 @@ app.get('/api/news', async (req, res) => {
     res.json(publicFallback.attachMeta(payload, { fallback: false }));
   } catch (error) {
     console.error('Get news error:', error);
+    try {
+      await publicFallback.recordFallbackHit({
+        key: 'news-list-filtered',
+        reason: 'live_unavailable_no_snapshot',
+      });
+    } catch {
+      /* ignore */
+    }
     res.status(503).json(
       publicFallback.attachMeta(
         {
@@ -6187,6 +6195,14 @@ app.get('/api/events', async (req, res) => {
     res.json(publicFallback.attachMeta(payload, { fallback: false }));
   } catch (error) {
     console.error('[GET /api/events] Error:', error);
+    try {
+      await publicFallback.recordFallbackHit({
+        key: 'events-list-filtered',
+        reason: 'live_unavailable_no_snapshot',
+      });
+    } catch {
+      /* ignore */
+    }
     res.status(503).json(
       publicFallback.attachMeta(
         {
@@ -9004,6 +9020,14 @@ app.get('/api/organizations', async (req, res) => {
     res.json(publicFallback.attachMeta(payload, { fallback: false }));
   } catch (error) {
     console.error('Get organizations error:', error);
+    try {
+      await publicFallback.recordFallbackHit({
+        key: 'organizations-list-filtered',
+        reason: 'live_unavailable_no_snapshot',
+      });
+    } catch {
+      /* ignore */
+    }
     res.status(503).json(
       publicFallback.attachMeta(
         {

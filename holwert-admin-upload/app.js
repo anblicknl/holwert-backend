@@ -1045,6 +1045,7 @@ class HolwertAdmin {
             // Load pending content
             this.loadPendingContent();
             this.loadRecentActivity();
+            this.loadFallbackStatus();
             
             // Load notification counts
             this.loadNotificationCounts();
@@ -1052,6 +1053,93 @@ class HolwertAdmin {
         } catch (error) {
             console.error('Error loading dashboard:', error);
         }
+    }
+
+    formatFallbackTime(iso) {
+        if (!iso) return '—';
+        try {
+            const d = new Date(iso);
+            if (!Number.isFinite(d.getTime())) return String(iso);
+            return d.toLocaleString('nl-NL', {
+                day: '2-digit',
+                month: 'short',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+            });
+        } catch {
+            return String(iso);
+        }
+    }
+
+    async loadFallbackStatus() {
+        const body = document.getElementById('fallbackStatusBody');
+        if (!body) return;
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/app/fallback-status`, {
+                cache: 'no-store',
+            });
+            if (!response.ok) {
+                body.innerHTML = `<p class="fallback-status-error">Kon fallback-status niet laden (${response.status}).</p>`;
+                return;
+            }
+            const data = await response.json();
+            const u = data.usage || {};
+            const active = u.activeNow === true;
+            const lastHit = u.lastHitAt;
+            const snaps = Array.isArray(data.snapshots) ? data.snapshots.length : 0;
+            const recent = Array.isArray(u.recent) ? u.recent.slice(0, 5) : [];
+
+            let stateClass = 'fallback-ok';
+            let stateLabel = 'Geen recente fallback';
+            if (active) {
+                stateClass = 'fallback-active';
+                stateLabel = 'Nu actief (laatste 15 min)';
+            } else if (lastHit) {
+                stateClass = 'fallback-recent';
+                stateLabel = `Laatst gebruikt ${u.lastHitAge || ''}`;
+            }
+
+            const recentHtml = recent.length
+                ? `<ul class="fallback-recent-list">${recent
+                      .map(
+                          (e) =>
+                              `<li><span class="fallback-recent-at">${this.formatFallbackTime(e.at)}</span> · <code>${this.escapeHtml(e.key || '')}</code> · ${this.escapeHtml(e.reason || '')}</li>`
+                      )
+                      .join('')}</ul>`
+                : `<p class="muted">Nog geen hits gelogd. Dit vult zich zodra VDX even niet bereikbaar is (of bij een test met FORCE_PUBLIC_FALLBACK).</p>`;
+
+            body.innerHTML = `
+                <div class="fallback-status-row ${stateClass}">
+                    <strong>${stateLabel}</strong>
+                    <span>Snapshots: ${snaps} · Hits totaal: ${u.hitsTotal || 0}</span>
+                </div>
+                <p class="fallback-status-meta">
+                    Laatste hit: <strong>${this.formatFallbackTime(lastHit)}</strong>
+                    ${u.lastHitKey ? ` · key <code>${this.escapeHtml(u.lastHitKey)}</code>` : ''}
+                    ${u.lastHitReason ? ` · ${this.escapeHtml(u.lastHitReason)}` : ''}
+                </p>
+                <div class="fallback-recent">
+                    <h4>Recente hits</h4>
+                    ${recentHtml}
+                </div>
+                <p class="fallback-status-link muted">
+                    Detail-JSON:
+                    <a href="${this.apiBaseUrl}/app/fallback-status" target="_blank" rel="noopener">/api/app/fallback-status</a>
+                </p>
+            `;
+        } catch (error) {
+            console.error('Error loading fallback status:', error);
+            body.innerHTML = `<p class="fallback-status-error">Kon fallback-status niet laden.</p>`;
+        }
+    }
+
+    escapeHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
     }
 
     async loadNotificationCounts() {

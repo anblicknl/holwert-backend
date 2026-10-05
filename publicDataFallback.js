@@ -640,6 +640,124 @@ function ageLabel(lastUpdated) {
   return `${Math.floor(h / 24)}d`;
 }
 
+const USAGE_KEY = 'fallback-usage';
+const MAX_USAGE_EVENTS = 40;
+const USAGE_WRITE_INTERVAL_MS = 15 * 1000;
+/** @type {{ at: string, key: string, reason: string, snapshotLastUpdated: string|null }[]} */
+let pendingUsageEvents = [];
+let usageFlushTimer = null;
+let lastUsageFlushAt = 0;
+
+async function loadUsageLog() {
+  try {
+    const snap = await loadSnapshot(USAGE_KEY);
+    if (snap?.data && isPlainObject(snap.data)) return snap.data;
+  } catch {
+    /* ignore */
+  }
+  return {
+    lastHitAt: null,
+    lastHitKey: null,
+    lastHitReason: null,
+    hitsTotal: 0,
+    recent: [],
+  };
+}
+
+async function flushUsageLog() {
+  if (!storeConfigured() || pendingUsageEvents.length === 0) return;
+  const batch = pendingUsageEvents.splice(0, pendingUsageEvents.length);
+  lastUsageFlushAt = Date.now();
+  try {
+    const current = await loadUsageLog();
+    const recent = [...batch, ...(Array.isArray(current.recent) ? current.recent : [])]
+      .slice(0, MAX_USAGE_EVENTS);
+    const last = batch[0];
+    const data = {
+      lastHitAt: last.at,
+      lastHitKey: last.key,
+      lastHitReason: last.reason,
+      lastSnapshotLastUpdated: last.snapshotLastUpdated || null,
+      hitsTotal: (Number(current.hitsTotal) || 0) + batch.length,
+      recent,
+    };
+    const lastUpdated = new Date().toISOString();
+    const envelope = {
+      tenant: TENANT_ID,
+      key: USAGE_KEY,
+      kind: 'fallback-usage',
+      lastUpdated,
+      hash: contentHash(data),
+      data,
+    };
+    const res = await axios.post(
+      storeBaseUrl(),
+      { action: 'put', tenant: TENANT_ID, key: USAGE_KEY, body: envelope },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Fallback-Secret': storeSecret(),
+        },
+        timeout: 8000,
+        validateStatus: () => true,
+      }
+    );
+    if (!(res.status >= 200 && res.status < 300 && res.data?.ok === true)) {
+      console.warn(
+        '[public-fallback] usage log save mislukt:',
+        res.status,
+        res.data?.error || ''
+      );
+      // terugzetten zodat een volgende hit opnieuw probeert
+      pendingUsageEvents = batch.concat(pendingUsageEvents).slice(0, MAX_USAGE_EVENTS);
+    } else {
+      console.log(
+        `[public-fallback] usage log bijgewerkt lastHit=${last.at} key=${last.key} reason=${last.reason}`
+      );
+    }
+  } catch (e) {
+    console.warn('[public-fallback] usage log flush fail:', e.message);
+    pendingUsageEvents = batch.concat(pendingUsageEvents).slice(0, MAX_USAGE_EVENTS);
+  }
+}
+
+/**
+ * Registreer dat de API fallback-data heeft geserveerd (voor admin-status).
+ * Schrijft throttled naar de frl-store zodat je later kunt zien of/wanneer het is gebruikt.
+ */
+async function recordFallbackHit({ key, reason, snapshotLastUpdated } = {}) {
+  if (!storeConfigured()) return { ok: false, reason: 'no_store' };
+  const event = {
+    at: new Date().toISOString(),
+    key: safeKey(key || 'unknown'),
+    reason: String(reason || 'live_unavailable').slice(0, 80),
+    snapshotLastUpdated: snapshotLastUpdated || null,
+  };
+  pendingUsageEvents.unshift(event);
+  if (pendingUsageEvents.length > MAX_USAGE_EVENTS) {
+    pendingUsageEvents.length = MAX_USAGE_EVENTS;
+  }
+
+  const due = Date.now() - lastUsageFlushAt >= USAGE_WRITE_INTERVAL_MS;
+  if (due) {
+    await flushUsageLog();
+    return { ok: true, flushed: true };
+  }
+  if (!usageFlushTimer) {
+    usageFlushTimer = setTimeout(() => {
+      usageFlushTimer = null;
+      flushUsageLog().catch(() => {});
+    }, USAGE_WRITE_INTERVAL_MS);
+    if (typeof usageFlushTimer.unref === 'function') usageFlushTimer.unref();
+  }
+  // Op Vercel: toch kort awaiten als er nog nooit is geflusht
+  if (lastUsageFlushAt === 0) {
+    await flushUsageLog();
+    return { ok: true, flushed: true };
+  }
+  return { ok: true, flushed: false };
+}
+
 async function sendPublicOrFallback(res, opts) {
   const {
     key,
@@ -658,10 +776,24 @@ async function sendPublicOrFallback(res, opts) {
       console.log(
         `[public-fallback] FALLBACK gebruikt key=${key} lastUpdated=${snap.lastUpdated} age=${ageLabel(snap.lastUpdated)} (forced)`
       );
+      try {
+        await recordFallbackHit({
+          key,
+          reason: 'forced',
+          snapshotLastUpdated: snap.lastUpdated,
+        });
+      } catch {
+        /* ignore */
+      }
       if (cacheControl) res.set('Cache-Control', cacheControl);
       return res.json(
         attachMeta(snap.data, { fallback: true, lastUpdated: snap.lastUpdated })
       );
+    }
+    try {
+      await recordFallbackHit({ key, reason: 'forced_no_snapshot' });
+    } catch {
+      /* ignore */
     }
     return res
       .status(503)
@@ -705,6 +837,15 @@ async function sendPublicOrFallback(res, opts) {
       console.log(
         `[public-fallback] FALLBACK gebruikt key=${key} lastUpdated=${snap.lastUpdated} age=${ageLabel(snap.lastUpdated)}`
       );
+      try {
+        await recordFallbackHit({
+          key,
+          reason: 'live_unavailable',
+          snapshotLastUpdated: snap.lastUpdated,
+        });
+      } catch {
+        /* ignore */
+      }
       if (cacheControl) res.set('Cache-Control', 'public, max-age=60');
       return res.json(
         attachMeta(snap.data, { fallback: true, lastUpdated: snap.lastUpdated })
@@ -714,6 +855,11 @@ async function sendPublicOrFallback(res, opts) {
     console.error(
       `[public-fallback] GEEN fallback beschikbaar key=${key} tenant=${TENANT_ID}`
     );
+    try {
+      await recordFallbackHit({ key, reason: 'no_snapshot' });
+    } catch {
+      /* ignore */
+    }
     return res.status(503).json(
       attachMeta(failBody || { error: 'Service temporarily unavailable' }, {
         fallback: true,
@@ -733,9 +879,30 @@ async function getStatusSummary() {
     writeIntervalMs: WRITE_INTERVAL_MS,
     retentionDays: RETENTION_DAYS,
     backend: 'http-host',
+    usage: null,
     snapshots: [],
   };
   if (!storeBaseUrl()) return base;
+
+  try {
+    const usage = await loadUsageLog();
+    const lastHitAt = usage.lastHitAt || null;
+    base.usage = {
+      lastHitAt,
+      lastHitAge: lastHitAt ? ageLabel(lastHitAt) : null,
+      lastHitKey: usage.lastHitKey || null,
+      lastHitReason: usage.lastHitReason || null,
+      lastSnapshotLastUpdated: usage.lastSnapshotLastUpdated || null,
+      hitsTotal: Number(usage.hitsTotal) || 0,
+      recent: Array.isArray(usage.recent) ? usage.recent.slice(0, 15) : [],
+      activeNow: !!(
+        lastHitAt &&
+        Date.now() - new Date(lastHitAt).getTime() < 15 * 60 * 1000
+      ),
+    };
+  } catch {
+    base.usage = { lastHitAt: null, recent: [], hitsTotal: 0, activeNow: false };
+  }
 
   const probeKeys = [
     'bootstrap',
@@ -782,6 +949,7 @@ module.exports = {
   loadSnapshot,
   sendPublicOrFallback,
   getStatusSummary,
+  recordFallbackHit,
   ageLabel,
   publicJsonUrl,
 };

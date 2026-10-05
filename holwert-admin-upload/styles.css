@@ -511,6 +511,82 @@ body.admin-login-open {
     margin-bottom: 2rem;
 }
 
+.fallback-status-panel {
+    margin-bottom: 1.5rem;
+}
+
+.fallback-status-body .muted {
+    color: #666;
+    font-size: 0.9rem;
+}
+
+.fallback-status-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.25rem;
+    align-items: baseline;
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    border: 1px solid #e0e0e0;
+    margin-bottom: 0.75rem;
+    background: #fafafa;
+}
+
+.fallback-status-row.fallback-ok {
+    border-color: #c8e6c9;
+    background: #f1f8f2;
+}
+
+.fallback-status-row.fallback-recent {
+    border-color: #ffe0b2;
+    background: #fff8e7;
+}
+
+.fallback-status-row.fallback-active {
+    border-color: #ffcdd2;
+    background: #fdecea;
+}
+
+.fallback-status-meta {
+    margin: 0 0 0.75rem;
+    font-size: 0.92rem;
+    color: #444;
+}
+
+.fallback-recent h4 {
+    margin: 0 0 0.4rem;
+    font-size: 0.95rem;
+}
+
+.fallback-recent-list {
+    margin: 0;
+    padding-left: 1.1rem;
+    font-size: 0.88rem;
+    color: #444;
+}
+
+.fallback-recent-list li {
+    margin-bottom: 0.25rem;
+}
+
+.fallback-recent-at {
+    font-variant-numeric: tabular-nums;
+}
+
+.fallback-status-link {
+    margin: 0.75rem 0 0;
+    font-size: 0.85rem;
+}
+
+.fallback-status-link a {
+    color: #1565c0;
+}
+
+.fallback-status-error {
+    color: #c62828;
+    margin: 0;
+}
+
 .stat-card {
     background: white;
     padding: 1.5rem;

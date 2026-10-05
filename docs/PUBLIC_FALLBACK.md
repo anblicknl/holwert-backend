@@ -38,11 +38,13 @@ Oude `PUBLIC_FALLBACK_*` namen werken nog als fallback in code.
 ## Controleren
 
 ```bash
-curl -sS 'https://holwert.frl/dorpsapp-fallback-host/store.php?tenant=holwert&key=news-list' | jq '.data.news[0].image_url'
-# verwacht iets met store.php?…&raw=1 (niet appenvloed.com)
-
-curl -sS https://holwert-backend.vercel.app/api/app/fallback-status
+curl -sS https://holwert-backend.vercel.app/api/app/fallback-status | jq '{usage, snapshots:(.snapshots|length)}'
 ```
+
+In het **admin-dashboard** (na FTP van `index.html` / `app.js` / `styles.css`):
+blok “Publieke fallback” met laatste hit + recente events.
+
+`usage.activeNow` is true als de laatste hit < 15 minuten geleden was.
 
 ## VDX-storing simuleren
 
