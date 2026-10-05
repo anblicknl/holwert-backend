@@ -265,6 +265,196 @@ function sanitizeForSnapshot(kind, payload) {
   return clone;
 }
 
+const MEDIA_URL_KEYS = new Set([
+  'image_url',
+  'logo_url',
+  'organization_logo',
+  'icon',
+  'pdf_url',
+]);
+
+const VDX_HOST_RE = /(^https?:\/\/)?([^/]*\.)?holwert\.appenvloed\.com/i;
+
+function shouldMirrorUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  const s = url.trim();
+  if (!s || s.startsWith('data:') || s.startsWith('blob:')) return false;
+  if (VDX_HOST_RE.test(s)) return true;
+  // relatieve uploads op VDX-hosting
+  if (s.startsWith('/uploads/') || s.startsWith('uploads/')) return true;
+  return false;
+}
+
+function absoluteVdxUrl(url) {
+  const s = String(url).trim();
+  if (/^https?:\/\//i.test(s)) return s;
+  if (s.startsWith('//')) return `https:${s}`;
+  if (s.startsWith('/')) return `https://holwert.appenvloed.com${s}`;
+  if (s.startsWith('uploads/')) return `https://holwert.appenvloed.com/${s}`;
+  return s;
+}
+
+function extFromUrlOrType(url, contentType) {
+  const path = String(url).split('?')[0].toLowerCase();
+  const m = path.match(/\.(jpe?g|png|webp|gif|pdf)$/);
+  if (m) return m[1] === 'jpeg' ? 'jpg' : m[1];
+  const ct = String(contentType || '').toLowerCase();
+  if (ct.includes('png')) return 'png';
+  if (ct.includes('webp')) return 'webp';
+  if (ct.includes('gif')) return 'gif';
+  if (ct.includes('pdf')) return 'pdf';
+  return 'jpg';
+}
+
+function publicMediaUrl(mediaKey) {
+  const base = storeBaseUrl();
+  if (!base) return null;
+  const u = new URL(base.includes('://') ? base : `https://${base}`);
+  u.searchParams.set('tenant', TENANT_ID);
+  u.searchParams.set('key', mediaKey);
+  u.searchParams.set('raw', '1');
+  return u.toString();
+}
+
+/** Max unieke media-uploads per snapshot-write (Vercel-tijdlimiet). */
+const MAX_MEDIA_PER_SAVE = Math.max(
+  1,
+  parseInt(process.env.FALLBACK_MAX_MEDIA_PER_SAVE || '18', 10) || 18
+);
+
+/** @type {Map<string, string>} */
+const mirrorMemo = new Map();
+
+function payloadHasMirrorableMedia(node, found = { n: 0 }) {
+  if (found.n > 0) return true;
+  if (typeof node === 'string') {
+    if (shouldMirrorUrl(node)) found.n += 1;
+    return found.n > 0;
+  }
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      if (payloadHasMirrorableMedia(item, found)) return true;
+    }
+    return false;
+  }
+  if (isPlainObject(node)) {
+    for (const v of Object.values(node)) {
+      if (payloadHasMirrorableMedia(v, found)) return true;
+    }
+  }
+  return false;
+}
+
+async function uploadMediaBuffer(mediaKey, buffer, contentType) {
+  const res = await axios.post(storeBaseUrl(), buffer, {
+    headers: {
+      'Content-Type': contentType || 'application/octet-stream',
+      'X-Fallback-Secret': storeSecret(),
+      'X-Fallback-Action': 'put-media',
+      'X-Fallback-Tenant': TENANT_ID,
+      'X-Fallback-Media-Key': mediaKey,
+    },
+    timeout: 20000,
+    maxBodyLength: 2_500_000,
+    validateStatus: () => true,
+    transformRequest: [(d) => d],
+  });
+  if (res.status >= 200 && res.status < 300 && res.data?.ok === true) {
+    return publicMediaUrl(mediaKey);
+  }
+  throw new Error(res.data?.error || `media_upload_http_${res.status}`);
+}
+
+async function mirrorOneUrl(url, budget) {
+  if (!shouldMirrorUrl(url)) return url;
+  if (mirrorMemo.has(url)) return mirrorMemo.get(url);
+  if (budget.left <= 0) return url;
+
+  const abs = absoluteVdxUrl(url);
+  try {
+    const dl = await axios.get(abs, {
+      responseType: 'arraybuffer',
+      timeout: 10000,
+      maxContentLength: 2_000_000,
+      validateStatus: (s) => s >= 200 && s < 300,
+    });
+    const buf = Buffer.from(dl.data);
+    if (!buf.length || buf.length > 2_000_000) {
+      mirrorMemo.set(url, url);
+      return url;
+    }
+    const ext = extFromUrlOrType(abs, dl.headers['content-type']);
+    const hash = crypto.createHash('sha256').update(buf).digest('hex').slice(0, 32);
+    const mediaKey = `media/${hash}.${ext}`;
+    const mirrored = await uploadMediaBuffer(
+      mediaKey,
+      buf,
+      dl.headers['content-type'] || contentTypeGuess(ext)
+    );
+    budget.left -= 1;
+    mirrorMemo.set(url, mirrored || url);
+    return mirrored || url;
+  } catch (e) {
+    console.warn('[public-fallback] media mirror fail:', abs.slice(0, 80), e.message);
+    // niet cachen als fail: volgende save mag opnieuw
+    return url;
+  }
+}
+
+function contentTypeGuess(ext) {
+  if (ext === 'png') return 'image/png';
+  if (ext === 'webp') return 'image/webp';
+  if (ext === 'gif') return 'image/gif';
+  if (ext === 'pdf') return 'application/pdf';
+  return 'image/jpeg';
+}
+
+async function mirrorValue(value, stats, budget) {
+  if (typeof value === 'string' && shouldMirrorUrl(value)) {
+    stats.seen += 1;
+    const next = await mirrorOneUrl(value, budget);
+    if (next !== value) stats.mirrored += 1;
+    return next;
+  }
+  if (Array.isArray(value)) {
+    const out = [];
+    for (const item of value) out.push(await mirrorValue(item, stats, budget));
+    return out;
+  }
+  if (isPlainObject(value)) {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) {
+      if (MEDIA_URL_KEYS.has(k) || k === 'image_variants') {
+        out[k] = await mirrorValue(v, stats, budget);
+      } else if (isPlainObject(v) || Array.isArray(v)) {
+        out[k] = await mirrorValue(v, stats, budget);
+      } else {
+        out[k] = v;
+      }
+    }
+    return out;
+  }
+  return value;
+}
+
+/**
+ * Spiegel VDX-media naar fallback-host en herschrijf URL's in de payload.
+ * Beperkt tot max N unieke URL's per snapshot (Vercel-tijdlimiet).
+ */
+async function mirrorMediaInPayload(payload) {
+  if (!storeConfigured() || !isPlainObject(payload)) return payload;
+  const stats = { seen: 0, mirrored: 0 };
+  const budget = { left: MAX_MEDIA_PER_SAVE };
+  const cloned = JSON.parse(JSON.stringify(payload));
+  const result = await mirrorValue(cloned, stats, budget);
+  if (stats.seen > 0) {
+    console.log(
+      `[public-fallback] media mirror seen=${stats.seen} uploaded=${stats.mirrored} remaining_budget=${budget.left} tenant=${TENANT_ID}`
+    );
+  }
+  return result;
+}
+
 function attachMeta(payload, { fallback, lastUpdated, error } = {}) {
   const out = isPlainObject(payload) ? { ...payload } : { data: payload };
   out.fallback = fallback === true;
@@ -299,6 +489,7 @@ function parseEnvelope(text) {
     data: envelope.data,
     lastUpdated: envelope.lastUpdated,
     hash: envelope.hash,
+    sourceHash: envelope.sourceHash || null,
   };
 }
 
@@ -333,34 +524,54 @@ async function saveSnapshotIfDue(key, kind, payload) {
   }
 
   const now = Date.now();
+  const sourceHash = contentHash(sanitized);
+  const existing = await loadSnapshot(key);
+  const sameContent = existing?.sourceHash === sourceHash;
+  // Kijk naar de opgeslagen snapshot: live VDX-payload heeft altijd VDX-URL's.
+  const mediaPending = sameContent
+    ? payloadHasMirrorableMedia(existing.data)
+    : payloadHasMirrorableMedia(sanitized);
+
+  if (sameContent && lastSavedHash.get(key) === sourceHash && !mediaPending) {
+    lastWriteAttempt.set(key, now);
+    return { ok: true, saved: false, reason: 'unchanged' };
+  }
+  if (sameContent && !mediaPending) {
+    lastSavedHash.set(key, sourceHash);
+    lastWriteAttempt.set(key, now);
+    return { ok: true, saved: false, reason: 'unchanged' };
+  }
+
+  const intervalMs =
+    sameContent && mediaPending
+      ? Math.min(WRITE_INTERVAL_MS, 90 * 1000)
+      : WRITE_INTERVAL_MS;
   const lastAttempt = lastWriteAttempt.get(key) || 0;
-  if (now - lastAttempt < WRITE_INTERVAL_MS) {
+  if (now - lastAttempt < intervalMs) {
     return { ok: true, saved: false, reason: 'throttled' };
   }
 
-  const hash = contentHash(sanitized);
-  if (lastSavedHash.get(key) === hash) {
-    lastWriteAttempt.set(key, now);
-    return { ok: true, saved: false, reason: 'unchanged' };
-  }
-
-  const existing = await loadSnapshot(key);
-  if (existing?.hash === hash) {
-    lastSavedHash.set(key, hash);
-    lastWriteAttempt.set(key, now);
-    return { ok: true, saved: false, reason: 'unchanged' };
-  }
-
   lastWriteAttempt.set(key, now);
+
+  // Bij catch-up: verder vanaf al deels gespiegelde snapshot, niet opnieuw vanaf VDX-URL's.
+  let dataForStore = sameContent && existing?.data ? existing.data : sanitized;
+  try {
+    dataForStore = await mirrorMediaInPayload(dataForStore);
+  } catch (e) {
+    console.warn('[public-fallback] media mirror batch fail:', e.message);
+  }
+
   const lastUpdated = new Date().toISOString();
+  const hash = contentHash(dataForStore);
   const envelope = {
     tenant: TENANT_ID,
     key: safeKey(key),
     kind,
     lastUpdated,
     hash,
+    sourceHash,
     retentionDays: RETENTION_DAYS,
-    data: sanitized,
+    data: dataForStore,
   };
 
   try {
@@ -377,12 +588,12 @@ async function saveSnapshotIfDue(key, kind, payload) {
           'Content-Type': 'application/json',
           'X-Fallback-Secret': storeSecret(),
         },
-        timeout: 15000,
+        timeout: 45000,
         validateStatus: () => true,
       }
     );
     if (res.status >= 200 && res.status < 300 && res.data?.ok === true) {
-      lastSavedHash.set(key, hash);
+      lastSavedHash.set(key, sourceHash);
       console.log(
         `[public-fallback] snapshot OPGESLAGEN host=frl key=${key} tenant=${TENANT_ID} at=${lastUpdated} hash=${hash}`
       );
