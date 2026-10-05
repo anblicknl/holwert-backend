@@ -9,24 +9,41 @@ const axios = require('axios');
 
 const READ_TIMEOUT_MS = Math.max(
   1000,
-  parseInt(process.env.PUBLIC_FALLBACK_READ_TIMEOUT_MS || '4000', 10) || 4000
+  parseInt(
+    process.env.FALLBACK_READ_TIMEOUT_MS ||
+      process.env.PUBLIC_FALLBACK_READ_TIMEOUT_MS ||
+      '4000',
+    10
+  ) || 4000
 );
 
 /** Minimale tijd tussen remote writes per key (bespaart I/O op de fallback-host). */
 const WRITE_INTERVAL_MS = Math.max(
   60 * 1000,
-  parseInt(process.env.PUBLIC_FALLBACK_WRITE_INTERVAL_MS || String(6 * 60 * 60 * 1000), 10) ||
-    6 * 60 * 60 * 1000
+  parseInt(
+    process.env.FALLBACK_WRITE_INTERVAL_MS ||
+      process.env.PUBLIC_FALLBACK_WRITE_INTERVAL_MS ||
+      String(6 * 60 * 60 * 1000),
+    10
+  ) || 6 * 60 * 60 * 1000
 );
 
 /** Alleen nieuws/agenda jonger dan dit in snapshots (dagen). */
 const RETENTION_DAYS = Math.max(
   1,
-  parseInt(process.env.PUBLIC_FALLBACK_RETENTION_DAYS || '21', 10) || 21
+  parseInt(
+    process.env.FALLBACK_RETENTION_DAYS ||
+      process.env.PUBLIC_FALLBACK_RETENTION_DAYS ||
+      '21',
+    10
+  ) || 21
 );
 
 const TENANT_ID = String(
-  process.env.PUBLIC_FALLBACK_TENANT || process.env.TENANT_ID || 'default'
+  process.env.FALLBACK_TENANT ||
+    process.env.PUBLIC_FALLBACK_TENANT ||
+    process.env.TENANT_ID ||
+    'default'
 )
   .trim()
   .toLowerCase()
@@ -41,11 +58,21 @@ const lastWriteAttempt = new Map();
 const lastSavedHash = new Map();
 
 function storeBaseUrl() {
-  return (process.env.PUBLIC_FALLBACK_STORE_URL || '').trim().replace(/\/+$/, '') || null;
+  return (
+    process.env.FALLBACK_STORE_URL ||
+    process.env.PUBLIC_FALLBACK_STORE_URL ||
+    ''
+  )
+    .trim()
+    .replace(/\/+$/, '') || null;
 }
 
 function storeSecret() {
-  return (process.env.PUBLIC_FALLBACK_STORE_SECRET || '').trim() || null;
+  return (
+    process.env.FALLBACK_STORE_SECRET ||
+    process.env.PUBLIC_FALLBACK_STORE_SECRET ||
+    ''
+  ).trim() || null;
 }
 
 function storeConfigured() {

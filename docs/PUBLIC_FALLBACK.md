@@ -19,14 +19,16 @@ Zie map [`dorpsapp-fallback-host/`](../dorpsapp-fallback-host/README.md):
 
 ## Vercel environment
 
-| Variabele | Voorbeeld |
-|-----------|-----------|
-| `PUBLIC_FALLBACK_STORE_URL` | `https://holwert.frl/dorpsapp-fallback/store.php` |
-| `PUBLIC_FALLBACK_STORE_SECRET` | zelfde als in `store.php` |
-| `PUBLIC_FALLBACK_TENANT` | `holwert` |
-| `PUBLIC_FALLBACK_RETENTION_DAYS` | `21` (optioneel) |
-| `PUBLIC_FALLBACK_READ_TIMEOUT_MS` | `4000` (optioneel) |
-| `FORCE_PUBLIC_FALLBACK` | `1` alleen voor tests |
+Gebruik namen **zonder** `PUBLIC_`-prefix (Vercel blokkeert Secret anders).
+
+| Type | Key | Value |
+|------|-----|--------|
+| Config | `FALLBACK_STORE_URL` | `https://www.holwert.frl/dorpsapp-fallback-host/store.php` |
+| Secret | `FALLBACK_STORE_SECRET` | `HolwertFallback_2026_Kx9mQ2vL7nP4rT8w` |
+| Config | `FALLBACK_TENANT` | `holwert` |
+
+Optioneel: `FALLBACK_RETENTION_DAYS=21`, `FALLBACK_READ_TIMEOUT_MS=4000`.
+Oude `PUBLIC_FALLBACK_*` namen werken nog als fallback in code.
 
 ## Controleren
 
