@@ -486,9 +486,12 @@ async function sendPublicOrFallback(res, opts) {
       throw new Error('invalid_or_incomplete_live_payload');
     }
 
-    saveSnapshotIfDue(key, kind, payload).catch((e) =>
-      console.warn('[public-fallback] save async:', e.message)
-    );
+    // Op Vercel: await vóór res.json, anders wordt de write afgekapt
+    try {
+      await saveSnapshotIfDue(key, kind, payload);
+    } catch (e) {
+      console.warn('[public-fallback] save:', e && e.message ? e.message : e);
+    }
 
     if (cacheControl) res.set('Cache-Control', cacheControl);
     return res.json(attachMeta(payload, { fallback: false }));
