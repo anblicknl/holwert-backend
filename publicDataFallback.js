@@ -1,22 +1,28 @@
 /**
  * Persistente "last known good" snapshots voor publieke Dorpsapp-data.
- * Opslag: Vercel Blob (onafhankelijk van VDX). Tenant-aware voor hergebruik.
- *
- * Hobby-plan: schrijven is getrottled (advanced ops limiet ~2k/maand).
+ * Opslag: externe host (bijv. holwert.frl op Antagonist) — onafhankelijk van VDX.
+ * Tenant-aware voor hergebruik bij andere dorpen.
  */
 
 const crypto = require('crypto');
+const axios = require('axios');
 
 const READ_TIMEOUT_MS = Math.max(
   1000,
   parseInt(process.env.PUBLIC_FALLBACK_READ_TIMEOUT_MS || '4000', 10) || 4000
 );
 
-/** Minimale tijd tussen Blob-writes per key (Hobby advanced-ops limiet). */
+/** Minimale tijd tussen remote writes per key (bespaart I/O op de fallback-host). */
 const WRITE_INTERVAL_MS = Math.max(
   60 * 1000,
   parseInt(process.env.PUBLIC_FALLBACK_WRITE_INTERVAL_MS || String(6 * 60 * 60 * 1000), 10) ||
     6 * 60 * 60 * 1000
+);
+
+/** Alleen nieuws/agenda jonger dan dit in snapshots (dagen). */
+const RETENTION_DAYS = Math.max(
+  1,
+  parseInt(process.env.PUBLIC_FALLBACK_RETENTION_DAYS || '21', 10) || 21
 );
 
 const TENANT_ID = String(
@@ -29,21 +35,38 @@ const TENANT_ID = String(
 const FORCE_FALLBACK =
   process.env.FORCE_PUBLIC_FALLBACK === '1' || process.env.FORCE_PUBLIC_FALLBACK === 'true';
 
-/** @type {Map<string, string>} pathname -> url */
-let urlIndex = null;
-/** @type {Map<string, number>} key -> last write attempt ms */
+/** @type {Map<string, number>} */
 const lastWriteAttempt = new Map();
+/** @type {Map<string, string>} key -> content hash of last successful save */
+const lastSavedHash = new Map();
 
-function blobToken() {
-  return (process.env.BLOB_READ_WRITE_TOKEN || '').trim() || null;
+function storeBaseUrl() {
+  return (process.env.PUBLIC_FALLBACK_STORE_URL || '').trim().replace(/\/+$/, '') || null;
 }
 
-function pathnameFor(key) {
-  const safe = String(key || '')
+function storeSecret() {
+  return (process.env.PUBLIC_FALLBACK_STORE_SECRET || '').trim() || null;
+}
+
+function storeConfigured() {
+  return !!(storeBaseUrl() && storeSecret());
+}
+
+function safeKey(key) {
+  return String(key || '')
     .replace(/[^a-zA-Z0-9/_-]/g, '_')
     .replace(/\/+/g, '/')
     .replace(/^\/|\/$/g, '');
-  return `dorpsapp-fallback/${TENANT_ID}/${safe}.json`;
+}
+
+/** Publieke lees-URL via store.php (werkt voor geneste keys). */
+function publicJsonUrl(key) {
+  const base = storeBaseUrl();
+  if (!base) return null;
+  const u = new URL(base.includes('://') ? base : `https://${base}`);
+  u.searchParams.set('tenant', TENANT_ID);
+  u.searchParams.set('key', safeKey(key));
+  return u.toString();
 }
 
 function contentHash(payload) {
@@ -62,7 +85,6 @@ function isPlainObject(v) {
   return v != null && typeof v === 'object' && !Array.isArray(v);
 }
 
-/** Structureel geldig genoeg om als live response te accepteren (mag leeg zijn). */
 function isStructurallyValid(payload) {
   if (payload == null) return false;
   if (typeof payload === 'string' && looksLikeHtml(payload)) return false;
@@ -88,11 +110,6 @@ function hasPublicDataKeys(payload) {
   );
 }
 
-/**
- * Strenge check vóór opslaan: nooit lege/incomplete/fout-payloads als LKG bewaren.
- * @param {string} kind
- * @param {object} payload
- */
 function isWorthSaving(kind, payload) {
   if (!isStructurallyValid(payload)) return false;
   if (payload.error && !hasPublicDataKeys(payload)) return false;
@@ -134,7 +151,7 @@ function isWorthSaving(kind, payload) {
         payload.organization.name.trim() !== ''
       );
     case 'profile-blocks':
-      return Array.isArray(payload.blocks); // lege blocks OK als org geen blokken heeft — maar dan niet overschrijven als we al iets hadden: zie save logic
+      return Array.isArray(payload.blocks);
     case 'practical-info':
       return Array.isArray(payload.items) && payload.items.length > 0;
     case 'afvalkalender':
@@ -145,16 +162,67 @@ function isWorthSaving(kind, payload) {
         (payload.oudPapierDates.length > 0 || payload.containerDates.length > 0)
       );
     case 'dorpsomroeper':
-      // active false is een geldige "geen mededeling"-state
       return typeof payload.active === 'boolean';
     default:
       return hasPublicDataKeys(payload);
   }
 }
 
-/** Strip persoonlijke velden vóór snapshot (bookmarks e.d.). */
-function sanitizeForSnapshot(kind, payload) {
+function retentionCutoffMs() {
+  return Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000;
+}
+
+function itemDateMs(item, fields) {
+  for (const f of fields) {
+    if (item?.[f]) {
+      const t = new Date(item[f]).getTime();
+      if (Number.isFinite(t)) return t;
+    }
+  }
+  return null;
+}
+
+/** Beperk nieuws/agenda in snapshots tot de retentieperiode. */
+function applyRetentionWindow(kind, payload) {
   const clone = JSON.parse(JSON.stringify(payload));
+  const cutoff = retentionCutoffMs();
+
+  const filterNews = (arr) =>
+    (arr || []).filter((n) => {
+      const t = itemDateMs(n, ['published_at', 'created_at', 'updated_at']);
+      return t == null || t >= cutoff;
+    });
+
+  const filterEvents = (arr) =>
+    (arr || []).filter((e) => {
+      const t = itemDateMs(e, ['event_date', 'event_end_date', 'created_at']);
+      // Toekomstige events altijd houden
+      if (t != null && t >= Date.now() - 24 * 60 * 60 * 1000) return true;
+      return t == null || t >= cutoff;
+    });
+
+  if (kind === 'bootstrap' || kind === 'news-list' || kind === 'news-head') {
+    if (Array.isArray(clone.news)) clone.news = filterNews(clone.news);
+  }
+  if (kind === 'news-detail' && clone.article) {
+    const t = itemDateMs(clone.article, ['published_at', 'created_at']);
+    if (t != null && t < cutoff) return null; // te oud om te bewaren
+  }
+  if (kind === 'events-list' && Array.isArray(clone.events)) {
+    clone.events = filterEvents(clone.events);
+  }
+  if (kind === 'events-detail' && clone.event) {
+    const t = itemDateMs(clone.event, ['event_date', 'event_end_date', 'created_at']);
+    const upcoming = t != null && t >= Date.now() - 24 * 60 * 60 * 1000;
+    if (t != null && t < cutoff && !upcoming) return null;
+  }
+  return clone;
+}
+
+function sanitizeForSnapshot(kind, payload) {
+  const retained = applyRetentionWindow(kind, payload);
+  if (!retained) return null;
+  const clone = retained;
   const stripBookmarks = (arr) => {
     if (!Array.isArray(arr)) return;
     for (const item of arr) {
@@ -190,46 +258,29 @@ function withTimeout(promise, ms = READ_TIMEOUT_MS) {
   ]);
 }
 
-async function loadBlobSdk() {
+function parseEnvelope(text) {
+  if (looksLikeHtml(text)) return null;
+  let envelope;
   try {
-    return require('@vercel/blob');
-  } catch (e) {
-    console.warn('[public-fallback] @vercel/blob niet geïnstalleerd:', e.message);
+    envelope = JSON.parse(text);
+  } catch {
     return null;
   }
-}
-
-async function ensureUrlIndex(token) {
-  if (urlIndex) return urlIndex;
-  const sdk = await loadBlobSdk();
-  if (!sdk?.list) {
-    urlIndex = new Map();
-    return urlIndex;
-  }
-  try {
-    const prefix = `dorpsapp-fallback/${TENANT_ID}/`;
-    const { blobs } = await sdk.list({ prefix, token, limit: 1000 });
-    urlIndex = new Map();
-    for (const b of blobs || []) {
-      if (b?.pathname && b?.url) urlIndex.set(b.pathname, b.url);
-    }
-    console.log(
-      `[public-fallback] url-index geladen tenant=${TENANT_ID} count=${urlIndex.size}`
-    );
-  } catch (e) {
-    console.warn('[public-fallback] list/index mislukt:', e.message);
-    urlIndex = new Map();
-  }
-  return urlIndex;
+  if (!isPlainObject(envelope?.data) || !envelope.lastUpdated) return null;
+  if (!isStructurallyValid(envelope.data)) return null;
+  return {
+    data: envelope.data,
+    lastUpdated: envelope.lastUpdated,
+    hash: envelope.hash,
+  };
 }
 
 /**
  * @returns {Promise<{ ok: boolean, saved?: boolean, reason?: string, lastUpdated?: string }>}
  */
 async function saveSnapshotIfDue(key, kind, payload) {
-  const token = blobToken();
-  if (!token) {
-    return { ok: false, reason: 'no_blob_token' };
+  if (!storeConfigured()) {
+    return { ok: false, reason: 'no_store_config' };
   }
   if (!isWorthSaving(kind, payload)) {
     console.log(
@@ -238,7 +289,6 @@ async function saveSnapshotIfDue(key, kind, payload) {
     return { ok: false, reason: 'not_worth_saving' };
   }
 
-  // profile-blocks: lege array niet over bestaande non-empty heen schrijven
   if (kind === 'profile-blocks' && Array.isArray(payload.blocks) && payload.blocks.length === 0) {
     const existing = await loadSnapshot(key);
     if (existing?.data?.blocks?.length > 0) {
@@ -247,8 +297,12 @@ async function saveSnapshotIfDue(key, kind, payload) {
       );
       return { ok: false, reason: 'empty_would_overwrite' };
     }
-    // nog geen snapshot: lege blocks ook niet bewaren als "good"
     return { ok: false, reason: 'empty_blocks' };
+  }
+
+  const sanitized = sanitizeForSnapshot(kind, payload);
+  if (!sanitized || !isWorthSaving(kind, sanitized)) {
+    return { ok: false, reason: 'retention_empty' };
   }
 
   const now = Date.now();
@@ -257,46 +311,62 @@ async function saveSnapshotIfDue(key, kind, payload) {
     return { ok: true, saved: false, reason: 'throttled' };
   }
 
-  const sanitized = sanitizeForSnapshot(kind, payload);
   const hash = contentHash(sanitized);
+  if (lastSavedHash.get(key) === hash) {
+    lastWriteAttempt.set(key, now);
+    return { ok: true, saved: false, reason: 'unchanged' };
+  }
 
-  // Als bestaande snapshot dezelfde hash heeft: geen write (spaart advanced ops)
   const existing = await loadSnapshot(key);
   if (existing?.hash === hash) {
+    lastSavedHash.set(key, hash);
     lastWriteAttempt.set(key, now);
     return { ok: true, saved: false, reason: 'unchanged' };
   }
 
   lastWriteAttempt.set(key, now);
-  const sdk = await loadBlobSdk();
-  if (!sdk?.put) return { ok: false, reason: 'no_sdk' };
-
   const lastUpdated = new Date().toISOString();
   const envelope = {
     tenant: TENANT_ID,
-    key,
+    key: safeKey(key),
     kind,
     lastUpdated,
     hash,
+    retentionDays: RETENTION_DAYS,
     data: sanitized,
   };
 
-  const pathname = pathnameFor(key);
   try {
-    const blob = await sdk.put(pathname, JSON.stringify(envelope), {
-      access: 'public',
-      addRandomSuffix: false,
-      allowOverwrite: true,
-      contentType: 'application/json',
-      token,
-    });
-    if (!urlIndex) urlIndex = new Map();
-    if (blob?.url) urlIndex.set(pathname, blob.url);
-    const ageNote = existing?.lastUpdated ? ` prev=${existing.lastUpdated}` : '';
-    console.log(
-      `[public-fallback] snapshot OPGESLAGEN key=${key} tenant=${TENANT_ID} at=${lastUpdated} hash=${hash}${ageNote}`
+    const res = await axios.post(
+      storeBaseUrl(),
+      {
+        action: 'put',
+        tenant: TENANT_ID,
+        key: safeKey(key),
+        body: envelope,
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Fallback-Secret': storeSecret(),
+        },
+        timeout: 15000,
+        validateStatus: () => true,
+      }
     );
-    return { ok: true, saved: true, lastUpdated };
+    if (res.status >= 200 && res.status < 300 && res.data?.ok === true) {
+      lastSavedHash.set(key, hash);
+      console.log(
+        `[public-fallback] snapshot OPGESLAGEN host=frl key=${key} tenant=${TENANT_ID} at=${lastUpdated} hash=${hash}`
+      );
+      return { ok: true, saved: true, lastUpdated };
+    }
+    console.error(
+      `[public-fallback] snapshot save mislukt key=${key}:`,
+      res.status,
+      res.data?.error || res.data?.message || ''
+    );
+    return { ok: false, reason: res.data?.error || `http_${res.status}` };
   } catch (e) {
     console.error(`[public-fallback] snapshot save mislukt key=${key}:`, e.message);
     return { ok: false, reason: e.message };
@@ -307,50 +377,27 @@ async function saveSnapshotIfDue(key, kind, payload) {
  * @returns {Promise<{ data: object, lastUpdated: string, hash?: string }|null>}
  */
 async function loadSnapshot(key) {
-  const token = blobToken();
-  if (!token) return null;
-  const pathname = pathnameFor(key);
+  const url = publicJsonUrl(key);
+  if (!url) return null;
   try {
-    const index = await ensureUrlIndex(token);
-    let url = index.get(pathname);
-    if (!url) {
-      // Probeer directe list op exact prefix (zeldzaam: na deploy vóór index)
-      const sdk = await loadBlobSdk();
-      if (sdk?.list) {
-        const { blobs } = await sdk.list({ prefix: pathname.replace(/\.json$/, ''), token, limit: 5 });
-        const hit = (blobs || []).find((b) => b.pathname === pathname) || (blobs || [])[0];
-        if (hit?.url) {
-          url = hit.url;
-          index.set(pathname, url);
-        }
-      }
-    }
-    if (!url) return null;
-
-    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-    if (!res.ok) {
+    const res = await axios.get(url, {
+      timeout: 8000,
+      responseType: 'text',
+      transformResponse: [(d) => d],
+      validateStatus: () => true,
+      headers: { Accept: 'application/json' },
+    });
+    if (res.status === 404) return null;
+    if (res.status < 200 || res.status >= 300) {
       console.warn(`[public-fallback] snapshot fetch HTTP ${res.status} key=${key}`);
       return null;
     }
-    const text = await res.text();
-    if (looksLikeHtml(text)) {
-      console.warn(`[public-fallback] snapshot lijkt HTML key=${key}`);
+    const parsed = parseEnvelope(typeof res.data === 'string' ? res.data : String(res.data));
+    if (!parsed) {
+      console.warn(`[public-fallback] snapshot ongeldig key=${key}`);
       return null;
     }
-    let envelope;
-    try {
-      envelope = JSON.parse(text);
-    } catch {
-      console.warn(`[public-fallback] snapshot JSON parse fail key=${key}`);
-      return null;
-    }
-    if (!isPlainObject(envelope?.data) || !envelope.lastUpdated) return null;
-    if (!isStructurallyValid(envelope.data)) return null;
-    return {
-      data: envelope.data,
-      lastUpdated: envelope.lastUpdated,
-      hash: envelope.hash,
-    };
+    return parsed;
   } catch (e) {
     console.warn(`[public-fallback] snapshot load fail key=${key}:`, e.message);
     return null;
@@ -367,11 +414,6 @@ function ageLabel(lastUpdated) {
   return `${Math.floor(h / 24)}d`;
 }
 
-/**
- * Live ophalen met timeout; bij falen snapshot; metadata toevoegen.
- * @param {import('express').Response} res
- * @param {object} opts
- */
 async function sendPublicOrFallback(res, opts) {
   const {
     key,
@@ -417,7 +459,6 @@ async function sendPublicOrFallback(res, opts) {
       throw new Error('invalid_or_incomplete_live_payload');
     }
 
-    // Fire-and-forget save (niet awaiten langer dan nodig)
     saveSnapshotIfDue(key, kind, payload).catch((e) =>
       console.warn('[public-fallback] save async:', e.message)
     );
@@ -454,39 +495,45 @@ async function sendPublicOrFallback(res, opts) {
 }
 
 async function getStatusSummary() {
-  const token = blobToken();
   const base = {
     tenant: TENANT_ID,
-    blobConfigured: !!token,
+    storeConfigured: storeConfigured(),
+    storeUrl: storeBaseUrl() ? storeBaseUrl().replace(/\/\/.*@/, '//***@') : null,
     forceFallback: FORCE_FALLBACK,
     readTimeoutMs: READ_TIMEOUT_MS,
     writeIntervalMs: WRITE_INTERVAL_MS,
+    retentionDays: RETENTION_DAYS,
+    backend: 'http-host',
     snapshots: [],
   };
-  if (!token) return base;
-  try {
-    const index = await ensureUrlIndex(token);
-    const prefix = `dorpsapp-fallback/${TENANT_ID}/`;
-    for (const [pathname, url] of index.entries()) {
-      if (!pathname.startsWith(prefix)) continue;
-      try {
-        const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
-        if (!r.ok) continue;
-        const env = await r.json();
+  if (!storeBaseUrl()) return base;
+
+  const probeKeys = [
+    'bootstrap',
+    'news-list',
+    'news-list-minimal',
+    'news-head',
+    'events-list',
+    'organizations-list',
+    'organizations-list-minimal',
+    'practical-info',
+    'afvalkalender',
+    'dorpsomroeper',
+  ];
+  for (const key of probeKeys) {
+    try {
+      const snap = await loadSnapshot(key);
+      if (snap) {
         base.snapshots.push({
-          key: env.key || pathname,
-          kind: env.kind,
-          lastUpdated: env.lastUpdated,
-          age: ageLabel(env.lastUpdated),
-          hash: env.hash,
+          key,
+          lastUpdated: snap.lastUpdated,
+          age: ageLabel(snap.lastUpdated),
+          hash: snap.hash,
         });
-      } catch {
-        /* skip */
       }
+    } catch {
+      /* skip */
     }
-    base.snapshots.sort((a, b) => String(a.key).localeCompare(String(b.key)));
-  } catch (e) {
-    base.error = e.message;
   }
   return base;
 }
@@ -495,8 +542,9 @@ module.exports = {
   TENANT_ID,
   READ_TIMEOUT_MS,
   WRITE_INTERVAL_MS,
+  RETENTION_DAYS,
   FORCE_FALLBACK,
-  blobToken,
+  storeConfigured,
   withTimeout,
   attachMeta,
   isStructurallyValid,
@@ -506,4 +554,5 @@ module.exports = {
   sendPublicOrFallback,
   getStatusSummary,
   ageLabel,
+  publicJsonUrl,
 };
