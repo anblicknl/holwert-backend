@@ -91,12 +91,17 @@ function listSafeMediaUrl(url) {
   return s;
 }
 
+function reactionsOpenFlag(value) {
+  return value === true || value === 1 || value === '1' || value === 'true';
+}
+
 function sanitizeListNewsItem(article) {
   if (!article || typeof article !== 'object') return article;
   return {
     ...article,
     image_url: listSafeMediaUrl(article.image_url),
     organization_logo: listSafeMediaUrl(article.organization_logo),
+    reactions_open: reactionsOpenFlag(article.reactions_open),
   };
 }
 
@@ -267,6 +272,27 @@ function orgRegisterRateLimiter(req, res, next) {
     return res.status(429).json({
       error: 'Te veel registraties. Probeer het later opnieuw.',
       retry_after_seconds: Math.ceil((ORG_REGISTER_WINDOW_MS - (now - existing.first)) / 1000)
+    });
+  }
+  return next();
+}
+
+const newsReactionAttempts = new Map();
+const NEWS_REACTION_WINDOW_MS = 15 * 60 * 1000;
+const NEWS_REACTION_MAX = 8;
+function newsReactionRateLimiter(req, res, next) {
+  const key = String(req.user?.userId || getClientIp(req));
+  const now = Date.now();
+  const existing = newsReactionAttempts.get(key) || { count: 0, first: now };
+  if (now - existing.first > NEWS_REACTION_WINDOW_MS) {
+    existing.count = 0;
+    existing.first = now;
+  }
+  existing.count += 1;
+  newsReactionAttempts.set(key, existing);
+  if (existing.count > NEWS_REACTION_MAX) {
+    return res.status(429).json({
+      error: 'Te veel reacties. Probeer het later opnieuw.',
     });
   }
   return next();
@@ -1774,6 +1800,7 @@ app.get('/api/app/bootstrap', async (req, res) => {
     },
     live: async () => {
       await ensureBookmarksTable();
+      await ensureNewsColumns();
       let userId = null;
       const authHeader = req.headers.authorization;
       if (authHeader && authHeader.startsWith('Bearer ')) {
@@ -1787,7 +1814,7 @@ app.get('/api/app/bootstrap', async (req, res) => {
       let newsQuery = `
       SELECT n.id, n.title, '' as content,
         LEFT(COALESCE(n.content, ''), 2000) as excerpt,
-        n.image_url, n.youtube_url, n.source_name, n.source_url, n.pdf_url, n.created_at, n.updated_at,
+        n.image_url, n.youtube_url, n.source_name, n.source_url, n.pdf_url, n.reactions_open, n.created_at, n.updated_at,
         COALESCE(n.published_at, n.created_at) as published_at,
         n.organization_id, n.category, n.custom_category,
         o.name as organization_name, o.logo_url as organization_logo,
@@ -1848,6 +1875,7 @@ async function ensureNewsColumns() {
     ['source_name', 'VARCHAR(255)'],
     ['source_url',  'VARCHAR(500)'],
     ['pdf_url',     'VARCHAR(500)'],
+    ['reactions_open', 'TINYINT(1) NOT NULL DEFAULT 0'],
   ];
   for (const [col, def] of cols) {
     try {
@@ -1860,6 +1888,27 @@ async function ensureNewsColumns() {
     }
   }
   _newsColsMigrated = true;
+}
+
+let _newsReactionsTableReady = false;
+async function ensureNewsReactionsTable() {
+  if (_newsReactionsTableReady) return;
+  await executeQuery(`
+    CREATE TABLE IF NOT EXISTS news_reactions (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      news_id INT NOT NULL,
+      organization_id INT NOT NULL,
+      user_id INT NOT NULL,
+      author_name VARCHAR(255) NOT NULL,
+      author_email VARCHAR(255) NOT NULL,
+      body TEXT NOT NULL,
+      image_url VARCHAR(500) NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_news_reactions_org (organization_id, created_at),
+      INDEX idx_news_reactions_news (news_id)
+    )
+  `);
+  _newsReactionsTableReady = true;
 }
 
 let _orgColsMigrated = false;
@@ -1959,7 +2008,7 @@ app.get('/api/news', async (req, res) => {
         n.title, 
         ${minimalMode ? `'' as content` : `COALESCE(n.content, '') as content`},
         LEFT(COALESCE(n.content, ''), 2000) as excerpt,
-        n.image_url, n.youtube_url, n.source_name, n.source_url, n.pdf_url,
+        n.image_url, n.youtube_url, n.source_name, n.source_url, n.pdf_url, n.reactions_open,
         n.created_at, 
         n.updated_at, 
         COALESCE(n.published_at, n.created_at) as published_at,
@@ -3013,6 +3062,7 @@ app.get('/api/news/head', async (req, res) => {
     failBody: { news: [] },
     live: async () => {
       await ensureBookmarksTable();
+      await ensureNewsColumns();
       let userId = null;
       const authHeader = req.headers.authorization;
       if (authHeader && authHeader.startsWith('Bearer ')) {
@@ -3025,7 +3075,7 @@ app.get('/api/news/head', async (req, res) => {
       const newsQuery = `
       SELECT n.id, n.title,
         LEFT(COALESCE(n.content, ''), 500) as excerpt,
-        n.image_url, n.created_at, n.updated_at,
+        n.image_url, n.reactions_open, n.created_at, n.updated_at,
         COALESCE(n.published_at, n.created_at) as published_at,
         n.organization_id, n.category, n.custom_category,
         o.name as organization_name, o.logo_url as organization_logo,
@@ -3083,7 +3133,7 @@ app.get('/api/news/:id', async (req, res) => {
 
       const result = await executeQuery(`
       SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt,
-             n.image_url, n.youtube_url, n.source_name, n.source_url, n.pdf_url,
+             n.image_url, n.youtube_url, n.source_name, n.source_url, n.pdf_url, n.reactions_open,
              n.created_at, n.updated_at, 
              COALESCE(n.published_at, n.created_at) as published_at,
              n.category, n.custom_category, n.is_published,
@@ -3134,6 +3184,7 @@ app.get('/api/news/:id', async (req, res) => {
         article: {
           ...article,
           content,
+          reactions_open: reactionsOpenFlag(article.reactions_open),
           image_variants: imageVariants
         }
       };
@@ -4930,6 +4981,7 @@ app.delete('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, r
       return res.status(404).json({ error: 'Article not found' });
     }
     await executeQuery('DELETE FROM bookmarks WHERE news_id = ?', [id]).catch(() => {});
+    await executeQuery('DELETE FROM news_reactions WHERE news_id = ?', [id]).catch(() => {});
     if (oldPdfUrl) {
       cleanupHostedPdfIfUnreferenced(oldPdfUrl).catch(() => {});
     }
@@ -7637,7 +7689,7 @@ app.get('/api/org/news', authenticateToken, requireOrgPortal, async (req, res) =
     const { page = 1, limit = 20, status } = req.query;
     const offset = (page - 1) * limit;
     const orgId = req.organizationId;
-    let query = `SELECT n.id, n.title, LEFT(COALESCE(n.content, ''), 500) as excerpt, n.category, n.custom_category, n.image_url, n.is_published, COALESCE(n.published_at, n.created_at) as published_at, n.organization_id, n.created_at, n.updated_at
+    let query = `SELECT n.id, n.title, LEFT(COALESCE(n.content, ''), 500) as excerpt, n.category, n.custom_category, n.image_url, n.is_published, n.reactions_open, COALESCE(n.published_at, n.created_at) as published_at, n.organization_id, n.created_at, n.updated_at
       FROM news n WHERE n.organization_id = ?`;
     const params = [orgId];
     if (status === 'published') { query += ` AND n.is_published = true`; }
@@ -7667,7 +7719,7 @@ app.get('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req, re
     await ensureNewsColumns();
     const orgId = req.organizationId;
     const result = await executeQuery(
-      'SELECT id, title, content, excerpt, category, custom_category, image_url, youtube_url, source_name, source_url, pdf_url, is_published, COALESCE(published_at, created_at) as published_at, organization_id, author_id, created_at, updated_at FROM news WHERE id = ? AND organization_id = ?',
+      'SELECT id, title, content, excerpt, category, custom_category, image_url, youtube_url, source_name, source_url, pdf_url, is_published, reactions_open, COALESCE(published_at, created_at) as published_at, organization_id, author_id, created_at, updated_at FROM news WHERE id = ? AND organization_id = ?',
       [req.params.id, orgId]
     );
     if (!result.rows?.length) return res.status(404).json({ error: 'Artikel niet gevonden' });
@@ -7683,20 +7735,21 @@ app.post('/api/org/news', authenticateToken, requireOrgPortal, async (req, res) 
     await ensureNewsColumns();
     const orgId = req.organizationId;
     const userId = req.user.userId;
-    const { title, content, category, custom_category, image_url, youtube_url, source_name, source_url, pdf_url, is_published, published_at } = req.body || {};
+    const { title, content, category, custom_category, image_url, youtube_url, source_name, source_url, pdf_url, is_published, published_at, reactions_open } = req.body || {};
     if (!title) return res.status(400).json({ error: 'title is required' });
     const finalCategory = category || 'dorpsnieuws';
     const finalCustomCategory = finalCategory === 'overig' && custom_category ? String(custom_category).trim() : null;
     const isPublished = is_published === true;
+    const reactionsOpen = reactionsOpenFlag(reactions_open) ? 1 : 0;
     const pubAt = (published_at != null && String(published_at).trim() !== '')
       ? toMysqlDateTime(published_at)
       : null;
 
     let insertSql;
     let insertParams;
-    const baseCols = 'title, content, excerpt, author_id, organization_id, image_url, youtube_url, source_name, source_url, pdf_url, category, custom_category, is_published';
-    const baseVals = '?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?';
-    const baseParams = [title || '', content || '', null, userId, orgId, image_url || null, youtube_url || null, source_name || null, source_url || null, pdf_url || null, finalCategory, finalCustomCategory, isPublished];
+    const baseCols = 'title, content, excerpt, author_id, organization_id, image_url, youtube_url, source_name, source_url, pdf_url, category, custom_category, is_published, reactions_open';
+    const baseVals = '?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?';
+    const baseParams = [title || '', content || '', null, userId, orgId, image_url || null, youtube_url || null, source_name || null, source_url || null, pdf_url || null, finalCategory, finalCustomCategory, isPublished, reactionsOpen];
 
     if (pubAt) {
       insertSql = `INSERT INTO news (${baseCols}, published_at, created_at, updated_at) VALUES (${baseVals}, ?, NOW(), NOW())`;
@@ -7741,7 +7794,7 @@ app.put('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req, re
     await ensureNewsColumns();
     const orgId = req.organizationId;
     const id = parseInt(req.params.id);
-    const { title, content, category, custom_category, image_url, youtube_url, source_name, source_url, pdf_url, is_published, published_at } = req.body || {};
+    const { title, content, category, custom_category, image_url, youtube_url, source_name, source_url, pdf_url, is_published, published_at, reactions_open } = req.body || {};
     const existing = await executeQuery('SELECT id, pdf_url, is_published FROM news WHERE id = ? AND organization_id = ?', [id, orgId]);
     if (!existing.rows?.length) return res.status(404).json({ error: 'Artikel niet gevonden' });
     const wasPublished = !!existing.rows[0].is_published;
@@ -7752,6 +7805,7 @@ app.put('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req, re
     const finalCategory = category ?? 'dorpsnieuws';
     const finalCustomCategory = finalCategory === 'overig' && custom_category ? String(custom_category).trim() : null;
     const nowPublished = is_published === true;
+    const reactionsOpen = reactionsOpenFlag(reactions_open) ? 1 : 0;
 
     let publishedAtClause = 'published_at = published_at';
     if (pubAt) {
@@ -7763,13 +7817,13 @@ app.put('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req, re
     const updateParams = [
       title ?? '', content ?? '', null, finalCategory, finalCustomCategory,
       image_url ?? null, youtube_url ?? null, source_name ?? null, source_url ?? null, pdf_url ?? null,
-      nowPublished,
+      nowPublished, reactionsOpen,
     ];
     if (pubAt) updateParams.push(pubAt);
     updateParams.push(id);
 
     await executeQuery(
-      `UPDATE news SET title = ?, content = ?, excerpt = ?, category = ?, custom_category = ?, image_url = ?, youtube_url = ?, source_name = ?, source_url = ?, pdf_url = ?, is_published = ?, ${publishedAtClause}, updated_at = NOW() WHERE id = ?`,
+      `UPDATE news SET title = ?, content = ?, excerpt = ?, category = ?, custom_category = ?, image_url = ?, youtube_url = ?, source_name = ?, source_url = ?, pdf_url = ?, is_published = ?, reactions_open = ?, ${publishedAtClause}, updated_at = NOW() WHERE id = ?`,
       updateParams
     );
     const newPdfUrl = pdf_url ?? null;
@@ -7813,6 +7867,7 @@ app.delete('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req,
     const n = del.rowCount ?? del.rows?.length ?? 0;
     if (!n) return res.status(404).json({ error: 'Artikel niet gevonden' });
     await executeQuery('DELETE FROM bookmarks WHERE news_id = ?', [id]).catch(() => {});
+    await executeQuery('DELETE FROM news_reactions WHERE news_id = ?', [id]).catch(() => {});
     if (oldPdfUrl) {
       cleanupHostedPdfIfUnreferenced(oldPdfUrl).catch(() => {});
     }
@@ -7820,6 +7875,126 @@ app.delete('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req,
     res.json({ success: true });
   } catch (error) {
     console.error('DELETE /api/org/news/:id error:', error);
+    res.status(500).json({ error: 'Verwijderen mislukt', message: error.message });
+  }
+});
+
+app.post('/api/news/:id/reactions', authenticateToken, newsReactionRateLimiter, async (req, res) => {
+  try {
+    await ensureNewsColumns();
+    await ensureNewsReactionsTable();
+    const newsId = parseInt(req.params.id, 10);
+    if (Number.isNaN(newsId)) return res.status(400).json({ error: 'Ongeldig bericht' });
+
+    const text = String(req.body?.body || '').trim();
+    if (!text) return res.status(400).json({ error: 'Schrijf een reactie' });
+    if (text.length > 4000) return res.status(400).json({ error: 'Reactie is te lang' });
+
+    const articleResult = await executeQuery(
+      'SELECT id, title, organization_id, is_published, reactions_open FROM news WHERE id = ? LIMIT 1',
+      [newsId]
+    );
+    const article = articleResult.rows?.[0];
+    if (!article || !article.is_published || !reactionsOpenFlag(article.reactions_open)) {
+      return res.status(400).json({ error: 'Op dit bericht kun je niet reageren' });
+    }
+    if (!article.organization_id) {
+      return res.status(400).json({ error: 'Op dit bericht kun je niet reageren' });
+    }
+
+    const userResult = await executeQuery(
+      'SELECT id, email, first_name, last_name FROM users WHERE id = ? LIMIT 1',
+      [req.user.userId]
+    );
+    const user = userResult.rows?.[0];
+    if (!user?.email) return res.status(400).json({ error: 'Je account heeft geen e-mailadres' });
+    const authorName = [user.first_name, user.last_name].filter(Boolean).join(' ').trim() || user.email;
+
+    let imageUrl = null;
+    if (req.body?.image_data) {
+      const parsed = parseImageDataUrl(req.body.image_data);
+      if (!parsed) return res.status(400).json({ error: 'Ongeldige foto' });
+      const buffer = Buffer.from(parsed.base64Data, 'base64');
+      if (!buffer.length || buffer.length > 3 * 1024 * 1024) {
+        return res.status(400).json({ error: 'Foto is te groot', message: 'Maximaal 3 MB.' });
+      }
+      const filename = filenameWithImageMimeExt(`reaction-${Date.now()}`, parsed.mime);
+      imageUrl = await uploadImageBufferToSharedHosting(
+        buffer,
+        filename,
+        parsed.mime,
+        folderSegmentForOrgUpload(article.organization_id),
+      );
+    }
+
+    await executeInsert(
+      `INSERT INTO news_reactions (news_id, organization_id, user_id, author_name, author_email, body, image_url, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [newsId, article.organization_id, user.id, authorName, user.email, text, imageUrl]
+    );
+
+    const mailRows = await executeQuery(
+      `SELECT DISTINCT email FROM users
+       WHERE organization_id = ? AND (is_active = 1 OR is_active = true) AND email IS NOT NULL AND TRIM(email) <> ''`,
+      [article.organization_id]
+    );
+    const emails = (mailRows.rows || []).map((row) => row.email);
+    sendNewsReactionEmails({
+      emails,
+      articleTitle: article.title,
+      authorName,
+      authorEmail: user.email,
+      body: text,
+      imageUrl,
+    }).catch((error) => console.warn('[reaction-mail]', error.message));
+
+    res.status(201).json({ ok: true });
+  } catch (error) {
+    console.error('POST /api/news/:id/reactions error:', error);
+    res.status(500).json({ error: 'Reactie versturen mislukt', message: error.message });
+  }
+});
+
+app.get('/api/org/reactions', authenticateToken, requireOrgPortal, async (req, res) => {
+  try {
+    await ensureNewsColumns();
+    await ensureNewsReactionsTable();
+    const orgId = req.organizationId;
+    const result = await executeQuery(
+      `SELECT r.id, r.news_id, r.body, r.image_url, r.author_name, r.author_email, r.created_at,
+              n.title AS news_title, n.reactions_open
+       FROM news_reactions r
+       INNER JOIN news n ON n.id = r.news_id
+       WHERE r.organization_id = ?
+       ORDER BY r.created_at DESC
+       LIMIT 300`,
+      [orgId]
+    );
+    const reactions = (result.rows || []).map((row) => ({
+      ...row,
+      reactions_open: reactionsOpenFlag(row.reactions_open),
+    }));
+    res.json({ reactions });
+  } catch (error) {
+    console.error('GET /api/org/reactions error:', error);
+    res.status(500).json({ error: 'Reacties laden mislukt', message: error.message });
+  }
+});
+
+app.delete('/api/org/reactions/:id', authenticateToken, requireOrgPortal, async (req, res) => {
+  try {
+    await ensureNewsReactionsTable();
+    const id = parseInt(req.params.id, 10);
+    if (Number.isNaN(id)) return res.status(400).json({ error: 'Ongeldige reactie' });
+    const del = await executeQuery(
+      'DELETE FROM news_reactions WHERE id = ? AND organization_id = ?',
+      [id, req.organizationId]
+    );
+    const n = del.rowCount ?? 0;
+    if (!n) return res.status(404).json({ error: 'Reactie niet gevonden' });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('DELETE /api/org/reactions/:id error:', error);
     res.status(500).json({ error: 'Verwijderen mislukt', message: error.message });
   }
 });
@@ -9081,6 +9256,47 @@ ID: ${orgId}
 Admin-panel: ${adminUrl}`;
 
   return sendMailViaHosting({ toEmail, subject, html, text });
+}
+
+async function sendNewsReactionEmails({ emails, articleTitle, authorName, authorEmail, body, imageUrl }) {
+  const list = [...new Set((emails || []).map((e) => String(e || '').trim()).filter(Boolean))];
+  if (!list.length) return { ok: false, reason: 'no_recipient' };
+  const esc = (s) =>
+    String(s ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  const dashboardUrl = 'https://holwert.appenvloed.com/dashboard/#reactions';
+  const snippet = String(body || '').slice(0, 800);
+  const subject = `Nieuwe reactie: ${String(articleTitle || 'nieuwsbericht').slice(0, 80)}`;
+  const html = `<h2 style="color:#1a1a2e">Nieuwe reactie op je nieuwsbericht</h2>
+<p>Iemand heeft gereageerd op <strong>${esc(articleTitle)}</strong>.</p>
+<table style="border-collapse:collapse;margin:1rem 0">
+  <tr><td style="padding:4px 12px 4px 0;color:#555">Naam</td><td><strong>${esc(authorName)}</strong></td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#555">E-mail</td><td>${esc(authorEmail)}</td></tr>
+</table>
+<p style="white-space:pre-wrap">${esc(snippet)}</p>
+${imageUrl ? `<p><a href="${esc(imageUrl)}">Foto bekijken</a></p>` : ''}
+<p><a href="${esc(dashboardUrl)}" style="background:#1a1a2e;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block">Open in het dashboard</a></p>
+<p style="color:#999;font-size:0.85em">Holwert Dorpsapp · automatische melding</p>`;
+  const text = `Nieuwe reactie op: ${articleTitle}
+
+Naam: ${authorName}
+E-mail: ${authorEmail}
+
+${snippet}
+${imageUrl ? `\nFoto: ${imageUrl}\n` : ''}
+Dashboard: ${dashboardUrl}`;
+  const results = [];
+  for (const toEmail of list) {
+    try {
+      results.push(await sendMailViaHosting({ toEmail, subject, html, text }));
+    } catch (error) {
+      console.warn('[reaction-mail]', toEmail, error.message);
+    }
+  }
+  return { ok: true, sent: results.length };
 }
 
 app.post('/api/organizations/register', orgRegisterRateLimiter, async (req, res) => {

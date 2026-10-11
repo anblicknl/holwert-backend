@@ -1517,3 +1517,27 @@ body {
     opacity: 0.6;
 }
 .dash-toast__close:hover { opacity: 1; }
+
+.reaction-group {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    padding: 16px 18px;
+    margin-bottom: 16px;
+}
+.reaction-group h3 { margin: 0 0 4px; font-size: 1.05rem; }
+.reaction-list { list-style: none; margin: 12px 0 0; padding: 0; }
+.reaction-item {
+    border-top: 1px solid #eef2f7;
+    padding: 12px 0;
+}
+.reaction-item__head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    color: #4b5563;
+    font-size: 0.9rem;
+    margin-bottom: 6px;
+}
+.reaction-item__body { margin: 0 0 8px; white-space: pre-wrap; }
+.reaction-item .btn { margin-top: 4px; }

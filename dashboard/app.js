@@ -962,6 +962,7 @@
             mainScreen.classList.add('active');
             if (userInfo) userInfo.textContent = organization?.name || currentUser.email;
             loadNews();
+            openSectionFromHash();
             loadEvents();
             loadProfile();
             loadOverview();
@@ -1094,6 +1095,86 @@
         if (sectionId === 'followers') loadFollowers();
         if (sectionId === 'overview') loadOverview();
         if (sectionId === 'profile-blocks') loadProfileBlocks();
+        if (sectionId === 'reactions') loadReactions();
+        if (window.history && window.history.replaceState) {
+            const base = window.location.pathname + window.location.search;
+            window.history.replaceState(null, '', base + '#' + sectionId);
+        }
+    }
+
+    function openSectionFromHash() {
+        const id = (window.location.hash || '').replace(/^#/, '');
+        if (!id || !document.getElementById(id)?.classList.contains('content-section')) return;
+        navigateToSection(id);
+    }
+
+    async function loadReactions() {
+        const container = document.getElementById('reactionsContent');
+        if (!container) return;
+        container.innerHTML = '<p class="form-hint state-message">Reacties laden…</p>';
+        try {
+            const res = await fetch(`${apiBase}/org/reactions`, { headers: authHeaders() });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.message || data.error || 'Laden mislukt');
+            const list = Array.isArray(data.reactions) ? data.reactions : [];
+            if (!list.length) {
+                container.innerHTML = '<p class="empty-message">Nog geen reacties. Zet bij een nieuwsbericht “Reageren open” aan.</p>';
+                return;
+            }
+            const groups = new Map();
+            list.forEach((item) => {
+                const key = String(item.news_id);
+                if (!groups.has(key)) {
+                    groups.set(key, {
+                        title: item.news_title || 'Nieuwsbericht',
+                        open: !!item.reactions_open,
+                        items: [],
+                    });
+                }
+                groups.get(key).items.push(item);
+            });
+            container.innerHTML = [...groups.values()].map((group) => `
+                <article class="reaction-group">
+                    <h3>${escapeHtml(group.title)}</h3>
+                    <p class="form-hint">${group.open ? 'Reageren staat open' : 'Reageren staat dicht'} · ${group.items.length} reactie${group.items.length === 1 ? '' : 's'}</p>
+                    <ul class="reaction-list">
+                        ${group.items.map((item) => {
+                            const when = item.created_at ? new Date(item.created_at).toLocaleString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+                            const photo = item.image_url
+                                ? `<p><a href="${escapeHtml(item.image_url)}" target="_blank" rel="noopener">Foto bekijken</a></p>`
+                                : '';
+                            return `<li class="reaction-item">
+                                <div class="reaction-item__head">
+                                    <strong>${escapeHtml(item.author_name || 'Inwoner')}</strong>
+                                    <span>${escapeHtml(item.author_email || '')}</span>
+                                    <time>${escapeHtml(when)}</time>
+                                </div>
+                                <p class="reaction-item__body">${escapeHtml(item.body || '')}</p>
+                                ${photo}
+                                <button type="button" class="btn btn-secondary" data-delete-reaction="${item.id}">Verwijderen</button>
+                            </li>`;
+                        }).join('')}
+                    </ul>
+                </article>
+            `).join('');
+            container.querySelectorAll('[data-delete-reaction]').forEach((btn) => {
+                btn.addEventListener('click', () => deleteReaction(btn.getAttribute('data-delete-reaction')));
+            });
+        } catch (err) {
+            container.innerHTML = `<p class="empty-message">${escapeHtml(err.message || 'Laden mislukt')}</p>`;
+        }
+    }
+
+    async function deleteReaction(id) {
+        if (!id || !confirm('Deze reactie verwijderen?')) return;
+        try {
+            const res = await fetch(`${apiBase}/org/reactions/${id}`, { method: 'DELETE', headers: authHeaders() });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.message || data.error || 'Verwijderen mislukt');
+            loadReactions();
+        } catch (err) {
+            alert(err.message || 'Verwijderen mislukt');
+        }
     }
 
     async function loadFollowers() {
@@ -1335,6 +1416,11 @@
                                     : '<p class="form-hint">Geen PDF</p>')
                             }
                         </div>
+                        ${checkboxFieldHtml('newsReactionsOpen', 'Reageren open', {
+                            checked: !!article?.reactions_open,
+                            disabled: isPreview,
+                            hint: 'Inwoners met een account kunnen in de app een reactie sturen, eventueel met een foto. Anderen zien die reacties niet.',
+                        })}
                         ${checkboxFieldHtml('newsPublished', 'Gepubliceerd', { checked: !!article?.is_published, disabled: isPreview })}
                         ${!isPreview ? checkboxFieldHtml('newsShareFacebook', 'Na opslaan delen op Facebook', {
                             hint: 'Opent Facebook met linkpreview van dit bericht. Titel en begin van de inhoud staan op je klembord om te plakken.',
@@ -1393,6 +1479,7 @@
                         category,
                         custom_category,
                         is_published: document.getElementById('newsPublished').checked,
+                        reactions_open: document.getElementById('newsReactionsOpen')?.checked === true,
                         image_url: imageUrl || null,
                         youtube_url:  (document.getElementById('newsYoutubeUrl')?.value  || '').trim() || null,
                         source_name: (document.getElementById('newsSourceName')?.value || '').trim() || null,
@@ -2117,6 +2204,7 @@
                 mainScreen.classList.add('active');
                 if (userInfo) userInfo.textContent = organization?.name || currentUser?.email;
                 loadNews();
+                openSectionFromHash();
                 loadEvents();
                 loadProfile();
                 loadOverview();
