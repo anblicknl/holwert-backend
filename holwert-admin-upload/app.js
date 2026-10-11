@@ -4077,6 +4077,11 @@ class HolwertAdmin {
                                 </div>
                             </div>
                             
+                            ${this.checkboxFieldHtml('newsReactionsOpen', 'Reageren open', {
+                                checked: !!article?.reactions_open,
+                                hint: 'Inwoners met een account kunnen in de app reageren. De reactie gaat naar de gekozen organisatie, niet naar dit paneel.',
+                            })}
+
                             ${this.checkboxFieldHtml('newsPublished', 'Direct publiceren (toon in app)', {
                                 checked: article?.is_published !== false,
                                 hint: 'Uitvinken om als concept op te slaan',
@@ -4386,7 +4391,8 @@ class HolwertAdmin {
                 category,
                 custom_category,
                 organization_id,
-                is_published: field('newsPublished')?.checked === true
+                is_published: field('newsPublished')?.checked === true,
+                reactions_open: field('newsReactionsOpen')?.checked === true
             };
             if (published_at !== undefined) {
                 body.published_at = published_at;

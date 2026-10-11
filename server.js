@@ -3400,6 +3400,10 @@ app.post('/api/news', authenticateToken, async (req, res) => {
     pushExtra('source_name', req.body.source_name);
     pushExtra('source_url', req.body.source_url);
     pushExtra('pdf_url', req.body.pdf_url);
+    if (req.body.reactions_open !== undefined) {
+      extraSets.push('reactions_open = ?');
+      extraVals.push(reactionsOpenFlag(req.body.reactions_open) ? 1 : 0);
+    }
     if (extraSets.length) {
       extraVals.push(insertResult.insertId);
       await executeQuery(`UPDATE news SET ${extraSets.join(', ')} WHERE id = ?`, extraVals);
@@ -4693,7 +4697,7 @@ app.get('/api/admin/news/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
 
     const result = await executeQuery(`
-      SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt, n.image_url, n.youtube_url, n.source_name, n.source_url, n.pdf_url, n.organization_id,
+      SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt, n.image_url, n.youtube_url, n.source_name, n.source_url, n.pdf_url, n.reactions_open, n.organization_id,
              n.created_at, n.updated_at, 
              COALESCE(n.published_at, n.created_at) as published_at,
              n.category, n.custom_category, n.is_published,
@@ -4742,7 +4746,7 @@ app.put('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res)
   try {
     await ensureNewsColumns();
     const { id } = req.params;
-    const { title, content, category, custom_category, organization_id, image_url, youtube_url, source_name, source_url, pdf_url, image_data, is_published, published_at } = req.body;
+    const { title, content, category, custom_category, organization_id, image_url, youtube_url, source_name, source_url, pdf_url, image_data, is_published, published_at, reactions_open } = req.body;
 
     const prevNews = await executeQuery(
       'SELECT pdf_url, is_published, organization_id FROM news WHERE id = ? LIMIT 1',
@@ -4811,6 +4815,11 @@ app.put('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res)
     if (pdf_url !== undefined) {
       updateFields.push(`pdf_url = ?`);
       values.push(pdf_url || null);
+    }
+
+    if (reactions_open !== undefined) {
+      updateFields.push(`reactions_open = ?`);
+      values.push(reactionsOpenFlag(reactions_open) ? 1 : 0);
     }
 
     if (image_data !== undefined) {
