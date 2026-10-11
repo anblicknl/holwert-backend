@@ -1118,7 +1118,8 @@
             if (!res.ok) throw new Error(data.message || data.error || 'Laden mislukt');
             const list = Array.isArray(data.reactions) ? data.reactions : [];
             if (!list.length) {
-                container.innerHTML = '<p class="empty-message">Nog geen reacties. Zet bij een nieuwsbericht “Reageren open” aan.</p>';
+                const orgName = organization?.name ? escapeHtml(organization.name) : 'deze organisatie';
+                container.innerHTML = `<p class="empty-message">Nog geen reacties voor ${orgName}. Zet bij een nieuwsbericht “Reageren open” aan. Reacties van een ander bericht verschijnen alleen in het dashboard van die organisatie.</p>`;
                 return;
             }
             const groups = new Map();

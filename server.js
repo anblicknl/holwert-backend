@@ -7947,7 +7947,14 @@ app.post('/api/news/:id/reactions', authenticateToken, newsReactionRateLimiter, 
        WHERE organization_id = ? AND (is_active = 1 OR is_active = true) AND email IS NOT NULL AND TRIM(email) <> ''`,
       [article.organization_id]
     );
-    const emails = (mailRows.rows || []).map((row) => row.email);
+    const orgMail = await executeQuery(
+      'SELECT email FROM organizations WHERE id = ? LIMIT 1',
+      [article.organization_id]
+    );
+    const emails = [
+      ...(mailRows.rows || []).map((row) => row.email),
+      orgMail.rows?.[0]?.email,
+    ];
     sendNewsReactionEmails({
       emails,
       articleTitle: article.title,
