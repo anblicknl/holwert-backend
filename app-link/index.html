@@ -51,16 +51,12 @@
   <h1>Holwert app</h1>
   <p id="intro">Dit bericht opent in de Holwert-app…</p>
   <a id="openBtn" class="btn btn-primary" href="#">Open in de app</a>
-  <a id="storeBtn" class="btn btn-secondary hidden" href="#">Download de app</a>
-  <p id="noStore" class="note hidden">
-    De app is binnenkort te downloaden in de App Store en Google Play.
-  </p>
+  <a id="storeBtn" class="btn btn-secondary" href="#">Download de app</a>
 </div>
 <script>
 (function () {
-  // Vul deze in zodra de app in de stores staat:
-  var IOS_STORE_URL = '';      // bijv. https://apps.apple.com/nl/app/holwert/id1234567890
-  var ANDROID_STORE_URL = '';  // bijv. https://play.google.com/store/apps/details?id=com.appenvloed.holwert
+  var IOS_STORE_URL = 'https://apps.apple.com/nl/app/dorpsapp-holwert/id6786440435';
+  var ANDROID_STORE_URL = 'https://play.google.com/store/apps/details?id=com.appenvloed.holwert';
 
   var params = new URLSearchParams(window.location.search);
   var typeMap = { news: 'news', nieuws: 'news', event: 'event', agenda: 'event', org: 'org', organisatie: 'org' };
@@ -76,16 +72,11 @@
 
   var openBtn = document.getElementById('openBtn');
   var storeBtn = document.getElementById('storeBtn');
-  var noStore = document.getElementById('noStore');
   var intro = document.getElementById('intro');
 
   openBtn.href = appUrl;
-  if (storeUrl) {
-    storeBtn.href = storeUrl;
-    storeBtn.classList.remove('hidden');
-  } else {
-    noStore.classList.remove('hidden');
-  }
+  storeBtn.href = storeUrl || ANDROID_STORE_URL;
+  storeBtn.textContent = isIOS ? 'Download in de App Store' : (isAndroid ? 'Download in Google Play' : 'Download in de App Store');
 
   // Alleen op mobiel automatisch proberen; desktop toont enkel de knoppen
   if (isIOS || isAndroid) {
@@ -94,8 +85,9 @@
       // Als de app is geopend, is deze pagina naar de achtergrond gegaan
       // (timer loopt dan vertraagd of het document is verborgen).
       if (document.hidden || Date.now() - started > 2500) return;
-      intro.textContent = 'Heb je de Holwert-app nog niet?';
-      if (storeUrl) window.location.href = storeUrl;
+      intro.textContent = isIOS
+        ? 'De Holwert-app is te downloaden in de App Store.'
+        : 'De Holwert-app is te downloaden in Google Play.';
     }, 1800);
     window.location.href = appUrl;
   } else {
