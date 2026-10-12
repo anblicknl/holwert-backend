@@ -521,6 +521,16 @@ class HolwertAdmin {
         if (saveDorpsomroeperBtn) {
             saveDorpsomroeperBtn.addEventListener('click', () => this.saveDorpsomroeper());
         }
+        const saveDashboardBannerBtn = document.getElementById('saveDashboardBannerBtn');
+        if (saveDashboardBannerBtn) {
+            saveDashboardBannerBtn.addEventListener('click', () => this.saveDashboardBanner());
+        }
+        const dashboardBannerEnabled = document.getElementById('dashboardBannerEnabled');
+        if (dashboardBannerEnabled) {
+            dashboardBannerEnabled.addEventListener('change', (e) => {
+                if (!e.target.checked) void this.saveDashboardBanner();
+            });
+        }
         const dorpsomroeperEnabled = document.getElementById('dorpsomroeperEnabled');
         if (dorpsomroeperEnabled) {
             dorpsomroeperEnabled.addEventListener('change', (e) => {
@@ -659,6 +669,10 @@ class HolwertAdmin {
         const navItem = document.getElementById('dorpsomroeperNavItem');
         if (navItem) {
             navItem.style.display = canManageDorpsomroeper ? '' : 'none';
+        }
+        const bannerNav = document.getElementById('dashboardBannerNavItem');
+        if (bannerNav) {
+            bannerNav.style.display = canManageDorpsomroeper ? '' : 'none';
         }
     }
 
@@ -975,6 +989,9 @@ class HolwertAdmin {
                 break;
             case 'dorpsomroeper':
                 this.loadDorpsomroeper();
+                break;
+            case 'dashboard-banner':
+                this.loadDashboardBanner();
                 break;
             case 'moderation':
                 this.loadModeration();
@@ -6409,6 +6426,81 @@ class HolwertAdmin {
                 msgEl.className = 'form-message error';
             }
             this.showNotification('Dorpsomroeper opslaan mislukt: ' + (error.message || error), 'error');
+        } finally {
+            if (saveBtn) {
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Opslaan';
+            }
+        }
+    }
+
+    async loadDashboardBanner() {
+        const enabledEl = document.getElementById('dashboardBannerEnabled');
+        const textEl = document.getElementById('dashboardBannerText');
+        if (!enabledEl || !textEl) return;
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/admin/settings/dashboard-banner`, {
+                cache: 'no-store',
+                headers: {
+                    Authorization: `Bearer ${this.token}`,
+                    'Content-Type': 'application/json',
+                },
+            });
+            if (!response.ok) return;
+            const data = await response.json();
+            enabledEl.checked = data.enabled === true;
+            textEl.value = data.text || '';
+        } catch (error) {
+            console.warn('Kon dashboardmelding niet laden:', error.message);
+        }
+    }
+
+    async saveDashboardBanner() {
+        const enabledEl = document.getElementById('dashboardBannerEnabled');
+        const textEl = document.getElementById('dashboardBannerText');
+        const msgEl = document.getElementById('dashboardBannerMsg');
+        const saveBtn = document.getElementById('saveDashboardBannerBtn');
+        if (!enabledEl || !textEl) return;
+
+        const enabled = enabledEl.checked;
+        const text = (textEl.value || '').trim();
+        if (enabled && !text) {
+            if (msgEl) {
+                msgEl.textContent = 'Voer tekst in voor een actieve balk.';
+                msgEl.className = 'form-message error';
+            }
+            return;
+        }
+        if (saveBtn) {
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Opslaan…';
+        }
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/admin/settings/dashboard-banner`, {
+                method: 'PUT',
+                cache: 'no-store',
+                headers: {
+                    Authorization: `Bearer ${this.token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ enabled, text }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.message || data.error || `HTTP ${response.status}`);
+            enabledEl.checked = data.enabled === true;
+            if (msgEl) {
+                msgEl.textContent = enabled
+                    ? 'Balk staat aan in het organisatie-dashboard.'
+                    : 'Balk uitgeschakeld.';
+                msgEl.className = 'form-message success';
+            }
+            this.showNotification(enabled ? 'Dashboardmelding actief' : 'Dashboardmelding uit', 'success');
+        } catch (error) {
+            if (msgEl) {
+                msgEl.textContent = 'Opslaan mislukt: ' + (error.message || error);
+                msgEl.className = 'form-message error';
+            }
+            this.showNotification('Dashboardmelding opslaan mislukt: ' + (error.message || error), 'error');
         } finally {
             if (saveBtn) {
                 saveBtn.disabled = false;

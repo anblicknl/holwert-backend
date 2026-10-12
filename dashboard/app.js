@@ -966,6 +966,7 @@
             loadEvents();
             loadProfile();
             loadOverview();
+            loadDashboardBanner();
             if (span) span.textContent = 'Inloggen';
         } catch (err) {
             showError(err.message || 'Inloggen mislukt');
@@ -2272,6 +2273,46 @@
         return div.innerHTML;
     }
 
+    const DASHBOARD_BANNER_SEEN_KEY = 'holwert_dashboard_banner_dismissed';
+
+    function hideDashboardBanner() {
+        const bar = document.getElementById('dashboardBanner');
+        if (bar) bar.hidden = true;
+    }
+
+    async function loadDashboardBanner() {
+        const bar = document.getElementById('dashboardBanner');
+        const textEl = document.getElementById('dashboardBannerText');
+        if (!bar || !textEl || !token) return;
+        try {
+            const res = await fetch(`${apiBase}/org/dashboard-banner`, {
+                cache: 'no-store',
+                headers: authHeaders(),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || !data.active || !data.text || !data.bannerId) {
+                hideDashboardBanner();
+                return;
+            }
+            if (localStorage.getItem(DASHBOARD_BANNER_SEEN_KEY) === data.bannerId) {
+                hideDashboardBanner();
+                return;
+            }
+            textEl.textContent = data.text;
+            bar.dataset.bannerId = data.bannerId;
+            bar.hidden = false;
+        } catch (_) {
+            hideDashboardBanner();
+        }
+    }
+
+    document.getElementById('dashboardBannerClose')?.addEventListener('click', () => {
+        const bar = document.getElementById('dashboardBanner');
+        const id = bar?.dataset.bannerId;
+        if (id) localStorage.setItem(DASHBOARD_BANNER_SEEN_KEY, id);
+        hideDashboardBanner();
+    });
+
     if (token) {
         fetch(`${apiBase}/org/me`, { headers: authHeaders() })
             .then(r => {
@@ -2289,6 +2330,7 @@
                 loadEvents();
                 loadProfile();
                 loadOverview();
+                loadDashboardBanner();
             })
             .catch(() => {
                 clearStoredToken();

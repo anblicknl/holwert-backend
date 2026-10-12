@@ -96,6 +96,10 @@
                     <i class="fas fa-bullhorn"></i>
                     <span>Dorpsomroeper</span>
                 </li>
+                <li class="nav-item" id="dashboardBannerNavItem" data-section="dashboard-banner" style="display: none;">
+                    <i class="fas fa-comment-dots"></i>
+                    <span>Dashboardmelding</span>
+                </li>
                 <li class="nav-item" data-section="moderation">
                     <i class="fas fa-check-circle"></i>
                     <span>Moderatie</span>
@@ -434,6 +438,35 @@
                 </div>
             </section>
 
+            <section id="dashboard-banner" class="content-section">
+                <div class="section-header">
+                    <h2><i class="fas fa-comment-dots"></i> Dashboardmelding</h2>
+                </div>
+                <p class="section-description">
+                    Balk bovenaan het organisatie-dashboard, voor alle organisaties. Bijvoorbeeld bij een nieuwe functie.
+                    De Dorpsomroeper in de app blijft een aparte melding.
+                    Zet <strong>Melding actief</strong> uit om de balk direct te verbergen.
+                </p>
+                <div class="settings-panel">
+                    <div class="settings-panel__fields">
+                        <div class="form-group checkbox-field">
+                            <label class="checkbox-label" for="dashboardBannerEnabled">
+                                <input type="checkbox" id="dashboardBannerEnabled">
+                                <span>Melding actief</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="dashboardBannerText">Tekst in het dashboard</label>
+                            <textarea id="dashboardBannerText" rows="4" maxlength="1000" placeholder="Bijv. Je kunt nu reacties op nieuwsberichten bekijken onder Reacties."></textarea>
+                        </div>
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" id="saveDashboardBannerBtn" class="btn btn-primary">Opslaan</button>
+                        <span id="dashboardBannerMsg" class="form-message"></span>
+                    </div>
+                </div>
+            </section>
+
             <!-- Moderation Section -->
             <section id="moderation" class="content-section">
                 <div class="section-header">
@@ -498,6 +531,6 @@
     </script>
     <!-- Cache-busting query parameter zodat nieuwe app.js altijd wordt opgehaald -->
     <script src="profile-blocks-ui.js?v=20260918-header-icon"></script>
-    <script src="app.js?v=20261011-reactions"></script>
+    <script src="app.js?v=20261012-dashboard-banner"></script>
 </body>
 </html>

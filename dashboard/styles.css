@@ -491,6 +491,34 @@ body {
     min-width: 0;
     max-width: 100%;
 }
+.dashboard-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin: 0 0 1.25rem;
+    padding: 0.9rem 1rem;
+    border-radius: 10px;
+    background: #0f46ae;
+    color: #fff;
+}
+.dashboard-banner[hidden] { display: none; }
+.dashboard-banner p {
+    margin: 0;
+    flex: 1;
+    white-space: pre-wrap;
+    line-height: 1.45;
+}
+.dashboard-banner button {
+    border: 0;
+    background: transparent;
+    color: #fff;
+    font-size: 1.4rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 0.15rem;
+    opacity: 0.85;
+}
+.dashboard-banner button:hover { opacity: 1; }
 .content-section { display: none; min-width: 0; max-width: 100%; }
 .content-section.active { display: block; width: 100%; max-width: 100%; }
 .section-header {

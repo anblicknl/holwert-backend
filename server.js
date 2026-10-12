@@ -6938,6 +6938,106 @@ app.get('/api/admin/settings/global-banner', authenticateToken, requireDorpsomro
 app.put('/api/admin/settings/dorpsomroeper', authenticateToken, requireDorpsomroeperAdmin, handleDorpsomroeperAdminPut);
 app.put('/api/admin/settings/global-banner', authenticateToken, requireDorpsomroeperAdmin, handleDorpsomroeperAdminPut);
 
+const DASHBOARD_BANNER_SLUG = '_setting_dashboard_banner';
+
+function parseDashboardBannerFromContent(raw) {
+  if (raw == null || String(raw).trim() === '') return null;
+  try {
+    const parsed = JSON.parse(String(raw));
+    if (!parsed || typeof parsed !== 'object') return null;
+    const text = parsed.text != null ? String(parsed.text).trim() : '';
+    const bannerId = parsed.bannerId != null ? String(parsed.bannerId).trim() : '';
+    const enabled = parsed.enabled === true || parsed.enabled === 'true';
+    return { enabled, text, bannerId };
+  } catch {
+    return null;
+  }
+}
+
+function isDashboardBannerActive(banner) {
+  return !!(banner && banner.enabled && banner.text && banner.bannerId);
+}
+
+async function getDashboardBannerFromDb() {
+  const result = await executeQuery(
+    'SELECT content FROM content_pages WHERE slug = ? LIMIT 1',
+    [DASHBOARD_BANNER_SLUG],
+  );
+  return parseDashboardBannerFromContent(result.rows?.[0]?.content);
+}
+
+async function setDashboardBannerInDb(banner) {
+  const content = JSON.stringify({
+    enabled: banner.enabled === true,
+    text: banner.text || '',
+    bannerId: banner.bannerId || '',
+  });
+  await executeQuery(
+    `INSERT INTO content_pages (slug, title, content) VALUES (?, ?, ?)
+     ON DUPLICATE KEY UPDATE title = VALUES(title), content = VALUES(content)`,
+    [DASHBOARD_BANNER_SLUG, 'Dashboardmelding', content],
+  );
+}
+
+app.get('/api/org/dashboard-banner', authenticateToken, requireOrgPortal, async (req, res) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    const banner = await getDashboardBannerFromDb();
+    if (!isDashboardBannerActive(banner)) {
+      return res.json({ active: false, text: null, bannerId: null });
+    }
+    res.json({ active: true, text: banner.text, bannerId: banner.bannerId });
+  } catch (error) {
+    console.error('GET /api/org/dashboard-banner error:', error);
+    res.status(500).json({ error: 'Kon melding niet ophalen', message: error.message });
+  }
+});
+
+app.get('/api/admin/settings/dashboard-banner', authenticateToken, requireDorpsomroeperAdmin, async (req, res) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    const banner = await getDashboardBannerFromDb();
+    if (!banner) return res.json({ enabled: false, text: '', bannerId: '' });
+    res.json({ enabled: banner.enabled, text: banner.text, bannerId: banner.bannerId });
+  } catch (error) {
+    console.error('Get dashboard banner error:', error);
+    res.status(500).json({ error: 'Kon melding niet ophalen', message: error.message });
+  }
+});
+
+app.put('/api/admin/settings/dashboard-banner', authenticateToken, requireDorpsomroeperAdmin, async (req, res) => {
+  try {
+    const enabled = req.body?.enabled === true || req.body?.enabled === 'true';
+    const text = req.body?.text != null ? String(req.body.text).trim() : '';
+    if (enabled && !text) {
+      return res.status(400).json({ error: 'Tekst is verplicht wanneer de balk actief is' });
+    }
+    if (text.length > 1000) {
+      return res.status(400).json({ error: 'Tekst mag maximaal 1000 tekens bevatten' });
+    }
+
+    const existing = await getDashboardBannerFromDb();
+    let bannerId = existing?.bannerId || `dashboard-${Date.now()}`;
+    const textChanged = !existing || (existing.text || '') !== text;
+    const enablingFresh = enabled && (!existing?.enabled || textChanged);
+    if (enablingFresh) bannerId = `dashboard-${Date.now()}`;
+
+    const banner = { enabled, text, bannerId };
+    await setDashboardBannerInDb(banner);
+    const saved = await getDashboardBannerFromDb();
+    if ((saved?.enabled === true) !== enabled) {
+      return res.status(500).json({
+        error: 'Melding kon niet worden opgeslagen',
+        message: 'De database bevestigde de wijziging niet. Probeer opnieuw.',
+      });
+    }
+    res.json({ success: true, ...banner });
+  } catch (error) {
+    console.error('Save dashboard banner error:', error);
+    res.status(500).json({ error: 'Kon melding niet opslaan', message: error.message });
+  }
+});
+
 // ── Content Pages (admin) ────────────────────────────────────
 app.get('/api/admin/content-pages', authenticateToken, requireAdmin, async (req, res) => {
   try {
