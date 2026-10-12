@@ -815,6 +815,22 @@ body {
     margin: 0;
     color: #111827;
 }
+.news-preview-kicker {
+    margin: 0 0 8px;
+    color: #6b7280;
+    font-size: 0.9rem;
+}
+.news-preview-title {
+    margin: 0 0 12px;
+    font-size: 1.25rem;
+}
+.news-preview-body {
+    margin-top: 12px;
+    line-height: 1.55;
+    color: #111827;
+}
+.news-preview-body p { margin: 0 0 0.75rem; }
+.news-preview-meta { margin: 10px 0 0; }
 
 .editor-toolbar { display: flex; gap: 4px; margin-bottom: 4px; }
 .editor-btn {

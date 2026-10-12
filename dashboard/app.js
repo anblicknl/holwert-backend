@@ -119,6 +119,19 @@
         return url ? `<div class="preview-thumb"><img src="${escapeHtml(url)}" alt="${escapeHtml(alt)}"></div>` : '';
     }
 
+    function sanitizePreviewHtml(html) {
+        const wrap = document.createElement('div');
+        wrap.innerHTML = String(html || '');
+        wrap.querySelectorAll('script, iframe, object, embed, form').forEach((el) => el.remove());
+        wrap.querySelectorAll('*').forEach((el) => {
+            [...el.attributes].forEach((attr) => {
+                const name = attr.name.toLowerCase();
+                if (name.startsWith('on') || name === 'srcdoc') el.removeAttribute(attr.name);
+            });
+        });
+        return wrap.innerHTML;
+    }
+
     function stripHtmlForShareText(html, maxLen = 300) {
         if (!html) return '';
         let text = String(html)
@@ -1398,6 +1411,45 @@
                 const r = await fetch(`${apiBase}/org/news/${id}`, { headers: authHeaders() });
                 const d = await r.json();
                 if (r.ok) article = d.article;
+            }
+            if (isPreview) {
+                const when = article?.published_at
+                    ? new Date(article.published_at).toLocaleString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                    : 'Geen datum';
+                const status = article?.is_published ? 'Gepubliceerd' : 'Concept';
+                const reactions = article?.reactions_open ? 'Reageren staat open' : 'Reageren staat dicht';
+                const source = article?.source_name
+                    ? `<p class="news-preview-meta">Bron: ${article.source_url ? `<a href="${escapeHtml(article.source_url)}" target="_blank" rel="noopener">${escapeHtml(article.source_name)}</a>` : escapeHtml(article.source_name)}</p>`
+                    : '';
+                const video = article?.youtube_url
+                    ? `<p class="news-preview-meta"><a href="${escapeHtml(article.youtube_url)}" target="_blank" rel="noopener">Video bekijken</a></p>`
+                    : '';
+                const pdf = article?.pdf_url
+                    ? `<p class="news-preview-meta"><a href="${escapeHtml(article.pdf_url)}" target="_blank" rel="noopener">PDF openen</a></p>`
+                    : '';
+                overlay.innerHTML = `
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h3>Artikel bekijken</h3>
+                            <button type="button" class="modal-close">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <p class="news-preview-kicker">${escapeHtml(newsCategoryLabel(article?.category, article?.custom_category))} · ${escapeHtml(when)} · ${status} · ${reactions}</p>
+                            <h4 class="news-preview-title">${escapeHtml(article?.title || 'Artikel')}</h4>
+                            ${previewThumbHtml(article?.image_url, article?.title || '')}
+                            <div class="news-preview-body"></div>
+                            ${source}${video}${pdf}
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary modal-close-btn">Sluiten</button>
+                        </div>
+                    </div>`;
+                const body = overlay.querySelector('.news-preview-body');
+                const safeHtml = sanitizePreviewHtml(article?.content || '');
+                if (body) body.innerHTML = safeHtml || '<p class="form-hint">Geen inhoud</p>';
+                overlay.querySelector('.modal-close')?.addEventListener('click', () => overlay.remove());
+                overlay.querySelector('.modal-close-btn')?.addEventListener('click', () => overlay.remove());
+                return;
             }
             const imgPreview = previewThumbHtml(article?.image_url);
             const titleHtml = isPreview ? 'Artikel bekijken' : (article ? 'Artikel bewerken' : 'Nieuw artikel');
