@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard - Holwert Dorpsapp</title>
-    <link rel="stylesheet" href="styles.css?v=20261011-reactions">
+    <link rel="stylesheet" href="styles.css?v=20261012-reactions">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
 <body>
@@ -237,7 +237,7 @@
                 <li class="nav-item active" data-section="overview"><i class="fas fa-chart-bar"></i><span>Overzicht</span></li>
                 <li class="nav-item" data-section="followers"><i class="fas fa-heart"></i><span>Volgers</span><span class="nav-badge-dot" id="followersNavDot" hidden aria-hidden="true"></span></li>
                 <li class="nav-item" data-section="news"><i class="fas fa-newspaper"></i><span>Nieuws</span></li>
-                <li class="nav-item" data-section="reactions"><i class="fas fa-comment"></i><span>Reacties</span></li>
+                <li class="nav-item" data-section="reactions"><i class="fas fa-comment"></i><span>Reacties</span><span class="nav-badge-dot" id="reactionsNavDot" hidden aria-hidden="true"></span></li>
                 <li class="nav-item" data-section="events"><i class="fas fa-calendar"></i><span>Agenda</span></li>
                 <li class="nav-item" data-section="profile"><i class="fas fa-building"></i><span>Organisatie profiel</span></li>
                 <li class="nav-item" data-section="profile-blocks"><i class="fas fa-th-large"></i><span>Profielblokken</span></li>
@@ -268,7 +268,7 @@
                 <div class="section-header">
                     <h2><i class="fas fa-comment"></i> Reacties</h2>
                 </div>
-                <p class="section-description">Reacties die inwoners via de app op een nieuwsbericht hebben gestuurd. Alleen jullie zien ze.</p>
+                <p class="section-description">Reacties die inwoners via de app op een nieuwsbericht hebben gestuurd. Alleen jullie zien ze. Klik op de titel om het bericht aan te passen, bijvoorbeeld om reageren uit te zetten.</p>
                 <div id="reactionsContent"></div>
             </section>
 
@@ -427,6 +427,6 @@
         if (window.location.hash === '#voorwaarden') openOrgTerms();
     })();
     </script>
-    <script src="app.js?v=20261011-reactions-org"></script>
+    <script src="app.js?v=20261012-reactions"></script>
 </body>
 </html>

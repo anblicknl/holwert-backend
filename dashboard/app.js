@@ -1040,6 +1040,12 @@
 
     initSidebarToggle();
 
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState !== 'visible') return;
+        refreshReactionsNavDot();
+    });
+    setInterval(() => refreshReactionsNavDot(), 20000);
+
     function followersSeenStorageKey(orgId) {
         return `holwert_followers_seen_${orgId}`;
     }
@@ -1084,6 +1090,59 @@
         updateFollowersNavDot(currentCount);
     }
 
+    function reactionsSeenStorageKey(orgId) {
+        return `holwert_reactions_seen_id_${orgId}`;
+    }
+
+    function getSeenReactionId(orgId) {
+        if (!orgId) return null;
+        const stored = localStorage.getItem(reactionsSeenStorageKey(orgId));
+        if (stored == null) return null;
+        const n = parseInt(stored, 10);
+        return Number.isNaN(n) ? null : n;
+    }
+
+    function setSeenReactionId(orgId, id) {
+        if (!orgId) return;
+        localStorage.setItem(reactionsSeenStorageKey(orgId), String(id || 0));
+    }
+
+    function latestReactionId(list) {
+        return (list || []).reduce((max, item) => Math.max(max, Number(item.id) || 0), 0);
+    }
+
+    function applyReactionsNavDot(latestId) {
+        const orgId = organization?.id;
+        const dot = document.getElementById('reactionsNavDot');
+        const navItem = document.querySelector('.nav-item[data-section="reactions"]');
+        if (!orgId || !dot) return;
+        const seen = getSeenReactionId(orgId);
+        const hasNew = latestId > 0 && (seen === null || latestId > seen);
+        dot.hidden = !hasNew;
+        dot.setAttribute('aria-hidden', hasNew ? 'false' : 'true');
+        if (navItem) navItem.setAttribute('title', hasNew ? 'Nieuwe reacties' : '');
+    }
+
+    function markReactionsAsSeen(latestId) {
+        const orgId = organization?.id;
+        if (!orgId) return;
+        const seen = getSeenReactionId(orgId) || 0;
+        setSeenReactionId(orgId, Math.max(seen, latestId || 0));
+        applyReactionsNavDot(latestId || 0);
+    }
+
+    async function refreshReactionsNavDot() {
+        if (!token || !organization?.id) return;
+        if (document.getElementById('reactions')?.classList.contains('active')) return;
+        try {
+            const res = await fetch(`${apiBase}/org/reactions`, { headers: authHeaders() });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) return;
+            const list = Array.isArray(data.reactions) ? data.reactions : [];
+            applyReactionsNavDot(latestReactionId(list));
+        } catch (_) { /* bolletje is extra, de lijst blijft leidend */ }
+    }
+
     function navigateToSection(sectionId) {
         if (!sectionId) return;
         document.querySelectorAll('.nav-item').forEach(n => {
@@ -1117,6 +1176,7 @@
             const data = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(data.message || data.error || 'Laden mislukt');
             const list = Array.isArray(data.reactions) ? data.reactions : [];
+            markReactionsAsSeen(latestReactionId(list));
             if (!list.length) {
                 const orgName = organization?.name ? escapeHtml(organization.name) : 'deze organisatie';
                 container.innerHTML = `<p class="empty-message">Nog geen reacties voor ${orgName}. Zet bij een nieuwsbericht “Reageren open” aan. Reacties van een ander bericht verschijnen alleen in het dashboard van die organisatie.</p>`;
@@ -1126,17 +1186,18 @@
             list.forEach((item) => {
                 const key = String(item.news_id);
                 if (!groups.has(key)) {
-                    groups.set(key, {
-                        title: item.news_title || 'Nieuwsbericht',
-                        open: !!item.reactions_open,
-                        items: [],
-                    });
+                groups.set(key, {
+                    newsId: item.news_id,
+                    title: item.news_title || 'Nieuwsbericht',
+                    open: !!item.reactions_open,
+                    items: [],
+                });
                 }
                 groups.get(key).items.push(item);
             });
             container.innerHTML = [...groups.values()].map((group) => `
                 <article class="reaction-group">
-                    <h3>${escapeHtml(group.title)}</h3>
+                    <h3><button type="button" class="reaction-group__title" data-edit-news-from-reaction="${group.newsId}">${escapeHtml(group.title)}</button></h3>
                     <p class="form-hint">${group.open ? 'Reageren staat open' : 'Reageren staat dicht'} · ${group.items.length} reactie${group.items.length === 1 ? '' : 's'}</p>
                     <ul class="reaction-list">
                         ${group.items.map((item) => {
@@ -1158,6 +1219,12 @@
                     </ul>
                 </article>
             `).join('');
+            container.querySelectorAll('[data-edit-news-from-reaction]').forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    const newsId = parseInt(btn.getAttribute('data-edit-news-from-reaction'), 10);
+                    if (newsId) openNewsModal(newsId, false);
+                });
+            });
             container.querySelectorAll('[data-delete-reaction]').forEach((btn) => {
                 btn.addEventListener('click', () => deleteReaction(btn.getAttribute('data-delete-reaction')));
             });
@@ -1498,6 +1565,7 @@
                     const savedId = newsSaveJson.article?.id || id;
                     overlay.remove();
                     loadNews();
+                    if (document.getElementById('reactions')?.classList.contains('active')) loadReactions();
                     if (isPublished && shareOnFacebook && savedId) {
                         openFacebookShareForNews(savedId, payload.title, payload.content);
                     }
@@ -2258,6 +2326,7 @@
             const past       = allEvents.length - upcoming;
 
             updateFollowersNavDot(followers);
+            refreshReactionsNavDot();
 
             // Meest recente berichten (max 5)
             const recent = allNews

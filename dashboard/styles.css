@@ -471,6 +471,15 @@ body {
 .nav-item:hover { background: #f5f5f5; color: #333; }
 .nav-item.active { background: #f5f5f5; color: #000; border-left-color: #000; }
 .nav-item i { width: 20px; text-align: center; }
+.nav-badge-dot {
+    width: 9px;
+    height: 9px;
+    margin-left: auto;
+    border-radius: 50%;
+    background: #dc2626;
+    flex-shrink: 0;
+}
+.nav-badge-dot[hidden] { display: none; }
 
 .main-content {
     grid-area: main;
@@ -1525,7 +1534,20 @@ body {
     padding: 16px 18px;
     margin-bottom: 16px;
 }
-.reaction-group h3 { margin: 0 0 4px; font-size: 1.05rem; }
+.reaction-group__title {
+    display: inline;
+    margin: 0 0 4px;
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: #0f46ae;
+    cursor: pointer;
+    text-align: left;
+}
+.reaction-group__title:hover { text-decoration: underline; }
 .reaction-list { list-style: none; margin: 12px 0 0; padding: 0; }
 .reaction-item {
     border-top: 1px solid #eef2f7;
