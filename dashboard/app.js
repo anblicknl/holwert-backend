@@ -1197,7 +1197,13 @@
             });
             container.innerHTML = [...groups.values()].map((group) => `
                 <article class="reaction-group">
-                    <h3><button type="button" class="reaction-group__title" data-edit-news-from-reaction="${group.newsId}">${escapeHtml(group.title)}</button></h3>
+                    <div class="reaction-group__head">
+                        <h3>${escapeHtml(group.title)}</h3>
+                        <div class="action-buttons">
+                            <button type="button" class="btn-icon btn-view" data-preview-news-from-reaction="${group.newsId}" title="Bekijken" aria-label="Bekijken"><i class="fas fa-eye"></i></button>
+                            <button type="button" class="btn-icon btn-edit" data-edit-news-from-reaction="${group.newsId}" title="Bewerken" aria-label="Bewerken"><i class="fas fa-edit"></i></button>
+                        </div>
+                    </div>
                     <p class="form-hint">${group.open ? 'Reageren staat open' : 'Reageren staat dicht'} · ${group.items.length} reactie${group.items.length === 1 ? '' : 's'}</p>
                     <ul class="reaction-list">
                         ${group.items.map((item) => {
@@ -1219,6 +1225,12 @@
                     </ul>
                 </article>
             `).join('');
+            container.querySelectorAll('[data-preview-news-from-reaction]').forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    const newsId = parseInt(btn.getAttribute('data-preview-news-from-reaction'), 10);
+                    if (newsId) openNewsModal(newsId, true);
+                });
+            });
             container.querySelectorAll('[data-edit-news-from-reaction]').forEach((btn) => {
                 btn.addEventListener('click', () => {
                     const newsId = parseInt(btn.getAttribute('data-edit-news-from-reaction'), 10);
