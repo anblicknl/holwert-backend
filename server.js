@@ -3943,6 +3943,153 @@ app.post('/auth/org-reset-password', orgForgotPasswordRateLimiter, handleOrgRese
 app.post('/api/auth/org-validate-reset-token', orgForgotPasswordRateLimiter, handleOrgValidateResetTokenRequest);
 app.post('/auth/org-validate-reset-token', orgForgotPasswordRateLimiter, handleOrgValidateResetTokenRequest);
 
+const ADMIN_PANEL_ROLES = new Set(['admin', 'superadmin', 'editor']);
+
+function isAdminPasswordResetEligible(u) {
+  if (!u || !isMysqlUserActive(u.is_active)) return false;
+  return ADMIN_PANEL_ROLES.has(String(u.role || '').toLowerCase());
+}
+
+function getAdminPanelPublicBaseUrl() {
+  let base = (process.env.ADMIN_PANEL_URL || '').trim();
+  if (!base) base = 'https://holwert.appenvloed.com/admin/';
+  return base.replace(/\/?$/, '/');
+}
+
+async function ensureAdminPasswordResetsTable() {
+  try {
+    await executeQuery('SELECT 1 FROM admin_password_resets LIMIT 1');
+    return;
+  } catch (probeErr) {
+    if (!isMysqlMissingTableError(probeErr)) {
+      console.warn('ensureAdminPasswordResetsTable probe:', probeErr.message);
+      return;
+    }
+  }
+  await executeQuery(`
+    CREATE TABLE IF NOT EXISTS admin_password_resets (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      token_hash CHAR(64) NOT NULL,
+      expires_at DATETIME NOT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_admin_password_resets_user (user_id),
+      KEY idx_admin_password_resets_token (token_hash)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+}
+
+async function sendAdminPasswordResetEmailViaHosting({ toEmail, resetUrl }) {
+  const esc = (s) =>
+    String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  const subject = 'Holwert: wachtwoord wijzigen (beheerderspaneel)';
+  const html = `<p>Je hebt een nieuw wachtwoord aangevraagd voor het <strong>Holwert-beheerderspaneel</strong>.</p>
+<p><a href="${esc(resetUrl)}">Klik hier om een nieuw wachtwoord in te stellen</a></p>
+<p>Of kopieer deze link in je browser:<br><span style="word-break:break-all">${esc(resetUrl)}</span></p>
+<p>Deze link is <strong>1 uur</strong> geldig. Als je dit niet zelf hebt aangevraagd, kun je deze e-mail negeren.</p>`;
+  const text = `Je hebt een nieuw wachtwoord aangevraagd voor het Holwert-beheerderspaneel.
+
+Open deze link om een nieuw wachtwoord in te stellen:
+${resetUrl}
+
+Deze link is 1 uur geldig. Als je dit niet zelf hebt aangevraagd, kun je deze e-mail negeren.`;
+  return sendMailViaHosting({ toEmail, subject, html, text });
+}
+
+async function handleAdminForgotPasswordRequest(req, res) {
+  const generic = {
+    message:
+      'Als dit e-mailadres bij ons bekend is voor het beheerderspaneel, ontvang je zo meteen een e-mail met een link om je wachtwoord te vernieuwen.',
+  };
+  try {
+    const emailRaw = req.body?.email != null ? String(req.body.email).trim().toLowerCase() : '';
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailRaw)) {
+      return res.status(200).json(generic);
+    }
+    const user = await findUserRowForOrgPasswordReset(emailRaw);
+    if (!user || !isAdminPasswordResetEligible(user)) {
+      console.log('[admin-forgot-password] geen reset-mail:', emailRaw);
+      return res.status(200).json(generic);
+    }
+    await ensureAdminPasswordResetsTable();
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = hashOrgPasswordResetToken(rawToken);
+    await executeQuery('DELETE FROM admin_password_resets WHERE user_id = ?', [user.id]);
+    await executeInsert(
+      'INSERT INTO admin_password_resets (user_id, token_hash, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR))',
+      [user.id, tokenHash],
+    );
+    const resetUrl = `${getAdminPanelPublicBaseUrl()}?reset=${encodeURIComponent(rawToken)}`;
+    const sent = await sendAdminPasswordResetEmailViaHosting({ toEmail: user.email, resetUrl });
+    if (!sent.ok) {
+      await executeQuery('DELETE FROM admin_password_resets WHERE user_id = ?', [user.id]).catch(() => {});
+      console.warn('[admin-forgot-password] geen e-mail verstuurd:', sent.reason);
+    }
+    return res.status(200).json(generic);
+  } catch (error) {
+    const msg = String(error?.message || '');
+    if (/disallowed table/i.test(msg) && /admin_password_resets/i.test(msg)) {
+      return res.status(503).json({
+        error: 'Wachtwoord-reset is tijdelijk niet beschikbaar. Upload db-proxy.php opnieuw (tabel admin_password_resets).',
+        message: msg,
+      });
+    }
+    console.error('admin-forgot-password error:', error);
+    return res.status(500).json({
+      error: 'Er ging iets mis. Probeer het later opnieuw.',
+      message: error.message,
+    });
+  }
+}
+
+async function handleAdminResetPasswordRequest(req, res) {
+  try {
+    const token = req.body?.token != null ? String(req.body.token).trim() : '';
+    const password = req.body?.password != null ? String(req.body.password) : '';
+    if (!/^[a-f0-9]{64}$/i.test(token)) {
+      return res.status(400).json({ error: 'Ongeldige of verlopen link.' });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'Het wachtwoord moet minimaal 6 tekens zijn.' });
+    }
+    const tokenHash = hashOrgPasswordResetToken(token);
+    await ensureAdminPasswordResetsTable();
+    const row = await executeQuery(
+      `SELECT r.user_id, u.role, u.is_active
+       FROM admin_password_resets r
+       INNER JOIN users u ON u.id = r.user_id
+       WHERE r.token_hash = ?
+         AND r.expires_at > NOW()
+         AND r.created_at > DATE_SUB(NOW(), INTERVAL 1 HOUR)
+       LIMIT 1`,
+      [tokenHash],
+    );
+    const match = row.rows?.[0];
+    if (!match || !isAdminPasswordResetEligible(match)) {
+      return res.status(400).json({ error: 'Ongeldige of verlopen link. Vraag een nieuwe aan via «Wachtwoord vergeten».' });
+    }
+    const hashed = await bcrypt.hash(password, 10);
+    await executeQuery('UPDATE users SET password_hash = ? WHERE id = ?', [hashed, match.user_id]);
+    await executeQuery('DELETE FROM admin_password_resets WHERE user_id = ?', [match.user_id]);
+    return res.json({ message: 'Je wachtwoord is bijgewerkt. Je kunt nu inloggen.' });
+  } catch (error) {
+    console.error('admin-reset-password error:', error);
+    return res.status(500).json({
+      error: 'Er ging iets mis. Probeer het later opnieuw.',
+      message: error.message,
+    });
+  }
+}
+
+app.post('/api/auth/admin-forgot-password', orgForgotPasswordRateLimiter, handleAdminForgotPasswordRequest);
+app.post('/auth/admin-forgot-password', orgForgotPasswordRateLimiter, handleAdminForgotPasswordRequest);
+app.post('/api/auth/admin-reset-password', orgForgotPasswordRateLimiter, handleAdminResetPasswordRequest);
+app.post('/auth/admin-reset-password', orgForgotPasswordRateLimiter, handleAdminResetPasswordRequest);
+
 function isAppPasswordResetEligible(u) {
   if (!u) return false;
   if (!isMysqlUserActive(u.is_active)) return false;

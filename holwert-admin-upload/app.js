@@ -249,6 +249,108 @@ class HolwertAdmin {
         }
     }
 
+    setupAdminPasswordReset() {
+        const loginForm = document.getElementById('loginForm');
+        const forgotForm = document.getElementById('adminForgotForm');
+        const resetForm = document.getElementById('adminResetForm');
+        const showBtn = document.getElementById('showAdminForgotBtn');
+        const backBtn = document.getElementById('adminForgotBackBtn');
+        const errorDiv = document.getElementById('loginError');
+        const params = new URLSearchParams(window.location.search);
+        const resetToken = (params.get('reset') || '').trim();
+
+        const showLogin = () => {
+            if (loginForm) loginForm.hidden = false;
+            if (forgotForm) forgotForm.hidden = true;
+            if (resetForm) resetForm.hidden = true;
+            if (showBtn) showBtn.hidden = false;
+        };
+        const showForgot = () => {
+            if (loginForm) loginForm.hidden = true;
+            if (forgotForm) forgotForm.hidden = false;
+            if (resetForm) resetForm.hidden = true;
+            if (showBtn) showBtn.hidden = true;
+            const emailEl = document.getElementById('email');
+            const forgotEmail = document.getElementById('adminForgotEmail');
+            if (emailEl && forgotEmail && !forgotEmail.value) forgotEmail.value = emailEl.value || '';
+        };
+        const showMessage = (text, isError) => {
+            if (!errorDiv) return;
+            errorDiv.textContent = text || '';
+            errorDiv.style.color = isError ? '#b91c1c' : '#15803d';
+        };
+
+        showBtn?.addEventListener('click', () => {
+            showMessage('');
+            showForgot();
+        });
+        backBtn?.addEventListener('click', () => {
+            showMessage('');
+            showLogin();
+        });
+        forgotForm?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = (document.getElementById('adminForgotEmail')?.value || '').trim().toLowerCase();
+            const btn = forgotForm.querySelector('button[type="submit"]');
+            if (btn) btn.disabled = true;
+            try {
+                const res = await fetch(`${this.apiBaseUrl}/auth/admin-forgot-password`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || data.message || 'Versturen mislukt');
+                showMessage(data.message || 'Als dit adres bekend is, ontvang je een e-mail.', false);
+            } catch (err) {
+                showMessage(err.message || 'Versturen mislukt', true);
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        });
+
+        if (!/^[a-f0-9]{64}$/i.test(resetToken)) return;
+        if (loginForm) loginForm.hidden = true;
+        if (forgotForm) forgotForm.hidden = true;
+        if (resetForm) resetForm.hidden = false;
+        if (showBtn) showBtn.hidden = true;
+
+        resetForm?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const password = document.getElementById('adminResetPassword')?.value || '';
+            const again = document.getElementById('adminResetPassword2')?.value || '';
+            if (password.length < 6) {
+                showMessage('Het wachtwoord moet minimaal 6 tekens zijn.', true);
+                return;
+            }
+            if (password !== again) {
+                showMessage('De wachtwoorden komen niet overeen.', true);
+                return;
+            }
+            const btn = resetForm.querySelector('button[type="submit"]');
+            if (btn) btn.disabled = true;
+            try {
+                const res = await fetch(`${this.apiBaseUrl}/auth/admin-reset-password`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token: resetToken, password }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || data.message || 'Opslaan mislukt');
+                showMessage(data.message || 'Je wachtwoord is bijgewerkt. Je kunt nu inloggen.', false);
+                if (resetForm) resetForm.hidden = true;
+                showLogin();
+                const url = new URL(window.location.href);
+                url.searchParams.delete('reset');
+                window.history.replaceState(null, '', url.pathname + url.search);
+            } catch (err) {
+                showMessage(err.message || 'Opslaan mislukt', true);
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        });
+    }
+
     setupEventListeners() {
         // Login form
         const loginForm = document.getElementById('loginForm');
@@ -258,6 +360,7 @@ class HolwertAdmin {
                 this.handleLogin();
             });
         }
+        this.setupAdminPasswordReset();
 
         const loginPwToggle = document.getElementById('loginPasswordToggle');
         const loginPwInput = document.getElementById('password');

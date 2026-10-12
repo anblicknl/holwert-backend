@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Holwert Dorpsapp - Admin Panel</title>
-    <link rel="stylesheet" href="styles.css?v=20260907-org-view">
+    <link rel="stylesheet" href="styles.css?v=20261012-admin-reset">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
 <body class="admin-login-open">
@@ -37,6 +37,30 @@
                     <span>Inloggen</span>
                 </button>
             </form>
+            <form id="adminForgotForm" class="login-form" hidden>
+                <div class="form-group">
+                    <label for="adminForgotEmail">E-mailadres</label>
+                    <input type="email" id="adminForgotEmail" autocomplete="email" required placeholder="admin@holwert.frl">
+                </div>
+                <button type="submit" class="btn btn-primary">
+                    <span>Verstuur herstellink</span>
+                </button>
+                <button type="button" id="adminForgotBackBtn" class="login-forgot-link">Terug naar inloggen</button>
+            </form>
+            <form id="adminResetForm" class="login-form" hidden>
+                <div class="form-group">
+                    <label for="adminResetPassword">Nieuw wachtwoord</label>
+                    <input type="password" id="adminResetPassword" autocomplete="new-password" required minlength="6">
+                </div>
+                <div class="form-group">
+                    <label for="adminResetPassword2">Herhaal wachtwoord</label>
+                    <input type="password" id="adminResetPassword2" autocomplete="new-password" required minlength="6">
+                </div>
+                <button type="submit" class="btn btn-primary">
+                    <span>Wachtwoord opslaan</span>
+                </button>
+            </form>
+            <button type="button" id="showAdminForgotBtn" class="login-forgot-link">Wachtwoord vergeten?</button>
             <div id="loginError" class="error-message"></div>
         </div>
     </div>
@@ -531,6 +555,6 @@
     </script>
     <!-- Cache-busting query parameter zodat nieuwe app.js altijd wordt opgehaald -->
     <script src="profile-blocks-ui.js?v=20260918-header-icon"></script>
-    <script src="app.js?v=20261012-dashboard-banner"></script>
+    <script src="app.js?v=20261012-admin-reset"></script>
 </body>
 </html>

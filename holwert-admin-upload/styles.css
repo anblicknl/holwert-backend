@@ -59,6 +59,20 @@ body.admin-login-open {
     font-weight: 500;
 }
 
+.login-forgot-link {
+    display: block;
+    margin-top: 0.75rem;
+    padding: 0;
+    border: none;
+    background: none;
+    font-size: 0.85rem;
+    color: #64748b;
+    cursor: pointer;
+    font-family: inherit;
+    text-align: left;
+}
+.login-forgot-link:hover { color: #334155; text-decoration: underline; }
+
 .login-header {
     text-align: center;
     margin-bottom: 2rem;
