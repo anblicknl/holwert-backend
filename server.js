@@ -3572,10 +3572,8 @@ app.post('/api/auth/login', loginRateLimiter, async (req, res) => {
       });
     }
 
-    const user = userResult.rows[0];
-
-    // Check if user is active
-    if (!user.is_active) {
+    const activeRows = (userResult.rows || []).filter((row) => isMysqlUserActive(row.is_active));
+    if (!activeRows.length) {
       return res.status(401).json({
         error: 'Account is deactivated',
         field: 'account',
@@ -3583,9 +3581,14 @@ app.post('/api/auth/login', loginRateLimiter, async (req, res) => {
       });
     }
 
-    // Verify password
-    const isValidPassword = await bcrypt.compare(password, user.password_hash);
-    if (!isValidPassword) {
+    let user = null;
+    for (const candidate of activeRows) {
+      if (await bcrypt.compare(password, candidate.password_hash)) {
+        user = candidate;
+        break;
+      }
+    }
+    if (!user) {
       return res.status(401).json({
         error: 'Invalid email or password',
         field: 'password',
@@ -4059,7 +4062,7 @@ async function handleAdminResetPasswordRequest(req, res) {
     const tokenHash = hashOrgPasswordResetToken(token);
     await ensureAdminPasswordResetsTable();
     const row = await executeQuery(
-      `SELECT r.user_id, u.role, u.is_active
+      `SELECT r.user_id, u.role, u.is_active, u.email
        FROM admin_password_resets r
        INNER JOIN users u ON u.id = r.user_id
        WHERE r.token_hash = ?
@@ -4073,7 +4076,15 @@ async function handleAdminResetPasswordRequest(req, res) {
       return res.status(400).json({ error: 'Ongeldige of verlopen link. Vraag een nieuwe aan via «Wachtwoord vergeten».' });
     }
     const hashed = await bcrypt.hash(password, 10);
-    await executeQuery('UPDATE users SET password_hash = ? WHERE id = ?', [hashed, match.user_id]);
+    const sameEmail = await executeQuery(
+      'SELECT id, role, is_active FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM(?))',
+      [match.email],
+    );
+    const ids = (sameEmail.rows || []).filter((u) => isAdminPasswordResetEligible(u)).map((u) => u.id);
+    const targets = ids.length ? ids : [match.user_id];
+    for (const id of targets) {
+      await executeQuery('UPDATE users SET password_hash = ? WHERE id = ?', [hashed, id]);
+    }
     await executeQuery('DELETE FROM admin_password_resets WHERE user_id = ?', [match.user_id]);
     return res.json({ message: 'Je wachtwoord is bijgewerkt. Je kunt nu inloggen.' });
   } catch (error) {
