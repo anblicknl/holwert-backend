@@ -115,9 +115,13 @@ function sanitizeListOrganization(org) {
   };
 }
 
+/** Blok-HTML (RSS, Drupal). Een losse link of vetgedrukte tekst uit de textarea hoort hier niet bij. */
+const RICH_TEXT_BLOCK_TAG =
+  /<\/?(?:p|div|h[1-6]|ul|ol|li|blockquote|section|article|figure|figcaption|picture|table|tr|td|th|thead|tbody)\b/i;
+
 /**
- * Web/HTML-weergave: behoud regeleinden uit textarea (plain text of gemengd met HTML).
- * Zelfde idee als prepareRichTextHtml in de mobile app.
+ * Web/HTML-weergave: behoud regeleinden uit textarea (plain text of lichte opmaak).
+ * Zelfde regel als prepareRichTextHtml in de mobile app.
  */
 function formatRichTextForWeb(raw) {
   if (!raw) return '';
@@ -125,6 +129,9 @@ function formatRichTextForWeb(raw) {
   s = s.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
   s = s.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '');
   s = s.replace(/<!--[\s\S]*?-->/g, '');
+  if (RICH_TEXT_BLOCK_TAG.test(s)) {
+    return s.replace(/>\s+</g, '><').replace(/>\s*,\s*</g, '><').trim();
+  }
   const hasHtml = /<[a-z][\s\S]*>/i.test(s);
   if (!hasHtml) {
     s = s
@@ -132,10 +139,8 @@ function formatRichTextForWeb(raw) {
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
-    return s.replace(/\n/g, '<br />');
   }
-  // Echte HTML: geen \n→br (voorkomt witruimte tussen tags)
-  return s.replace(/>\s+</g, '><').replace(/>\s*,\s*</g, '><').trim();
+  return s.replace(/\n/g, '<br />');
 }
 
 function getCacheKey(endpoint, params = {}) {

@@ -31,18 +31,25 @@ function stripHtmlForShareText(html, maxLen = 300) {
     return text;
 }
 
-/** Web/HTML-weergave: behoud regeleinden uit textarea (plain text of gemengd met HTML). */
+/** Blok-HTML (RSS, Drupal). Een losse link of vetgedrukte tekst uit de textarea hoort hier niet bij. */
+const RICH_TEXT_BLOCK_TAG =
+    /<\/?(?:p|div|h[1-6]|ul|ol|li|blockquote|section|article|figure|figcaption|picture|table|tr|td|th|thead|tbody)\b/i;
+
+/** Web/HTML-weergave: enters blijven staan bij een link, vet of cursief. Echte alinea-HTML niet. */
 function formatRichTextForWeb(raw) {
     if (!raw) return '';
     let s = String(raw).replace(/\r\n/g, '\n');
     s = s.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
     s = s.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '');
     s = s.replace(/<!--[\s\S]*?-->/g, '');
-    const hasHtml = /<[a-z][\s\S]*>/i.test(s);
-    if (!hasHtml) {
-        s = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    if (!RICH_TEXT_BLOCK_TAG.test(s)) {
+        const hasHtml = /<[a-z][\s\S]*>/i.test(s);
+        if (!hasHtml) {
+            s = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+        s = s.replace(/\n/g, '<br />');
     }
-    return s.replace(/\n/g, '<br />');
+    return s;
 }
 
 function buildFacebookShareMessage(title, content, shareUrl) {
