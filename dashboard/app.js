@@ -132,6 +132,13 @@
         return wrap.innerHTML;
     }
 
+    function preparePreviewHtml(raw) {
+        let s = String(raw || '').replace(/\r\n/g, '\n');
+        const block = /<\/?(?:p|div|h[1-6]|ul|ol|li|blockquote|section|article|table|tr|td|th)\b/i;
+        if (!block.test(s)) s = s.replace(/\n/g, '<br />');
+        return sanitizePreviewHtml(s);
+    }
+
     function stripHtmlForShareText(html, maxLen = 300) {
         if (!html) return '';
         let text = String(html)
@@ -1445,7 +1452,7 @@
                         </div>
                     </div>`;
                 const body = overlay.querySelector('.news-preview-body');
-                const safeHtml = sanitizePreviewHtml(article?.content || '');
+                const safeHtml = preparePreviewHtml(article?.content || '');
                 if (body) body.innerHTML = safeHtml || '<p class="form-hint">Geen inhoud</p>';
                 overlay.querySelector('.modal-close')?.addEventListener('click', () => overlay.remove());
                 overlay.querySelector('.modal-close-btn')?.addEventListener('click', () => overlay.remove());
