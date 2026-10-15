@@ -1,7 +1,7 @@
 <?php
 /**
  * Database-proxy voor Holwert-backend (Vercel → MySQL).
- * Staat in holwert-admin-upload; upload deze map via FTP naar je server (bijv. …/admin/).
+ * Staat in de map admin; upload deze map via FTP naar de servermap admin.
  *
  * Verwachte POST (JSON): { "action": "execute"|"insert"|"update"|"delete", "query": "...", "params": [] }
  * Header: X-API-Key: (zelfde waarde als Vercel env PHP_PROXY_API_KEY)
