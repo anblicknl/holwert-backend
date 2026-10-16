@@ -3052,14 +3052,16 @@ app.get('/api/cron/afval-reminders', async (req, res) => {
     const cronSecret = process.env.CRON_SECRET;
     const auth = req.headers.authorization || '';
     const isVercelCron = String(req.headers['x-vercel-cron'] || '') === '1';
-    if (cronSecret) {
-      const authOk = auth === `Bearer ${cronSecret}`;
-      if (!authOk && !isVercelCron) {
-        return res.status(401).json({ error: 'Unauthorized' });
-      }
+    const authOk = !cronSecret || auth === `Bearer ${cronSecret}`;
+    if (cronSecret && !authOk && !isVercelCron) {
+      return res.status(401).json({ error: 'Unauthorized' });
     }
     const force = req.query.force === '1';
-    const result = await runAfvalReminderJob({ force });
+    // Dagelijkse Vercel-cron: geen strikt uurvenster (Hobby kan uitlopen; wintertijd verschuift UTC→AMS).
+    const result = await runAfvalReminderJob({
+      force,
+      fromCron: isVercelCron || authOk,
+    });
     console.log('[afval-reminders]', JSON.stringify(result));
     res.json(result);
   } catch (error) {
@@ -8862,81 +8864,20 @@ function addDays(d, n) {
 }
 
 function toDateStr(d) {
-  return d.toISOString().slice(0, 10);
+  // Lokale Y-M-D zonder UTC-shift (Vercel draait in UTC).
+  const yy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
 }
 
-function computeNextOudPapierDates(config, count = 8) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const out = [];
-  if (!config || !config.oudPapier) return out;
-  const c = config.oudPapier;
-  if (c.type === 'dates' && Array.isArray(c.dates)) {
-    const sorted = c.dates.map((x) => ({ d: new Date(x), s: x })).filter((x) => !isNaN(x.d.getTime()) && x.d >= today);
-    sorted.sort((a, b) => a.d - b.d);
-    sorted.slice(0, count).forEach((x) => out.push({ date: x.s, dateStr: x.d.toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' }) }));
-    return out;
-  }
-  if (c.type === 'recurring' && c.first_date && c.interval_weeks) {
-    let d = new Date(c.first_date);
-    d.setHours(0, 0, 0, 0);
-    const intervalDays = (c.interval_weeks || 6) * 7;
-    while (d < today) d = addDays(d, intervalDays);
-    for (let i = 0; i < count; i++) {
-      out.push({ date: toDateStr(d), dateStr: d.toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' }) });
-      d = addDays(d, intervalDays);
-    }
-    return out;
-  }
-  return out;
-}
-
-function getWeekNumber(d) {
-  const onejan = new Date(d.getFullYear(), 0, 1);
-  return Math.ceil(((d - onejan) / 86400000 + onejan.getDay() + 1) / 7);
-}
-
-function computeNextContainerDates(config, count = 8) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const weekday = (config && config.containers && config.containers.weekday) ?? 5;
-  const extra = (config && config.containers && config.containers.extra_dates) || [];
-  const evenLabel = (config && config.containers && config.containers.even_label) === 'grijs' ? 'grijs' : 'groen';
-  const oddLabel = (config && config.containers && config.containers.odd_label) === 'groen'
-    ? 'groen'
-    : (evenLabel === 'groen' ? 'grijs' : 'groen');
-  const fridays = [];
-  let d = new Date(today);
-  for (let i = 0; i < 60; i++) {
-    if (d.getDay() === weekday) {
-      const weekNum = getWeekNumber(d);
-      const label = weekNum % 2 === 0 ? evenLabel : oddLabel;
-      fridays.push({ date: toDateStr(d), dateStr: d.toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' }), label });
-    }
-    if (fridays.length >= count) break;
-    d.setDate(d.getDate() + 1);
-  }
-  const extraList = extra
-    .filter((x) => x && !isNaN(new Date(x).getTime()))
-    .map((x) => ({ date: x, dateStr: new Date(x).toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' }), label: 'extra' }));
-  const combined = [...fridays, ...extraList]
-    .filter((x) => new Date(x.date) >= today)
-    .sort((a, b) => new Date(a.date) - new Date(b.date))
-    .slice(0, count);
-  return combined;
-}
-
-function isTodayOudPapier(config) {
-  const today = toDateStr(new Date());
-  const next = computeNextOudPapierDates(config, 1);
-  if (next.length === 0) return false;
-  return next[0].date === today;
-}
-
-function isTodayContainer(config) {
-  const today = toDateStr(new Date());
-  const next = computeNextContainerDates(config, 2);
-  return next.some((x) => x.date === today);
+function parseDateOnlyLocal(dateStr) {
+  const [y, m, d] = String(dateStr || '')
+    .slice(0, 10)
+    .split('-')
+    .map(Number);
+  if (!y || !m || !d) return null;
+  return new Date(y, m - 1, d);
 }
 
 function amsterdamTodayStr() {
@@ -8962,6 +8903,105 @@ function amsterdamHour() {
     }).format(new Date()),
     10
   );
+}
+
+/** “Vandaag” als lokale kalenderdag in Amsterdam (niet server-UTC). */
+function amsterdamTodayDate() {
+  return parseDateOnlyLocal(amsterdamTodayStr());
+}
+
+function formatNlDateLong(dateStr) {
+  const d = parseDateOnlyLocal(dateStr);
+  if (!d) return String(dateStr || '');
+  return d.toLocaleDateString('nl-NL', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+function computeNextOudPapierDates(config, count = 8) {
+  const today = amsterdamTodayDate();
+  const out = [];
+  if (!today || !config || !config.oudPapier) return out;
+  const c = config.oudPapier;
+  if (c.type === 'dates' && Array.isArray(c.dates)) {
+    const sorted = c.dates
+      .map((x) => ({ d: parseDateOnlyLocal(x), s: String(x).slice(0, 10) }))
+      .filter((x) => x.d && x.d >= today);
+    sorted.sort((a, b) => a.d - b.d);
+    sorted.slice(0, count).forEach((x) =>
+      out.push({ date: x.s, dateStr: formatNlDateLong(x.s) })
+    );
+    return out;
+  }
+  if (c.type === 'recurring' && c.first_date && c.interval_weeks) {
+    let d = parseDateOnlyLocal(c.first_date);
+    if (!d) return out;
+    const intervalDays = (c.interval_weeks || 6) * 7;
+    while (d < today) d = addDays(d, intervalDays);
+    for (let i = 0; i < count; i++) {
+      const s = toDateStr(d);
+      out.push({ date: s, dateStr: formatNlDateLong(s) });
+      d = addDays(d, intervalDays);
+    }
+    return out;
+  }
+  return out;
+}
+
+function getWeekNumber(d) {
+  const onejan = new Date(d.getFullYear(), 0, 1);
+  return Math.ceil(((d - onejan) / 86400000 + onejan.getDay() + 1) / 7);
+}
+
+function computeNextContainerDates(config, count = 8) {
+  const today = amsterdamTodayDate();
+  if (!today) return [];
+  const weekday = (config && config.containers && config.containers.weekday) ?? 5;
+  const extra = (config && config.containers && config.containers.extra_dates) || [];
+  const evenLabel = (config && config.containers && config.containers.even_label) === 'grijs' ? 'grijs' : 'groen';
+  const oddLabel = (config && config.containers && config.containers.odd_label) === 'groen'
+    ? 'groen'
+    : (evenLabel === 'groen' ? 'grijs' : 'groen');
+  const fridays = [];
+  let d = new Date(today);
+  for (let i = 0; i < 60; i++) {
+    if (d.getDay() === weekday) {
+      const weekNum = getWeekNumber(d);
+      const label = weekNum % 2 === 0 ? evenLabel : oddLabel;
+      const s = toDateStr(d);
+      fridays.push({ date: s, dateStr: formatNlDateLong(s), label });
+    }
+    if (fridays.length >= count) break;
+    d.setDate(d.getDate() + 1);
+  }
+  const extraList = extra
+    .map((x) => String(x || '').slice(0, 10))
+    .filter((x) => !!parseDateOnlyLocal(x))
+    .map((x) => ({ date: x, dateStr: formatNlDateLong(x), label: 'extra' }));
+  const combined = [...fridays, ...extraList]
+    .filter((x) => {
+      const dx = parseDateOnlyLocal(x.date);
+      return dx && dx >= today;
+    })
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)))
+    .slice(0, count);
+  return combined;
+}
+
+function isTodayOudPapier(config) {
+  const today = amsterdamTodayStr();
+  const next = computeNextOudPapierDates(config, 1);
+  if (next.length === 0) return false;
+  return next[0].date === today;
+}
+
+function isTodayContainer(config) {
+  const today = amsterdamTodayStr();
+  const next = computeNextContainerDates(config, 2);
+  return next.some((x) => x.date === today);
 }
 
 function isOudPapierOnDate(config, dateStr) {
@@ -9023,7 +9063,11 @@ function buildTomorrowAfvalReminder(config) {
   return {
     title: `Morgen ${subject}`,
     body: afvalReminderBody(parts),
-    data: { type: 'practical', screen: 'praktisch' },
+    data: {
+      type: 'practical',
+      screen: 'praktisch',
+      target_date: tomorrowStr,
+    },
   };
 }
 
@@ -9142,15 +9186,38 @@ async function queueNewOrganizationPush(organizationId, wasApprovedBefore = fals
   );
 }
 
-async function alreadySentPracticalReminderToday() {
+async function alreadySentPracticalReminderForTarget(tomorrowStr) {
   try {
     const result = await executeQuery(
+      `SELECT id, data FROM notification_history
+       WHERE notification_type = 'practical'
+       AND sent_at >= DATE_SUB(NOW(), INTERVAL 48 HOUR)
+       ORDER BY id DESC
+       LIMIT 40`
+    );
+    const rows = result.rows || [];
+    for (const row of rows) {
+      let data = row.data;
+      if (typeof data === 'string') {
+        try {
+          data = JSON.parse(data);
+        } catch {
+          data = null;
+        }
+      }
+      if (data && data.target_date && String(data.target_date) === String(tomorrowStr)) {
+        return true;
+      }
+    }
+    // Legacy rijen zonder target_date: blokkeer dubbele run dezelfde avond.
+    const legacy = await executeQuery(
       `SELECT id FROM notification_history
        WHERE notification_type = 'practical'
        AND sent_at >= DATE_SUB(NOW(), INTERVAL 20 HOUR)
+       AND (data IS NULL OR data NOT LIKE '%target_date%')
        LIMIT 1`
     );
-    return (result.rows || []).length > 0;
+    return (legacy.rows || []).length > 0;
   } catch {
     return false;
   }
@@ -9183,7 +9250,11 @@ async function sendPracticalReminderToSubscribers(config) {
     const notification = {
       title: `Morgen ${parts.join(' en ')}`,
       body: afvalReminderBody(parts),
-      data: { type: 'practical', screen: 'praktisch' },
+      data: {
+        type: 'practical',
+        screen: 'praktisch',
+        target_date: tomorrowStr,
+      },
     };
 
     const sendResult = await sendPushNotification([row.token], notification);
@@ -9219,21 +9290,36 @@ async function sendPracticalReminderToSubscribers(config) {
 
 async function runAfvalReminderJob(options = {}) {
   const force = !!options.force;
+  const fromCron = !!options.fromCron;
   const hour = amsterdamHour();
-  // Hobby-cron kan ±1 uur uitlopen; accepteer 18–19 Amsterdam
-  if (!force && hour !== 18 && hour !== 19) {
-    return { skipped: true, reason: 'not_18_amsterdam', hour };
+  // Handmatige hits buiten de avond: overslaan. Vercel-dagcron: altijd doorlaten
+  // (Hobby loopt uit; na wintertijd is 16:00 UTC = 17:00 AMS i.p.v. 18:00).
+  if (!force && !fromCron && (hour < 16 || hour > 21)) {
+    return { skipped: true, reason: 'outside_evening_window', hour };
   }
   const config = await loadAfvalkalenderConfig();
   const tomorrowStr = amsterdamTomorrowStr();
   const hasOud = isOudPapierOnDate(config, tomorrowStr);
   const hasContainer = !!getContainerOnDate(config, tomorrowStr);
   if (!hasOud && !hasContainer) {
-    return { skipped: true, reason: 'nothing_tomorrow', tomorrow: tomorrowStr, hour };
+    return {
+      skipped: true,
+      reason: 'nothing_tomorrow',
+      tomorrow: tomorrowStr,
+      hour,
+      fromCron,
+    };
   }
   const sampleNotification = buildTomorrowAfvalReminder(config);
-  if (!force && (await alreadySentPracticalReminderToday())) {
-    return { skipped: true, reason: 'already_sent', title: sampleNotification?.title ?? null, tomorrow: tomorrowStr };
+  if (!force && (await alreadySentPracticalReminderForTarget(tomorrowStr))) {
+    return {
+      skipped: true,
+      reason: 'already_sent',
+      title: sampleNotification?.title ?? null,
+      tomorrow: tomorrowStr,
+      hour,
+      fromCron,
+    };
   }
   const sendResult = await sendPracticalReminderToSubscribers(config);
   return {
@@ -9241,6 +9327,7 @@ async function runAfvalReminderJob(options = {}) {
     title: sampleNotification?.title ?? null,
     tomorrow: tomorrowStr,
     hour,
+    fromCron,
     sent: sendResult.sent ?? 0,
     success: sendResult.success !== false,
   };
