@@ -1332,6 +1332,11 @@ input, select, textarea {
     color: #ff9800;
 }
 
+.status-badge.scheduled {
+    background: #fff7ed;
+    color: #b45309;
+}
+
 .status-badge.draft {
     background: #f0f0f0;
     color: #666;
@@ -1796,6 +1801,11 @@ input, select, textarea {
 
 .list-card-meta-sep {
     color: #ccc;
+}
+
+.list-card-status.status-scheduled {
+    color: #b45309;
+    background: #fff7ed;
 }
 
 .list-card-status.status-published {

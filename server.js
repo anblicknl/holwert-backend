@@ -792,6 +792,57 @@ function toMysqlDateTime(value) {
   return null;
 }
 
+/**
+ * Publiek zichtbaar nieuws: gepubliceerd én publicatietijd niet in de toekomst.
+ * Zo werkt "inplannen": is_published=true + published_at in de toekomst blijft verborgen
+ * tot die tijd (geen aparte cron nodig voor zichtbaarheid).
+ */
+function sqlNewsPubliclyVisible(alias = 'n') {
+  const a = alias ? `${alias}.` : '';
+  return `(${a}is_published = true OR ${a}is_published = 1) AND COALESCE(${a}published_at, ${a}created_at) <= NOW()`;
+}
+
+function isNewsPublishAtInFuture(publishedAt) {
+  if (publishedAt == null || publishedAt === '') return false;
+  const t = new Date(publishedAt).getTime();
+  if (!Number.isFinite(t)) return false;
+  return t > Date.now() + 45 * 1000;
+}
+
+let _lastScheduledNewsFlushAt = 0;
+/**
+ * Stuur uitgestelde follower-pushes zodra geplande artikelen live mogen.
+ * Wordt throttled aangeroepen vanuit publieke news-endpoints (geen extra Vercel-cron nodig).
+ */
+async function flushDueScheduledNewsPushes() {
+  if (Date.now() - _lastScheduledNewsFlushAt < 60 * 1000) return;
+  _lastScheduledNewsFlushAt = Date.now();
+  try {
+    await ensureNewsColumns();
+    const due = await executeQuery(`
+      SELECT id, title, organization_id
+      FROM news
+      WHERE (is_published = true OR is_published = 1)
+        AND organization_id IS NOT NULL
+        AND COALESCE(published_at, created_at) <= NOW()
+        AND COALESCE(published_at, created_at) > DATE_SUB(NOW(), INTERVAL 3 DAY)
+        AND followers_notified_at IS NULL
+      ORDER BY COALESCE(published_at, created_at) ASC
+      LIMIT 8
+    `);
+    const rows = due.rows || [];
+    if (!rows.length) return;
+    for (const row of rows) {
+      await notifyFollowersOfNewsArticle(row.organization_id, row.id, row.title);
+    }
+    invalidateCache('/api/news');
+    invalidateCache('/api/app/bootstrap');
+    invalidateCache('/api/featured');
+  } catch (e) {
+    console.warn('[news] scheduled push flush:', e && e.message ? e.message : e);
+  }
+}
+
 function normalizeEventPrice(value) {
   if (value === undefined || value === null || value === '') return null;
   const n = typeof value === 'number' ? value : parseFloat(String(value).replace(',', '.'));
@@ -1806,6 +1857,7 @@ app.get('/api/app/bootstrap', async (req, res) => {
     live: async () => {
       await ensureBookmarksTable();
       await ensureNewsColumns();
+      flushDueScheduledNewsPushes().catch(() => {});
       let userId = null;
       const authHeader = req.headers.authorization;
       if (authHeader && authHeader.startsWith('Bearer ')) {
@@ -1828,14 +1880,14 @@ app.get('/api/app/bootstrap', async (req, res) => {
       FROM news n
       LEFT JOIN organizations o ON n.organization_id = o.id
       ${userId ? 'LEFT JOIN bookmarks b ON b.news_id = n.id AND b.user_id = ?' : ''}
-      WHERE n.is_published = true
+      WHERE ${sqlNewsPubliclyVisible('n')}
       ORDER BY COALESCE(n.published_at, n.created_at) DESC LIMIT 10 OFFSET 0`;
       if (userId) newsParams.push(userId);
 
       const orgFields = `id, name, description, logo_url, brand_color, category, is_ondernemer,
       CASE WHEN logo_url IS NOT NULL AND logo_url <> '' THEN true ELSE false END as has_logo`;
       const orgQuery = `SELECT ${orgFields} FROM organizations WHERE is_approved = true ORDER BY name ASC LIMIT 100`;
-      const countNewsQuery = 'SELECT COUNT(*) as total FROM news n WHERE n.is_published = true';
+      const countNewsQuery = `SELECT COUNT(*) as total FROM news n WHERE ${sqlNewsPubliclyVisible('n')}`;
 
       const [newsResult, orgResult, countResult] = await Promise.all([
         executeQuery(newsQuery, newsParams),
@@ -1881,15 +1933,33 @@ async function ensureNewsColumns() {
     ['source_url',  'VARCHAR(500)'],
     ['pdf_url',     'VARCHAR(500)'],
     ['reactions_open', 'TINYINT(1) NOT NULL DEFAULT 0'],
+    ['followers_notified_at', 'DATETIME NULL'],
   ];
+  let addedFollowersNotified = false;
   for (const [col, def] of cols) {
     try {
       await executeQuery(`ALTER TABLE news ADD COLUMN ${col} ${def}`);
       console.log(`[ensureNewsColumns] news.${col} toegevoegd`);
+      if (col === 'followers_notified_at') addedFollowersNotified = true;
     } catch (e) {
       if (!String(e.message).includes('Duplicate column') && !String(e.message).includes('1060')) {
         console.warn(`[ensureNewsColumns] news.${col}:`, e.message);
       }
+    }
+  }
+  // Voorkom dat een backfill-push alle oude gepubliceerde artikelen opnieuw notificeert.
+  if (addedFollowersNotified) {
+    try {
+      await executeQuery(`
+        UPDATE news
+        SET followers_notified_at = COALESCE(published_at, created_at, NOW())
+        WHERE (is_published = true OR is_published = 1)
+          AND COALESCE(published_at, created_at) <= NOW()
+          AND followers_notified_at IS NULL
+      `);
+      console.log('[ensureNewsColumns] followers_notified_at backfill voor bestaande publicaties');
+    } catch (e) {
+      console.warn('[ensureNewsColumns] followers_notified_at backfill:', e.message);
     }
   }
   _newsColsMigrated = true;
@@ -1993,6 +2063,7 @@ app.get('/api/news', async (req, res) => {
   const liveNews = async () => {
     await ensureNewsColumns();
     await ensureBookmarksTable();
+    flushDueScheduledNewsPushes().catch(() => {});
 
     let userId = null;
     const authHeader = req.headers.authorization;
@@ -2027,7 +2098,7 @@ app.get('/api/news', async (req, res) => {
       FROM news n
       LEFT JOIN organizations o ON n.organization_id = o.id
       ${userId ? `LEFT JOIN bookmarks b ON b.news_id = n.id AND b.user_id = ?` : ''}
-      WHERE n.is_published = true
+      WHERE ${sqlNewsPubliclyVisible('n')}
     `;
 
     if (userId) params.push(userId);
@@ -2048,7 +2119,7 @@ app.get('/api/news', async (req, res) => {
     params.push(limitValue, offset);
 
     const countParams = [];
-    let countQuery = `SELECT COUNT(*) as total FROM news n LEFT JOIN organizations o ON n.organization_id = o.id WHERE n.is_published = true`;
+    let countQuery = `SELECT COUNT(*) as total FROM news n LEFT JOIN organizations o ON n.organization_id = o.id WHERE ${sqlNewsPubliclyVisible('n')}`;
     if (organization_id) {
       countQuery += ` AND n.organization_id = ?`;
       countParams.push(parseInt(organization_id));
@@ -2158,7 +2229,7 @@ app.get('/api/news/related', async (req, res) => {
       FROM news n
       LEFT JOIN users u ON n.author_id = u.id
       LEFT JOIN organizations o ON n.organization_id = o.id
-      WHERE n.is_published = true AND n.organization_id = ?`;
+      WHERE ${sqlNewsPubliclyVisible('n')} AND n.organization_id = ?`;
     if (exclude) {
       params.push(parseInt(exclude));
       query += ` AND n.id <> ?`;
@@ -2221,7 +2292,7 @@ function profileBlocksSetupErrorResponse(res) {
 async function pruneStaleBookmarks(userId) {
   await executeQuery(`
     DELETE b FROM bookmarks b
-    LEFT JOIN news n ON n.id = b.news_id AND n.is_published = true
+    LEFT JOIN news n ON n.id = b.news_id AND ${sqlNewsPubliclyVisible('n')}
     WHERE b.user_id = ? AND n.id IS NULL
   `, [userId]);
 }
@@ -2235,7 +2306,7 @@ app.get('/api/app/bookmarks/count', authenticateToken, async (req, res) => {
     const result = await executeQuery(`
       SELECT COUNT(*) as count
       FROM bookmarks b
-      INNER JOIN news n ON n.id = b.news_id AND n.is_published = true
+      INNER JOIN news n ON n.id = b.news_id AND ${sqlNewsPubliclyVisible('n')}
       WHERE b.user_id = ?
     `, [userId]);
     res.json({ count: result.rows?.[0]?.count ?? 0 });
@@ -2260,7 +2331,7 @@ app.get('/api/app/bookmarks', authenticateToken, async (req, res) => {
       const result = await executeQuery(`
         SELECT n.id, n.title, LEFT(COALESCE(n.content, ''), 500) as excerpt, n.image_url, n.created_at, b.created_at as bookmarked_at
         FROM bookmarks b
-        INNER JOIN news n ON n.id = b.news_id AND n.is_published = true
+        INNER JOIN news n ON n.id = b.news_id AND ${sqlNewsPubliclyVisible('n')}
         WHERE b.user_id = ?
         ORDER BY b.created_at DESC
         LIMIT 100
@@ -3039,7 +3110,7 @@ app.get('/api/news/count', async (req, res) => {
   try {
     const { organization_id } = req.query;
     
-    let query = 'SELECT COUNT(*) as total FROM news WHERE is_published = true';
+    let query = `SELECT COUNT(*) as total FROM news WHERE ${sqlNewsPubliclyVisible('')}`;
     const params = [];
     
     if (organization_id) {
@@ -3089,7 +3160,7 @@ app.get('/api/news/head', async (req, res) => {
       FROM news n
       LEFT JOIN organizations o ON n.organization_id = o.id
       ${userId ? 'LEFT JOIN bookmarks b ON b.news_id = n.id AND b.user_id = ?' : ''}
-      WHERE n.is_published = true
+      WHERE ${sqlNewsPubliclyVisible('n')}
       ORDER BY COALESCE(n.published_at, n.created_at) DESC LIMIT ?`;
       if (userId) newsParams.push(userId);
       newsParams.push(limit);
@@ -3149,7 +3220,7 @@ app.get('/api/news/:id', async (req, res) => {
       LEFT JOIN users u ON n.author_id = u.id
       LEFT JOIN organizations o ON n.organization_id = o.id
       ${userId ? `LEFT JOIN bookmarks b ON b.news_id = n.id AND b.user_id = ${userId}` : ''}
-      WHERE n.id = ? AND n.is_published = true
+      WHERE n.id = ? AND ${sqlNewsPubliclyVisible('n')}
       LIMIT 1
     `, [newsId]);
 
@@ -3205,7 +3276,7 @@ app.get('/news/:id', async (req, res) => {
       `SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt, n.image_url,
               COALESCE(n.published_at, n.created_at) as published_at
        FROM news n
-       WHERE n.id = ? AND n.is_published = true
+       WHERE n.id = ? AND ${sqlNewsPubliclyVisible('n')}
        LIMIT 1`,
       [id]
     );
@@ -3424,11 +3495,16 @@ app.post('/api/news', authenticateToken, async (req, res) => {
     }
 
     const newArticle = fetchResult.rows[0];
-    
-    // Send push notification if published and has organization
-    if (isPublished && organization_id) {
+    const scheduledForLater = isPublished && isNewsPublishAtInFuture(newArticle.published_at);
+
+    // Push alleen als het artikel nú zichtbaar is (niet bij toekomstige publicatiedatum)
+    if (isPublished && organization_id && !scheduledForLater) {
       await awaitPushSafe('news create', () =>
         notifyFollowersOfNewsArticle(organization_id, newArticle.id, title),
+      );
+    } else if (scheduledForLater) {
+      console.log(
+        `[news] push uitgesteld (gepland) newsId=${newArticle.id} at=${newArticle.published_at}`
       );
     }
 
@@ -3438,15 +3514,18 @@ app.post('/api/news', authenticateToken, async (req, res) => {
     invalidateCache('/api/admin/news');
     invalidateCache('/api/admin/dashboard');
 
-    const message = isPublished 
-      ? 'News article published successfully' 
-      : 'News article created and submitted for moderation';
+    const message = scheduledForLater
+      ? 'News article scheduled successfully'
+      : isPublished
+        ? 'News article published successfully'
+        : 'News article created and submitted for moderation';
 
     res.status(201).json({
       message: message,
       articleId: newArticle.id,
       article: newArticle,
       isPublished: isPublished,
+      scheduled: scheduledForLater,
       requiresModeration: !isPublished
     });
 
@@ -5054,15 +5133,24 @@ app.put('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res)
     const updatedArticle = result.rows[0];
     const orgIdForPush = updatedArticle.organization_id ?? organization_id;
     const nowPublished = !!updatedArticle.is_published;
-    if (nowPublished && orgIdForPush && !wasPublished) {
+    const scheduledForLater =
+      nowPublished && isNewsPublishAtInFuture(updatedArticle.published_at);
+    if (nowPublished && orgIdForPush && !wasPublished && !scheduledForLater) {
       await awaitPushSafe('news update→publish', () =>
         notifyFollowersOfNewsArticle(orgIdForPush, updatedArticle.id, updatedArticle.title),
+      );
+    } else if (scheduledForLater && !wasPublished) {
+      console.log(
+        `[news] push uitgesteld (gepland) newsId=${updatedArticle.id} at=${updatedArticle.published_at}`
       );
     }
 
     res.json({
-      message: 'Article updated successfully',
-      article: updatedArticle
+      message: scheduledForLater
+        ? 'Article scheduled successfully'
+        : 'Article updated successfully',
+      article: updatedArticle,
+      scheduled: scheduledForLater,
     });
 
   } catch (error) {
@@ -5107,7 +5195,18 @@ app.post('/api/admin/news/:id/publish', authenticateToken, requireAdmin, async (
     if (!upd.rowCount) {
       return res.status(404).json({ error: 'Artikel niet gevonden' });
     }
-    if (!wasPublished && prevArticle.organization_id) {
+    let publishedAt = null;
+    try {
+      const after = await executeQuery(
+        'SELECT COALESCE(published_at, created_at) as published_at FROM news WHERE id = ? LIMIT 1',
+        [id],
+      );
+      publishedAt = after.rows?.[0]?.published_at || null;
+    } catch {
+      /* ignore */
+    }
+    const scheduledForLater = isNewsPublishAtInFuture(publishedAt);
+    if (!wasPublished && prevArticle.organization_id && !scheduledForLater) {
       await awaitPushSafe('news publish', () =>
         notifyFollowersOfNewsArticle(
           prevArticle.organization_id,
@@ -5115,6 +5214,8 @@ app.post('/api/admin/news/:id/publish', authenticateToken, requireAdmin, async (
           prevArticle.title,
         ),
       );
+    } else if (scheduledForLater) {
+      console.log(`[news] push uitgesteld (gepland) newsId=${id} at=${publishedAt}`);
     }
     invalidateCache('/api/news');
     invalidateCache(`/api/news/${id}`);
@@ -5123,7 +5224,10 @@ app.post('/api/admin/news/:id/publish', authenticateToken, requireAdmin, async (
     invalidateCache('/api/admin/moderation/count');
     invalidateCache('/api/admin/dashboard');
     invalidateCache('/api/admin/pending');
-    res.json({ message: 'Nieuws gepubliceerd' });
+    res.json({
+      message: scheduledForLater ? 'Nieuws ingepland' : 'Nieuws gepubliceerd',
+      scheduled: scheduledForLater,
+    });
   } catch (error) {
     console.error('Publish news error:', error);
     res.status(500).json({ error: 'Publiceren mislukt', message: error.message });
@@ -8044,17 +8148,21 @@ app.post('/api/org/news', authenticateToken, requireOrgPortal, async (req, res) 
       id = fallback.rows?.[0]?.id;
       if (id) console.warn('[POST /api/org/news] insertId ontbrak; fallback id=', id);
     }
-    if (isPublished && orgId && id) {
-      await awaitPushSafe('org news create', () =>
-        notifyFollowersOfNewsArticle(orgId, id, title || ''),
-      );
-    }
     invalidatePublicNewsCaches(id);
     const row = await executeQuery('SELECT id, title, excerpt, is_published, COALESCE(published_at, created_at) as published_at, organization_id, created_at FROM news WHERE id = ?', [id]);
     if (!row.rows?.length) {
       return res.status(500).json({ error: 'Artikel aangemaakt maar kon id niet ophalen' });
     }
-    res.status(201).json({ article: row.rows[0] });
+    const created = row.rows[0];
+    const scheduledForLater = isPublished && isNewsPublishAtInFuture(created.published_at);
+    if (isPublished && orgId && id && !scheduledForLater) {
+      await awaitPushSafe('org news create', () =>
+        notifyFollowersOfNewsArticle(orgId, id, title || ''),
+      );
+    } else if (scheduledForLater) {
+      console.log(`[news] push uitgesteld (gepland) newsId=${id} at=${created.published_at}`);
+    }
+    res.status(201).json({ article: created, scheduled: scheduledForLater });
   } catch (error) {
     console.error('POST /api/org/news error:', error);
     res.status(500).json({ error: 'Failed to create article', message: error.message });
@@ -8103,13 +8211,18 @@ app.put('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req, re
       cleanupHostedPdfIfUnreferenced(oldPdfUrl).catch(() => {});
     }
     const row = await executeQuery('SELECT id, title, excerpt, is_published, COALESCE(published_at, created_at) as published_at, updated_at FROM news WHERE id = ?', [id]);
-    if (!wasPublished && nowPublished && orgId) {
+    const updated = row.rows[0];
+    const scheduledForLater =
+      nowPublished && isNewsPublishAtInFuture(updated?.published_at);
+    if (!wasPublished && nowPublished && orgId && !scheduledForLater) {
       await awaitPushSafe('org news update→publish', () =>
-        notifyFollowersOfNewsArticle(orgId, id, title ?? row.rows[0]?.title ?? ''),
+        notifyFollowersOfNewsArticle(orgId, id, title ?? updated?.title ?? ''),
       );
+    } else if (scheduledForLater && !wasPublished) {
+      console.log(`[news] push uitgesteld (gepland) newsId=${id} at=${updated?.published_at}`);
     }
     invalidatePublicNewsCaches(id);
-    res.json({ article: row.rows[0] });
+    res.json({ article: updated, scheduled: scheduledForLater });
   } catch (error) {
     console.error('PUT /api/org/news/:id error:', error);
     res.status(500).json({ error: 'Failed to update article', message: error.message });
@@ -10275,6 +10388,14 @@ async function notifyFollowersOfNewsArticle(organizationId, newsId, title) {
   };
   if (imageUrl) payload.imageUrl = imageUrl;
   await sendNotificationToFollowers(organizationId, payload, 'news');
+  try {
+    await executeQuery(
+      'UPDATE news SET followers_notified_at = NOW() WHERE id = ?',
+      [newsId]
+    );
+  } catch (e) {
+    console.warn('[news] followers_notified_at update:', e.message);
+  }
   console.log(`📢 Queued push notification for news article ${newsId}`);
 }
 

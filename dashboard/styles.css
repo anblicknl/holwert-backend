@@ -1117,6 +1117,11 @@ body {
     color: #ccc;
 }
 
+.list-card-status.status-scheduled {
+    color: #b45309;
+    background: #fff7ed;
+}
+
 .list-card-status.status-published {
     color: #2f9e44;
     font-weight: 500;

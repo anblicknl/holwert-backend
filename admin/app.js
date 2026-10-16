@@ -1269,6 +1269,18 @@ class HolwertAdmin {
             .replace(/"/g, '&quot;');
     }
 
+    newsPublishStatus(article) {
+        if (!article?.is_published) {
+            return { label: 'Concept', className: 'status-draft' };
+        }
+        const at = article.published_at || article.created_at;
+        const t = at ? new Date(at).getTime() : NaN;
+        if (Number.isFinite(t) && t > Date.now() + 45 * 1000) {
+            return { label: 'Gepland', className: 'status-scheduled' };
+        }
+        return { label: 'Gepubliceerd', className: 'status-published' };
+    }
+
     async loadNotificationCounts() {
         try {
             // Eén endpoint: bevat orgs + events (geen aparte organizations?status=pending-call)
@@ -3823,8 +3835,8 @@ class HolwertAdmin {
                                     ` : '<span class="text-muted">Geen organisatie</span>'}
                                 </td>
                                 <td>
-                                    <span class="status-badge published">
-                                        Gepubliceerd
+                                    <span class="status-badge ${this.newsPublishStatus(article).className.replace('status-', '')}">
+                                        ${this.newsPublishStatus(article).label}
                                     </span>
                                 </td>
                                 <td>
@@ -3863,7 +3875,7 @@ class HolwertAdmin {
                             <span class="list-card-meta-sep" aria-hidden="true">·</span>
                             <span>${this.escHtml(org)}</span>
                             <span class="list-card-meta-sep" aria-hidden="true">·</span>
-                            <span class="list-card-status status-published">Gepubliceerd</span>
+                            <span class="list-card-status ${this.newsPublishStatus(article).className}">${this.newsPublishStatus(article).label}</span>
                         </div>
                         <div class="list-card-actions action-buttons">
                             <button class="btn btn-icon btn-view" data-action="view" data-id="${article.id}" title="Bekijken"><i class="fas fa-eye"></i></button>
@@ -4134,12 +4146,13 @@ class HolwertAdmin {
                                     <label for="newsPubDate">Publicatiedatum *</label>
                                     <input type="date" id="newsPubDate" name="published_date" 
                                         value="${pubDate}" required>
-                                    <small class="form-hint">Datum waarop dit artikel wordt/werd gepubliceerd</small>
+                                    <small class="form-hint">Toekomstige datum + publiceren = gepland tot die dag/tijd</small>
                                 </div>
                                 <div class="form-group">
                                     <label for="newsPubTime">Publicatietijd</label>
                                     <input type="time" id="newsPubTime" name="published_time" 
                                         value="${pubTime}">
+                                    <small class="form-hint">Leeg = 00:00 die dag</small>
                                 </div>
                             </div>
                             
@@ -4209,9 +4222,9 @@ class HolwertAdmin {
                                 hint: 'Inwoners met een account kunnen in de app reageren. De reactie gaat naar de gekozen organisatie, niet naar dit paneel.',
                             })}
 
-                            ${this.checkboxFieldHtml('newsPublished', 'Direct publiceren (toon in app)', {
+                            ${this.checkboxFieldHtml('newsPublished', 'Publiceren / inplannen (toon in app)', {
                                 checked: article?.is_published !== false,
-                                hint: 'Uitvinken om als concept op te slaan',
+                                hint: 'Aan + toekomstige publicatiedatum = automatisch live vanaf dat moment. Uit = concept.',
                             })}
 
                             ${this.checkboxFieldHtml('newsShareFacebook', 'Na opslaan delen op Facebook', {

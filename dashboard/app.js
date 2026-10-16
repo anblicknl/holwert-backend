@@ -1335,7 +1335,7 @@
                     list.map(n => `<tr>
                         <td>${escapeHtml(n.title || '')}</td>
                         <td>${escapeHtml(newsCategoryLabel(n.category, n.custom_category))}</td>
-                        <td>${n.is_published ? 'Gepubliceerd' : 'Concept'}</td>
+                        <td><span class="list-card-status ${newsPublishStatus(n).className}">${newsPublishStatus(n).label}</span></td>
                         <td>${n.published_at ? new Date(n.published_at).toLocaleDateString('nl-NL') : '-'}</td>
                         <td class="cell-actions">
                             <div class="action-buttons">
@@ -1352,8 +1352,7 @@
                         const dateStr = n.published_at
                             ? new Date(n.published_at).toLocaleDateString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' })
                             : 'Geen datum';
-                        const statusClass = n.is_published ? 'status-published' : 'status-draft';
-                        const statusLabel = n.is_published ? 'Gepubliceerd' : 'Concept';
+                        const st = newsPublishStatus(n);
                         const category = escapeHtml(newsCategoryLabel(n.category, n.custom_category));
                         return `<div class="list-card">
                             <div class="list-card-title">${escapeHtml(n.title || '')}</div>
@@ -1362,7 +1361,7 @@
                                 <span class="list-card-meta-sep" aria-hidden="true">·</span>
                                 <span>${category}</span>
                                 <span class="list-card-meta-sep" aria-hidden="true">·</span>
-                                <span class="list-card-status ${statusClass}">${statusLabel}</span>
+                                <span class="list-card-status ${st.className}">${st.label}</span>
                             </div>
                             <div class="list-card-actions">
                                 <button type="button" class="btn-icon btn-view" data-preview-news="${n.id}" title="Preview" aria-label="Preview"><i class="fas fa-eye"></i></button>
@@ -1423,7 +1422,7 @@
                 const when = article?.published_at
                     ? new Date(article.published_at).toLocaleString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
                     : 'Geen datum';
-                const status = article?.is_published ? 'Gepubliceerd' : 'Concept';
+                const status = newsPublishStatus(article).label;
                 const reactions = article?.reactions_open ? 'Reageren staat open' : 'Reageren staat dicht';
                 const source = article?.source_name
                     ? `<p class="news-preview-meta">Bron: ${article.source_url ? `<a href="${escapeHtml(article.source_url)}" target="_blank" rel="noopener">${escapeHtml(article.source_name)}</a>` : escapeHtml(article.source_name)}</p>`
@@ -1529,7 +1528,7 @@
                         <div class="form-group">
                             <label>Publicatiedatum</label>
                             <input type="datetime-local" id="newsPublishedAt" value="${publishedAtValue}" ${ro}>
-                            <p class="form-hint">Leeg laten = huidige datum bij opslaan.</p>
+                            <p class="form-hint">Leeg laten = nu. Toekomstige datum + “Gepubliceerd” = automatisch live vanaf dat moment (push ook pas dan).</p>
                         </div>
                         <div class="form-group">
                             <label>Afbeelding</label>
@@ -1561,7 +1560,11 @@
                             disabled: isPreview,
                             hint: 'Inwoners met een account kunnen in de app een reactie sturen, eventueel met een foto. Anderen zien die reacties niet.',
                         })}
-                        ${checkboxFieldHtml('newsPublished', 'Gepubliceerd', { checked: !!article?.is_published, disabled: isPreview })}
+                        ${checkboxFieldHtml('newsPublished', 'Gepubliceerd (of inplannen met datum hierboven)', {
+                            checked: !!article?.is_published,
+                            disabled: isPreview,
+                            hint: 'Met een toekomstige publicatiedatum blijft het bericht verborgen tot die tijd.',
+                        })}
                         ${!isPreview ? checkboxFieldHtml('newsShareFacebook', 'Na opslaan delen op Facebook', {
                             hint: 'Opent Facebook met linkpreview van dit bericht. Titel en begin van de inhoud staan op je klembord om te plakken.',
                         }) : ''}
@@ -1744,6 +1747,19 @@
     function toDatetimeInputValue(val) {
         if (!val) return '';
         return String(val).replace(' ', 'T').replace(/Z$/, '').replace(/\+\d{2}:\d{2}$/, '').slice(0, 16);
+    }
+
+    /** Concept / Gepland / Gepubliceerd op basis van is_published + published_at. */
+    function newsPublishStatus(article) {
+        if (!article?.is_published) {
+            return { label: 'Concept', className: 'status-draft' };
+        }
+        const at = article.published_at || article.created_at;
+        const t = at ? new Date(at).getTime() : NaN;
+        if (Number.isFinite(t) && t > Date.now() + 45 * 1000) {
+            return { label: 'Gepland', className: 'status-scheduled' };
+        }
+        return { label: 'Gepubliceerd', className: 'status-published' };
     }
 
     /**
