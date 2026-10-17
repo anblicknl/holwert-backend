@@ -832,12 +832,21 @@ async function flushDueScheduledNewsPushes() {
     `);
     const rows = due.rows || [];
     if (!rows.length) return;
+    let anySent = false;
     for (const row of rows) {
-      await notifyFollowersOfNewsArticle(row.organization_id, row.id, row.title);
+      // notifyFollowersOfNewsArticle claimt atomisch → concurrent flushes sturen geen dubbele push
+      const sent = await notifyFollowersOfNewsArticle(
+        row.organization_id,
+        row.id,
+        row.title
+      );
+      if (sent) anySent = true;
     }
-    invalidateCache('/api/news');
-    invalidateCache('/api/app/bootstrap');
-    invalidateCache('/api/featured');
+    if (anySent) {
+      invalidateCache('/api/news');
+      invalidateCache('/api/app/bootstrap');
+      invalidateCache('/api/featured');
+    }
   } catch (e) {
     console.warn('[news] scheduled push flush:', e && e.message ? e.message : e);
   }
@@ -5074,6 +5083,10 @@ app.put('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res)
     if (is_published !== undefined) {
       updateFields.push(`is_published = ?`);
       values.push(is_published);
+      // Bij depubliceren: push-claim resetten zodat een latere herpublicatie wél mag pushen
+      if (is_published === false) {
+        updateFields.push('followers_notified_at = NULL');
+      }
     }
     
     // Handle published_at: gebruik waarde uit request, of zet automatisch bij publicatie
@@ -8204,8 +8217,10 @@ app.put('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req, re
     if (pubAt) updateParams.push(pubAt);
     updateParams.push(id);
 
+    const unpublishReset =
+      wasPublished && !nowPublished ? ', followers_notified_at = NULL' : '';
     await executeQuery(
-      `UPDATE news SET title = ?, content = ?, excerpt = ?, category = ?, custom_category = ?, image_url = ?, youtube_url = ?, source_name = ?, source_url = ?, pdf_url = ?, is_published = ?, reactions_open = ?, ${publishedAtClause}, updated_at = NOW() WHERE id = ?`,
+      `UPDATE news SET title = ?, content = ?, excerpt = ?, category = ?, custom_category = ?, image_url = ?, youtube_url = ?, source_name = ?, source_url = ?, pdf_url = ?, is_published = ?, reactions_open = ?, ${publishedAtClause}, updated_at = NOW()${unpublishReset} WHERE id = ?`,
       updateParams
     );
     const newPdfUrl = pdf_url ?? null;
@@ -10451,14 +10466,42 @@ async function sendPushNotification(pushTokens, notification) {
 
 /**
  * Stuur push naar volgers wanneer een nieuwsartikel (nieuw) gepubliceerd is.
+ * Dedup: claimt atomisch followers_notified_at zodat parallelle requests
+ * (app-opens / meerdere opslagen) geen dubbele push sturen.
+ * @returns {Promise<boolean>} true als er daadwerkelijk een push is gezet
  */
 async function notifyFollowersOfNewsArticle(organizationId, newsId, title) {
-  if (!organizationId || !newsId || !title) return;
+  if (!organizationId || !newsId || !title) return false;
+
+  try {
+    await ensureNewsColumns();
+    const claim = await executeQuery(
+      'UPDATE news SET followers_notified_at = NOW() WHERE id = ? AND followers_notified_at IS NULL',
+      [newsId]
+    );
+    if (!claim.rowCount) {
+      console.log(`[news] push overgeslagen (al genotificeerd) newsId=${newsId}`);
+      return false;
+    }
+  } catch (e) {
+    console.warn('[news] push-claim mislukt, stuur toch (legacy):', e.message);
+  }
+
   const [orgResult, newsResult] = await Promise.all([
     executeQuery('SELECT name, logo_url FROM organizations WHERE id = ?', [organizationId]),
     executeQuery('SELECT image_url FROM news WHERE id = ? LIMIT 1', [newsId]),
   ]);
-  if (!orgResult.rows.length) return;
+  if (!orgResult.rows.length) {
+    try {
+      await executeQuery(
+        'UPDATE news SET followers_notified_at = NULL WHERE id = ?',
+        [newsId]
+      );
+    } catch {
+      /* ignore */
+    }
+    return false;
+  }
   const orgName = orgResult.rows[0].name;
   const imageUrl = pushRichImageUrl(
     newsResult.rows?.[0]?.image_url,
@@ -10474,16 +10517,21 @@ async function notifyFollowersOfNewsArticle(organizationId, newsId, title) {
     },
   };
   if (imageUrl) payload.imageUrl = imageUrl;
-  await sendNotificationToFollowers(organizationId, payload, 'news');
   try {
-    await executeQuery(
-      'UPDATE news SET followers_notified_at = NOW() WHERE id = ?',
-      [newsId]
-    );
+    await sendNotificationToFollowers(organizationId, payload, 'news');
   } catch (e) {
-    console.warn('[news] followers_notified_at update:', e.message);
+    try {
+      await executeQuery(
+        'UPDATE news SET followers_notified_at = NULL WHERE id = ?',
+        [newsId]
+      );
+    } catch {
+      /* ignore */
+    }
+    throw e;
   }
   console.log(`📢 Queued push notification for news article ${newsId}`);
+  return true;
 }
 
 /**
