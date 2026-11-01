@@ -80,10 +80,11 @@
                     <i class="fas fa-unlock-alt hide" style="font-size:48px; color:#333;"></i>
                 </div>
                 <h1 class="login-title">Nieuw wachtwoord</h1>
-                <p class="login-lead">Kies een nieuw wachtwoord voor je organisatie-dashboard (minimaal 6 tekens).</p>
+                <p class="login-lead" id="resetPasswordLead">Kies een nieuw wachtwoord voor je organisatie-dashboard (minimaal 6 tekens).</p>
             </div>
             <form id="resetPasswordForm" class="login-form">
                 <input type="hidden" id="resetPwToken" value="">
+                <input type="hidden" id="resetPwOrgId" value="">
                 <div class="form-group">
                     <label for="resetPw1">Nieuw wachtwoord</label>
                     <input type="password" id="resetPw1" autocomplete="new-password" required minlength="6" placeholder="••••••••">
@@ -431,6 +432,6 @@
         if (window.location.hash === '#voorwaarden') openOrgTerms();
     })();
     </script>
-    <script src="app.js?v=20261104-imgcompress"></script>
+    <script src="app.js?v=20261106-reset-org"></script>
 </body>
 </html>

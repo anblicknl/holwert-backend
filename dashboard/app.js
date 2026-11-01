@@ -278,7 +278,30 @@
         localStorage.removeItem(TOKEN_KEY_LEGACY);
     }
 
-    let token = getStoredToken();
+    function getPasswordResetTokenFromUrl() {
+        try {
+            const rt = (new URLSearchParams(window.location.search).get('reset') || '').trim();
+            if (rt && /^[a-f0-9]{64}$/i.test(rt)) return rt;
+        } catch (_) { /* ignore */ }
+        return '';
+    }
+
+    function getOrgHintFromUrl() {
+        try {
+            return (new URLSearchParams(window.location.search).get('org') || '').trim();
+        } catch (_) {
+            return '';
+        }
+    }
+
+    /** Bij ?reset= nooit auto-login: oude JWT (andere vereniging) wissen/negeren. */
+    const passwordResetTokenFromUrl = getPasswordResetTokenFromUrl();
+    const passwordResetMode = Boolean(passwordResetTokenFromUrl);
+    if (passwordResetMode) {
+        clearStoredToken();
+    }
+
+    let token = passwordResetMode ? null : getStoredToken();
     let currentUser = null;
     let organization = null;
 
@@ -298,6 +321,11 @@
     const forgotPasswordMsg = document.getElementById('forgotPasswordMsg');
     const resetPasswordForm = document.getElementById('resetPasswordForm');
     const resetPasswordMsg = document.getElementById('resetPasswordMsg');
+
+    if (passwordResetMode) {
+        if (mainScreen) mainScreen.classList.remove('active');
+        if (loginScreen) loginScreen.classList.add('active');
+    }
 
     function showAuthPanel(which) {
         const map = {
@@ -345,6 +373,7 @@
         try {
             const u = new URL(window.location.href);
             u.searchParams.delete('reset');
+            u.searchParams.delete('org');
             const q = u.searchParams.toString();
             window.history.replaceState({}, '', u.pathname + (q ? `?${q}` : '') + u.hash);
         } catch (_) {
@@ -352,18 +381,46 @@
         }
     }
 
-    (async function initPasswordResetFromUrl() {
-        const p = new URLSearchParams(window.location.search);
-        const rt = (p.get('reset') || '').trim();
-        if (!rt || !/^[a-f0-9]{64}$/i.test(rt)) return;
+    function setResetPasswordOrgLabel(orgName, orgId) {
+        const lead = document.getElementById('resetPasswordLead');
+        if (!lead) return;
+        const name = (orgName || '').trim();
+        if (name) {
+            lead.textContent = `Nieuw wachtwoord voor ${name} (minimaal 6 tekens).`;
+        } else if (orgId) {
+            lead.textContent = 'Kies een nieuw wachtwoord voor je organisatie-dashboard (minimaal 6 tekens).';
+        } else {
+            lead.textContent = 'Kies een nieuw wachtwoord voor je organisatie-dashboard (minimaal 6 tekens).';
+        }
+    }
 
+    function forcePasswordResetUi() {
+        clearStoredToken();
+        token = null;
+        currentUser = null;
+        organization = null;
+        if (mainScreen) mainScreen.classList.remove('active');
+        if (loginScreen) loginScreen.classList.add('active');
         showAuthPanel('reset');
+    }
+
+    (async function initPasswordResetFromUrl() {
+        const rt = passwordResetTokenFromUrl || getPasswordResetTokenFromUrl();
+        if (!rt) return;
+
+        // Sessie/JWT van andere vereniging mag reset-UI nooit overschrijven.
+        forcePasswordResetUi();
+
+        const orgHint = getOrgHintFromUrl();
         const hid = document.getElementById('resetPwToken');
+        const orgHid = document.getElementById('resetPwOrgId');
         if (hid) hid.value = rt;
+        if (orgHid) orgHid.value = orgHint || '';
         const rp1 = document.getElementById('resetPw1');
         const rp2 = document.getElementById('resetPw2');
         if (rp1) rp1.value = '';
         if (rp2) rp2.value = '';
+        setResetPasswordOrgLabel('', orgHint);
 
         const btn = document.getElementById('resetPasswordSubmitBtn');
         if (btn) btn.disabled = true;
@@ -375,10 +432,12 @@
         }
 
         try {
+            const body = { token: rt };
+            if (orgHint) body.org = orgHint;
             const res = await fetch(`${apiBase}/auth/org-validate-reset-token`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ token: rt }),
+                body: JSON.stringify(body),
             });
             const data = await res.json().catch(() => ({}));
             if (!res.ok || data.valid !== true) {
@@ -387,6 +446,15 @@
                         'Deze resetlink is verlopen of al gebruikt. Vraag een nieuwe aan via «Wachtwoord vergeten».',
                 );
             }
+            // Nogmaals forceren: race met eventuele late session-restore.
+            forcePasswordResetUi();
+            if (hid) hid.value = rt;
+            const resolvedOrgId =
+                data.organizationId != null && data.organizationId !== ''
+                    ? String(data.organizationId)
+                    : orgHint || '';
+            if (orgHid) orgHid.value = resolvedOrgId;
+            setResetPasswordOrgLabel(data.organizationName || '', resolvedOrgId);
             if (resetPasswordMsg) {
                 resetPasswordMsg.textContent = '';
                 resetPasswordMsg.classList.remove('show', 'login-feedback--error');
@@ -394,7 +462,9 @@
             if (btn) btn.disabled = false;
         } catch (err) {
             if (hid) hid.value = '';
+            if (orgHid) orgHid.value = '';
             clearResetQueryFromUrl();
+            forcePasswordResetUi();
             if (resetPasswordMsg) {
                 resetPasswordMsg.textContent =
                     err.message ||
@@ -555,7 +625,14 @@
     resetPasswordForm?.addEventListener('submit', async (e) => {
         e.preventDefault();
         clearForgotResetMessages();
+        // Tijdens submit mag geen oude JWT terugkomen of mainScreen tonen.
+        forcePasswordResetUi();
         const t = (document.getElementById('resetPwToken')?.value || '').trim();
+        const orgId = (
+            document.getElementById('resetPwOrgId')?.value ||
+            getOrgHintFromUrl() ||
+            ''
+        ).trim();
         const p1 = document.getElementById('resetPw1')?.value || '';
         const p2 = document.getElementById('resetPw2')?.value || '';
         if (!/^[a-f0-9]{64}$/i.test(t)) {
@@ -590,17 +667,32 @@
         if (span) span.textContent = 'Opslaan…';
         if (btn) btn.disabled = true;
         try {
+            const payload = { token: t, password: p1 };
+            if (orgId) payload.org = orgId;
             const res = await fetch(`${apiBase}/auth/org-reset-password`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ token: t, password: p1 }),
+                body: JSON.stringify(payload),
             });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(data.error || data.message || 'Mislukt');
+            clearStoredToken();
+            token = null;
+            currentUser = null;
+            organization = null;
+            if (mainScreen) mainScreen.classList.remove('active');
+            if (loginScreen) loginScreen.classList.add('active');
             clearResetQueryFromUrl();
             showAuthPanel('login');
-            showError(data.message || 'Je wachtwoord is bijgewerkt. Je kunt nu inloggen.', false);
+            showError(data.message || 'Je wachtwoord is bijgewerkt. Log opnieuw in.', false);
         } catch (err) {
+            forcePasswordResetUi();
+            if (document.getElementById('resetPwToken')) {
+                document.getElementById('resetPwToken').value = t;
+            }
+            if (document.getElementById('resetPwOrgId') && orgId) {
+                document.getElementById('resetPwOrgId').value = orgId;
+            }
             if (resetPasswordMsg) {
                 resetPasswordMsg.textContent = err.message || 'Netwerkfout';
                 resetPasswordMsg.style.color = '';
@@ -2388,13 +2480,20 @@
         hideDashboardBanner();
     });
 
-    if (token) {
+    // Nooit session-restore tijdens wachtwoord-reset (?reset=) — anders wint last-org JWT.
+    if (token && !passwordResetMode) {
         fetch(`${apiBase}/org/me`, { headers: authHeaders() })
             .then(r => {
                 if (!r.ok) throw new Error();
                 return r.json();
             })
             .then(data => {
+                if (passwordResetMode || getPasswordResetTokenFromUrl()) {
+                    clearStoredToken();
+                    token = null;
+                    forcePasswordResetUi();
+                    return;
+                }
                 currentUser = data.user;
                 organization = data.organization;
                 loginScreen.classList.remove('active');
