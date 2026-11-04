@@ -2610,7 +2610,7 @@ class HolwertAdmin {
 
     updateMediaRecompressPanel(totals, statusText) {
         const panel = document.getElementById('mediaRecompressPanel');
-        if (panel) panel.hidden = false;
+        if (panel) panel.hidden = false; // zichtbaar houden na start
         const setText = (id, value) => {
             const el = document.getElementById(id);
             if (el) el.textContent = value;
@@ -2644,7 +2644,7 @@ class HolwertAdmin {
         const btn = document.getElementById('recompressMediaBtn');
         if (btn) {
             btn.disabled = true;
-            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Foto\'s verlichten…';
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Bezig…';
         }
 
         const totals = {
@@ -2660,7 +2660,7 @@ class HolwertAdmin {
         const maxRounds = 40;
 
         try {
-            this.updateMediaRecompressPanel(totals, 'Bezig…');
+            this.updateMediaRecompressPanel(totals, 'Bezig met nieuws én agenda…');
             for (let i = 0; i < maxRounds; i++) {
                 const response = await fetch(`${this.apiBaseUrl}/admin/media/recompress`, {
                     method: 'POST',
@@ -2734,7 +2734,7 @@ class HolwertAdmin {
             this._mediaRecompressRunning = false;
             if (btn) {
                 btn.disabled = false;
-                btn.innerHTML = '<i class="fas fa-compress"></i> Foto\'s verlichten';
+                btn.innerHTML = '<i class="fas fa-play"></i> Start verlichten';
             }
         }
     }

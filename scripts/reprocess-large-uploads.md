@@ -5,7 +5,7 @@ Dit document is voor **bestaande** monster-grote bestanden op `holwert.appenvloe
 
 ## Voorkeursroute (admin)
 
-In `/admin` → **Nieuws** → knop **Foto's verlichten**:
+In `/admin` → menu **Foto's verlichten** → knop **Start verlichten**:
 
 - Roept `POST /api/admin/media/recompress` aan (batches).
 - Comprimeert CDN-foto’s van nieuws + agenda (max 1600px, q≈72).

@@ -112,6 +112,10 @@
                     <i class="fas fa-tools"></i>
                     <span>Praktisch</span>
                 </li>
+                <li class="nav-item" data-section="media-optimize">
+                    <i class="fas fa-compress"></i>
+                    <span>Foto's verlichten</span>
+                </li>
                 <li class="nav-item" data-section="content-pages">
                     <i class="fas fa-file-alt"></i>
                     <span>Content</span>
@@ -283,22 +287,21 @@
                 </div>
             </section>
 
-            <!-- News Section -->
-            <section id="news" class="content-section">
+            <!-- Media optimize (nieuws + agenda) -->
+            <section id="media-optimize" class="content-section">
                 <div class="section-header">
-                    <h2><i class="fas fa-newspaper"></i> Nieuws</h2>
-                    <div class="organizations-header-actions" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-                        <button type="button" id="recompressMediaBtn" class="btn btn-secondary" title="Verklein bestaande nieuws- en agenda-foto's op de server (scherpte blijft behouden)">
-                            <i class="fas fa-compress"></i> Foto's verlichten
-                        </button>
-                        <button id="addNewsBtn" class="btn btn-primary">
-                            <i class="fas fa-plus"></i> Nieuw Artikel
-                        </button>
-                    </div>
+                    <h2><i class="fas fa-compress"></i> Foto's verlichten</h2>
+                    <button type="button" id="recompressMediaBtn" class="btn btn-primary" title="Verklein bestaande foto's op de server (scherpte blijft behouden)">
+                        <i class="fas fa-play"></i> Start verlichten
+                    </button>
                 </div>
-                <div id="mediaRecompressPanel" class="media-recompress-panel" hidden>
+                <p class="section-description">
+                    Verkleint bestaande foto’s van <strong>nieuws</strong> én <strong>agenda</strong> op de server.
+                    Nieuwe uploads worden al automatisch gecomprimeerd. Logo’s van organisaties staan apart onder Organisaties → Logo’s verlichten.
+                </p>
+                <div id="mediaRecompressPanel" class="media-recompress-panel">
                     <div class="media-recompress-panel__head">
-                        <strong><i class="fas fa-chart-bar"></i> Compressiewinst</strong>
+                        <strong><i class="fas fa-chart-bar"></i> Compressiewinst (nieuws + agenda)</strong>
                         <span id="mediaRecompressStatus" class="media-recompress-status">Nog niet gestart</span>
                     </div>
                     <div class="media-recompress-stats">
@@ -336,8 +339,18 @@
                         </div>
                     </div>
                     <p class="media-recompress-hint" id="mediaRecompressHint">
-                        Vergelijkt alleen foto’s die écht verkleind zijn. Overgeslagen items waren al licht genoeg.
+                        Alleen foto’s met echte winst tellen mee in de grafiek. Overgeslagen items waren al licht genoeg.
                     </p>
+                </div>
+            </section>
+
+            <!-- News Section -->
+            <section id="news" class="content-section">
+                <div class="section-header">
+                    <h2><i class="fas fa-newspaper"></i> Nieuws</h2>
+                    <button id="addNewsBtn" class="btn btn-primary">
+                        <i class="fas fa-plus"></i> Nieuw Artikel
+                    </button>
                 </div>
                 <div id="newsList">
                     <!-- News content will be loaded here by JavaScript -->
