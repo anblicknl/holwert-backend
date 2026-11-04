@@ -1243,6 +1243,55 @@ class HolwertAdmin {
         }
     }
 
+    formatFallbackRelative(iso) {
+        if (!iso) return null;
+        const t = new Date(iso).getTime();
+        if (!Number.isFinite(t)) return null;
+        const sec = Math.round((Date.now() - t) / 1000);
+        if (sec < 0) return 'zojuist';
+        if (sec < 60) return `${sec} seconden geleden`;
+        const min = Math.round(sec / 60);
+        if (min < 60) return `${min} minuut${min === 1 ? '' : 'en'} geleden`;
+        const hr = Math.round(min / 60);
+        if (hr < 48) return `${hr} uur geleden`;
+        const days = Math.round(hr / 24);
+        return `${days} dag${days === 1 ? '' : 'en'} geleden`;
+    }
+
+    fallbackReasonLabel(reason) {
+        const map = {
+            live_unavailable: 'Hoofddatabase was tijdelijk niet bereikbaar',
+            live_unavailable_no_snapshot: 'Database niet bereikbaar — voor dit onderdeel was geen backup klaar',
+            no_snapshot: 'Geen backup beschikbaar voor dit onderdeel',
+            forced: 'Handmatige testmodus (FORCE_PUBLIC_FALLBACK)',
+            forced_no_snapshot: 'Testmodus zonder beschikbare backup',
+        };
+        return map[reason] || (reason ? String(reason) : 'Onbekende reden');
+    }
+
+    fallbackKeyLabel(key) {
+        const map = {
+            bootstrap: 'App-start',
+            'news-list': 'Nieuwslijst',
+            'news-list-minimal': 'Nieuwslijst (licht)',
+            'news-list-filtered': 'Nieuws (gefilterd)',
+            'news-head': 'Nieuws (eerste berichten)',
+            'events-list': 'Agenda',
+            'events-list-filtered': 'Agenda (gefilterd)',
+            'organizations-list': 'Organisaties',
+            'organizations-list-minimal': 'Organisaties (licht)',
+            'organizations-list-filtered': 'Organisaties (gefilterd)',
+            'practical-info': 'Praktisch',
+            afvalkalender: 'Afvalkalender',
+            dorpsomroeper: 'Dorpsomroeper',
+        };
+        if (map[key]) return map[key];
+        if (String(key || '').startsWith('news/')) return `Nieuwsbericht #${String(key).slice(5)}`;
+        if (String(key || '').startsWith('events/')) return `Evenement #${String(key).slice(7)}`;
+        if (String(key || '').startsWith('organizations/')) return `Organisatie #${String(key).slice(14)}`;
+        return key || 'Onbekend onderdeel';
+    }
+
     async loadFallbackStatus() {
         const body = document.getElementById('fallbackStatusBody');
         if (!body) return;
@@ -1256,47 +1305,100 @@ class HolwertAdmin {
             }
             const data = await response.json();
             const u = data.usage || {};
+            const configured = data.storeConfigured !== false;
             const active = u.activeNow === true;
             const lastHit = u.lastHitAt;
-            const snaps = Array.isArray(data.snapshots) ? data.snapshots.length : 0;
-            const recent = Array.isArray(u.recent) ? u.recent.slice(0, 5) : [];
+            const relative = this.formatFallbackRelative(lastHit);
+            const snaps = Array.isArray(data.snapshots) ? data.snapshots : [];
+            const recent = Array.isArray(u.recent) ? u.recent.slice(0, 6) : [];
+            const retention = data.retentionDays || 21;
+
+            let oldestSnap = null;
+            let newestSnap = null;
+            for (const s of snaps) {
+                if (!s?.lastUpdated) continue;
+                const t = new Date(s.lastUpdated).getTime();
+                if (!Number.isFinite(t)) continue;
+                if (!oldestSnap || t < oldestSnap.t) oldestSnap = { t, age: s.age, key: s.key };
+                if (!newestSnap || t > newestSnap.t) newestSnap = { t, age: s.age, key: s.key };
+            }
 
             let stateClass = 'fallback-ok';
-            let stateLabel = 'Geen recente fallback';
-            if (active) {
+            let badge = 'Stabiel';
+            let title = 'Noodbackup niet nodig';
+            let whenHtml = 'Er is recent geen beroep gedaan op de noodbackup.';
+            if (!configured) {
+                stateClass = 'fallback-off';
+                badge = 'Niet geconfigureerd';
+                title = 'Fallback-store staat niet aan';
+                whenHtml = 'Controleer FALLBACK_STORE_URL / FALLBACK_STORE_SECRET in Vercel.';
+            } else if (active) {
                 stateClass = 'fallback-active';
-                stateLabel = 'Nu actief (laatste 15 min)';
+                badge = 'Nu actief';
+                title = 'Noodbackup wordt nu gebruikt';
+                whenHtml = relative
+                    ? `Laatste beroep: <strong>${this.formatFallbackTime(lastHit)}</strong> <span class="muted">(${relative})</span>`
+                    : 'Actief in de laatste 15 minuten.';
             } else if (lastHit) {
                 stateClass = 'fallback-recent';
-                stateLabel = `Laatst gebruikt ${u.lastHitAge || ''}`;
+                badge = 'Eerder gebruikt';
+                title = 'Noodbackup is eerder aangesproken';
+                whenHtml = `Laatste beroep: <strong>${this.formatFallbackTime(lastHit)}</strong>${relative ? ` <span class="muted">(${relative})</span>` : ''}`;
             }
+
+            const whyHtml = lastHit
+                ? `<p class="fallback-hero__why"><strong>Waarom:</strong> ${this.escapeHtml(this.fallbackReasonLabel(u.lastHitReason))}
+                   ${u.lastHitKey ? ` · <strong>Onderdeel:</strong> ${this.escapeHtml(this.fallbackKeyLabel(u.lastHitKey))}` : ''}</p>`
+                : '';
 
             const recentHtml = recent.length
                 ? `<ul class="fallback-recent-list">${recent
-                      .map(
-                          (e) =>
-                              `<li><span class="fallback-recent-at">${this.formatFallbackTime(e.at)}</span> · <code>${this.escapeHtml(e.key || '')}</code> · ${this.escapeHtml(e.reason || '')}</li>`
-                      )
+                      .map((e) => {
+                          const rel = this.formatFallbackRelative(e.at);
+                          return `<li>
+                            <span class="fallback-recent-at">${this.formatFallbackTime(e.at)}${rel ? `<br><span class="muted" style="font-weight:500">${this.escapeHtml(rel)}</span>` : ''}</span>
+                            <span class="fallback-recent-main">
+                              <span class="fallback-recent-key">${this.escapeHtml(this.fallbackKeyLabel(e.key))}</span>
+                              <span class="fallback-recent-reason">${this.escapeHtml(this.fallbackReasonLabel(e.reason))}</span>
+                            </span>
+                          </li>`;
+                      })
                       .join('')}</ul>`
-                : `<p class="muted">Nog geen hits gelogd. Dit vult zich zodra VDX even niet bereikbaar is (of bij een test met FORCE_PUBLIC_FALLBACK).</p>`;
+                : `<p class="muted">Nog geen eerdere berichten. Dit vult zich zodra de hoofddatabase even niet bereikbaar is.</p>`;
 
             body.innerHTML = `
-                <div class="fallback-status-row ${stateClass}">
-                    <strong>${stateLabel}</strong>
-                    <span>Snapshots: ${snaps} · Hits totaal: ${u.hitsTotal || 0}</span>
+                <div class="fallback-hero ${stateClass}">
+                    <span class="fallback-hero__badge"><i class="fas fa-${active ? 'exclamation-triangle' : lastHit ? 'history' : 'check'}"></i> ${badge}</span>
+                    <p class="fallback-hero__title">${title}</p>
+                    <p class="fallback-hero__when">${whenHtml}</p>
+                    ${whyHtml}
                 </div>
-                <p class="fallback-status-meta">
-                    Laatste hit: <strong>${this.formatFallbackTime(lastHit)}</strong>
-                    ${u.lastHitKey ? ` · key <code>${this.escapeHtml(u.lastHitKey)}</code>` : ''}
-                    ${u.lastHitReason ? ` · ${this.escapeHtml(u.lastHitReason)}` : ''}
-                </p>
+                <div class="fallback-stat-grid">
+                    <div class="fallback-stat">
+                        <span class="fallback-stat__label">Backup-pakketten</span>
+                        <span class="fallback-stat__value">${snaps.length} klaar</span>
+                    </div>
+                    <div class="fallback-stat">
+                        <span class="fallback-stat__label">Keer gebruikt</span>
+                        <span class="fallback-stat__value">${u.hitsTotal || 0}×</span>
+                    </div>
+                    <div class="fallback-stat">
+                        <span class="fallback-stat__label">Bewaartermijn</span>
+                        <span class="fallback-stat__value">±${retention} dagen</span>
+                    </div>
+                    <div class="fallback-stat">
+                        <span class="fallback-stat__label">Backup bijgewerkt</span>
+                        <span class="fallback-stat__value">${newestSnap?.age || '—'}</span>
+                    </div>
+                </div>
                 <div class="fallback-recent">
-                    <h4>Recente hits</h4>
+                    <h4>Recente momenten</h4>
                     ${recentHtml}
                 </div>
                 <p class="fallback-status-link muted">
-                    Detail-JSON:
-                    <a href="${this.apiBaseUrl}/app/fallback-status" target="_blank" rel="noopener">/api/app/fallback-status</a>
+                    Technisch detail:
+                    <a href="${this.apiBaseUrl}/app/fallback-status" target="_blank" rel="noopener">status-JSON</a>
+                    ${data.forceFallback ? ' · <strong>testmodus aan</strong>' : ''}
                 </p>
             `;
         } catch (error) {
