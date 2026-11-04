@@ -4336,8 +4336,8 @@ class HolwertAdmin {
         return 'jpg';
     }
 
-    /** Foto voor nieuws/agenda: WebP als de browser het kan, anders JPEG. Logo's blijven JPEG. */
-    compressPhotoImage(file, { maxSize = 1200, quality = 0.72 } = {}) {
+    /** Foto voor nieuws/agenda: WebP als de browser het kan, anders JPEG. Max ~1600px langste zijde. */
+    compressPhotoImage(file, { maxSize = 1600, quality = 0.72 } = {}) {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = (e) => {
@@ -4395,8 +4395,8 @@ class HolwertAdmin {
                     let width = img.width;
                     let height = img.height;
                     
-                    // Reduceer max size naar 800px voor kleinere bestanden
-                    const maxSize = 800;
+                    // Zelfde limiet als compressPhotoImage / server (max ~1600px, q≈0.72)
+                    const maxSize = 1600;
                     if (width > height && width > maxSize) {
                         height = (height / width) * maxSize;
                         width = maxSize;
@@ -4410,8 +4410,7 @@ class HolwertAdmin {
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(img, 0, 0, width, height);
                     
-                    // Start met lagere quality (0.6 in plaats van 0.8)
-                    let quality = 0.6;
+                    let quality = 0.72;
                     let compressed = canvas.toDataURL('image/jpeg', quality);
                     
                     // Als nog te groot, comprimeer verder
@@ -4472,7 +4471,7 @@ class HolwertAdmin {
             
             if (uploadedFile) {
                 try {
-                    const compressed = await this.compressPhotoImage(uploadedFile, { maxSize: 800, quality: 0.72 });
+                    const compressed = await this.compressPhotoImage(uploadedFile, { maxSize: 1600, quality: 0.72 });
                     console.log('News image compressed (temp base64), length:', compressed.dataUrl.length, compressed.mime);
                     
                     if (compressed.dataUrl.length > 4 * 1024 * 1024) {
@@ -7467,7 +7466,7 @@ class HolwertAdmin {
     }
 
     async compressEventImage(file) {
-        const compressed = await this.compressPhotoImage(file, { maxSize: 1200, quality: 0.7 });
+        const compressed = await this.compressPhotoImage(file, { maxSize: 1600, quality: 0.72 });
         return compressed.dataUrl;
     }
 
@@ -8125,7 +8124,7 @@ class HolwertAdmin {
             
             if (uploadedFile) {
                 try {
-                    const compressed = await this.compressPhotoImage(uploadedFile, { maxSize: 1200, quality: 0.7 });
+                    const compressed = await this.compressPhotoImage(uploadedFile, { maxSize: 1600, quality: 0.72 });
                     console.log('Event image compressed (temp base64), length:', compressed.dataUrl.length, compressed.mime);
                     
                     if (compressed.dataUrl.length > 4 * 1024 * 1024) {
