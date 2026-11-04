@@ -5894,6 +5894,33 @@ app.post('/api/admin/cache/flush', authenticateToken, requireAdmin, async (req, 
   }
 });
 
+// Fallback-media op holwert.frl: scan of verwijder bestanden die niet meer in snapshots staan.
+app.post('/api/admin/fallback/prune-media', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const dryRun = req.body?.dryRun !== false && req.body?.delete !== true;
+    const result = await publicFallback.pruneUnreferencedFallbackMedia({ dryRun });
+    const mb = ((result.orphanBytes || 0) / (1024 * 1024)).toFixed(2);
+    res.json({
+      message: dryRun
+        ? (result.orphanCount
+          ? `${result.orphanCount} ongebruikte fallback-bestanden (±${mb} MB) — nog niet verwijderd`
+          : 'Geen ongebruikte fallback-media')
+        : `${(result.deleted || []).length} fallback-bestanden verwijderd`,
+      ...result,
+    });
+  } catch (error) {
+    console.error('[POST /api/admin/fallback/prune-media]', error);
+    res.status(error.code === 'NO_STORE_CONFIG' ? 503 : 500).json({
+      error: 'Fallback-media opruimen mislukt',
+      message: error.message,
+      hint:
+        error.code === 'STORE_ACTION_FAILED'
+          ? 'Upload de bijgewerkte store.php naar holwert.frl (list-store / delete-media).'
+          : undefined,
+    });
+  }
+});
+
 // Create organization (admin)
 app.post('/api/admin/organizations', authenticateToken, requireAdmin, async (req, res) => {
   try {

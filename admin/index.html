@@ -405,6 +405,27 @@
 
                     <article class="optimize-card">
                         <div class="optimize-card__head">
+                            <h3><i class="fas fa-cloud"></i> Fallback-media (holwert.frl)</h3>
+                            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                                <button type="button" id="scanFallbackMediaBtn" class="btn btn-secondary">
+                                    <i class="fas fa-search"></i> Scannen
+                                </button>
+                                <button type="button" id="pruneFallbackMediaBtn" class="btn btn-primary" disabled>
+                                    <i class="fas fa-trash"></i> Ongebruikte wissen
+                                </button>
+                            </div>
+                        </div>
+                        <p class="optimize-card__text">
+                            Afbeeldingen die bij een VDX-storing op holwert.frl worden gespiegeld.
+                            Wist alleen bestanden die in <strong>geen enkele</strong> huidige fallback-snapshot meer voorkomen
+                            (bijv. nieuws ouder dan ±21 dagen).
+                        </p>
+                        <p class="media-recompress-hint" id="fallbackMediaHint">Nog niet gescand. Vereist bijgewerkte <code>store.php</code> op holwert.frl.</p>
+                        <ul id="fallbackMediaList" class="optimize-result-list" hidden></ul>
+                    </article>
+
+                    <article class="optimize-card">
+                        <div class="optimize-card__head">
                             <h3><i class="fas fa-memory"></i> API-cache legen</h3>
                             <button type="button" id="flushCacheBtn" class="btn btn-secondary">
                                 <i class="fas fa-sync"></i> Cache legen

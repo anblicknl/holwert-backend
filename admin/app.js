@@ -449,6 +449,14 @@ class HolwertAdmin {
         if (flushCacheBtn) {
             flushCacheBtn.addEventListener('click', () => this.flushApiCache());
         }
+        const scanFallbackMediaBtn = document.getElementById('scanFallbackMediaBtn');
+        if (scanFallbackMediaBtn) {
+            scanFallbackMediaBtn.addEventListener('click', () => this.scanFallbackMedia({ delete: false }));
+        }
+        const pruneFallbackMediaBtn = document.getElementById('pruneFallbackMediaBtn');
+        if (pruneFallbackMediaBtn) {
+            pruneFallbackMediaBtn.addEventListener('click', () => this.pruneFallbackMedia());
+        }
 
         const addOrgDashboardAccountBtn = document.getElementById('addOrgDashboardAccountBtn');
         if (addOrgDashboardAccountBtn) {
@@ -3032,6 +3040,93 @@ class HolwertAdmin {
             if (btn) {
                 btn.disabled = false;
                 btn.innerHTML = '<i class="fas fa-sync"></i> Cache legen';
+            }
+        }
+    }
+
+    async scanFallbackMedia({ delete: doDelete = false } = {}) {
+        if (!this.token || this._fallbackMediaRunning) return;
+        this._fallbackMediaRunning = true;
+        const hint = document.getElementById('fallbackMediaHint');
+        const list = document.getElementById('fallbackMediaList');
+        const scanBtn = document.getElementById('scanFallbackMediaBtn');
+        const pruneBtn = document.getElementById('pruneFallbackMediaBtn');
+        if (scanBtn) {
+            scanBtn.disabled = true;
+            scanBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Scannen…';
+        }
+        if (pruneBtn) pruneBtn.disabled = true;
+        if (hint) hint.textContent = 'Bezig…';
+        if (list) {
+            list.innerHTML = '';
+            list.hidden = true;
+        }
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/admin/fallback/prune-media`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${this.token}`,
+                },
+                body: JSON.stringify({ dryRun: !doDelete, delete: !!doDelete }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(
+                    (data.hint ? `${data.message} ${data.hint}` : null)
+                    || data.message
+                    || data.error
+                    || `HTTP ${response.status}`,
+                );
+            }
+            this._fallbackOrphans = (data.orphans || []).map((o) => o.name).filter(Boolean);
+            if (list && data.orphans?.length) {
+                list.hidden = false;
+                list.innerHTML = data.orphans.slice(0, 100).map((o) =>
+                    `<li>${o.name}${o.bytes != null ? ` <span style="color:#888">(${Math.round(o.bytes / 1024)} KB)</span>` : ''}</li>`
+                ).join('');
+            }
+            const mb = ((data.orphanBytes || 0) / (1024 * 1024)).toFixed(2);
+            if (hint) {
+                hint.textContent = doDelete
+                    ? (data.message || 'Klaar.')
+                    : (data.orphanCount
+                      ? `${data.orphanCount} ongebruikt (±${mb} MB) op ${data.mediaCount || 0} media-bestanden / ${data.snapshotCount || 0} snapshots.`
+                      : `Geen ongebruikte media (${data.mediaCount || 0} bestanden in ${data.snapshotCount || 0} snapshots).`);
+            }
+            if (pruneBtn) pruneBtn.disabled = !this._fallbackOrphans?.length;
+            this.showNotification(data.message || 'Scan klaar', data.orphanCount ? 'warning' : 'success');
+            if (doDelete) {
+                this._fallbackOrphans = [];
+                if (pruneBtn) pruneBtn.disabled = true;
+            }
+        } catch (error) {
+            if (hint) hint.textContent = `Fout: ${error.message}`;
+            this.showNotification(`Fallback-media: ${error.message}`, 'error');
+        } finally {
+            this._fallbackMediaRunning = false;
+            if (scanBtn) {
+                scanBtn.disabled = false;
+                scanBtn.innerHTML = '<i class="fas fa-search"></i> Scannen';
+            }
+        }
+    }
+
+    async pruneFallbackMedia() {
+        if (!this._fallbackOrphans?.length) return;
+        if (!confirm(`Weet je zeker dat je ${this._fallbackOrphans.length} ongebruikte fallback-bestanden op holwert.frl wilt verwijderen?`)) {
+            return;
+        }
+        const pruneBtn = document.getElementById('pruneFallbackMediaBtn');
+        if (pruneBtn) {
+            pruneBtn.disabled = true;
+            pruneBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Wissen…';
+        }
+        try {
+            await this.scanFallbackMedia({ delete: true });
+        } finally {
+            if (pruneBtn) {
+                pruneBtn.innerHTML = '<i class="fas fa-trash"></i> Ongebruikte wissen';
             }
         }
     }

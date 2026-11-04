@@ -129,10 +129,12 @@ if ($method === 'POST') {
         json_out(500, ['ok' => false, 'error' => 'Pas FALLBACK_STORE_SECRET aan in store.php']);
     }
 
-    $action = $_SERVER['HTTP_X_FALLBACK_ACTION'] ?? '';
-    if ($action === 'put-media') {
-        $tenant = safe_segment((string)($_SERVER['HTTP_X_FALLBACK_TENANT'] ?? ''));
-        $mediaKey = safe_segment((string)($_SERVER['HTTP_X_FALLBACK_MEDIA_KEY'] ?? ''));
+    $headerAction = (string) ($_SERVER['HTTP_X_FALLBACK_ACTION'] ?? '');
+
+    // Binary media upload
+    if ($headerAction === 'put-media') {
+        $tenant = safe_segment((string) ($_SERVER['HTTP_X_FALLBACK_TENANT'] ?? ''));
+        $mediaKey = safe_segment((string) ($_SERVER['HTTP_X_FALLBACK_MEDIA_KEY'] ?? ''));
         if ($tenant === '' || !is_media_key($mediaKey) || media_filename($mediaKey) === null) {
             json_out(400, ['ok' => false, 'error' => 'tenant/media-key verplicht']);
         }
@@ -157,18 +159,105 @@ if ($method === 'POST') {
         ]);
     }
 
+    // JSON actions: put | list-store | delete-media
     $raw = file_get_contents('php://input', false, null, 0, MAX_JSON_BYTES + 1);
     if ($raw === false || strlen($raw) > MAX_JSON_BYTES) {
         json_out(413, ['ok' => false, 'error' => 'body_too_large']);
     }
     $input = json_decode($raw, true);
-    if (!is_array($input) || ($input['action'] ?? '') !== 'put') {
-        json_out(400, ['ok' => false, 'error' => 'action=put verplicht']);
+    if (!is_array($input) || !isset($input['action'])) {
+        json_out(400, ['ok' => false, 'error' => 'JSON action verplicht']);
     }
-    $tenant = safe_segment((string)($input['tenant'] ?? ''));
-    $key = safe_segment((string)($input['key'] ?? ''));
+    $jsonAction = (string) $input['action'];
+    $tenant = safe_segment((string) ($input['tenant'] ?? ''));
+    if ($tenant === '') {
+        json_out(400, ['ok' => false, 'error' => 'tenant verplicht']);
+    }
+    $tenantDir = __DIR__ . '/data/' . $tenant;
+
+    if ($jsonAction === 'list-store') {
+        $snapshots = [];
+        $media = [];
+        if (is_dir($tenantDir)) {
+            foreach (scandir($tenantDir) ?: [] as $f) {
+                if ($f === '.' || $f === '..' || $f === 'media') continue;
+                $path = $tenantDir . '/' . $f;
+                if (!is_file($path) || !str_ends_with(strtolower($f), '.json')) continue;
+                $key = str_replace('__', '/', substr($f, 0, -5));
+                $snapshots[] = [
+                    'key' => $key,
+                    'file' => $f,
+                    'bytes' => filesize($path) ?: 0,
+                    'mtime' => filemtime($path) ?: 0,
+                ];
+            }
+            $mediaDir = $tenantDir . '/media';
+            if (is_dir($mediaDir)) {
+                foreach (scandir($mediaDir) ?: [] as $f) {
+                    if ($f === '.' || $f === '..') continue;
+                    if (!preg_match('/^[a-f0-9]{16,64}\.(jpe?g|png|webp|gif|pdf)$/i', $f)) continue;
+                    $path = $mediaDir . '/' . $f;
+                    if (!is_file($path)) continue;
+                    $media[] = [
+                        'name' => strtolower($f),
+                        'bytes' => filesize($path) ?: 0,
+                        'mtime' => filemtime($path) ?: 0,
+                    ];
+                }
+            }
+        }
+        json_out(200, [
+            'ok' => true,
+            'tenant' => $tenant,
+            'snapshots' => $snapshots,
+            'media' => $media,
+            'snapshotCount' => count($snapshots),
+            'mediaCount' => count($media),
+        ]);
+    }
+
+    if ($jsonAction === 'delete-media') {
+        $files = $input['files'] ?? [];
+        if (!is_array($files)) {
+            json_out(400, ['ok' => false, 'error' => 'files[] verplicht']);
+        }
+        $mediaDir = $tenantDir . '/media';
+        $deleted = [];
+        $failed = [];
+        $missing = [];
+        foreach (array_slice($files, 0, 200) as $name) {
+            $name = strtolower(basename((string) $name));
+            if (!preg_match('/^[a-f0-9]{16,64}\.(jpe?g|png|webp|gif|pdf)$/i', $name)) {
+                $failed[] = ['name' => $name, 'error' => 'ongeldige naam'];
+                continue;
+            }
+            $path = $mediaDir . '/' . $name;
+            if (!is_file($path)) {
+                $missing[] = $name;
+                continue;
+            }
+            if (@unlink($path)) {
+                $deleted[] = $name;
+            } else {
+                $failed[] = ['name' => $name, 'error' => 'unlink_failed'];
+            }
+        }
+        json_out(200, [
+            'ok' => true,
+            'tenant' => $tenant,
+            'deleted' => $deleted,
+            'missing' => $missing,
+            'failed' => $failed,
+        ]);
+    }
+
+    if ($jsonAction !== 'put') {
+        json_out(400, ['ok' => false, 'error' => 'onbekende action']);
+    }
+
+    $key = safe_segment((string) ($input['key'] ?? ''));
     $body = $input['body'] ?? null;
-    if ($tenant === '' || $key === '' || !is_array($body)) {
+    if ($key === '' || !is_array($body)) {
         json_out(400, ['ok' => false, 'error' => 'tenant, key en body verplicht']);
     }
     if (!isset($body['data'], $body['lastUpdated'])) {
