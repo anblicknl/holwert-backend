@@ -632,6 +632,116 @@ body.admin-login-open {
     min-width: 0;
 }
 
+/* Media recompress (foto's verlichten) */
+.media-recompress-panel {
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 1rem 1.25rem 1.15rem;
+    margin: 0 0 1.25rem;
+}
+.media-recompress-panel[hidden] {
+    display: none !important;
+}
+.media-recompress-panel__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem 1rem;
+    margin-bottom: 0.85rem;
+}
+.media-recompress-panel__head strong {
+    color: #1e3a8a;
+    font-size: 0.95rem;
+}
+.media-recompress-status {
+    font-size: 0.85rem;
+    color: #666;
+}
+.media-recompress-stats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.65rem;
+    margin-bottom: 1rem;
+}
+@media (max-width: 720px) {
+    .media-recompress-stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+.media-recompress-stat {
+    background: #f7f8fa;
+    border-radius: 6px;
+    padding: 0.65rem 0.75rem;
+    min-width: 0;
+}
+.media-recompress-stat--accent {
+    background: #eef6f0;
+}
+.media-recompress-stat__label {
+    display: block;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #777;
+    margin-bottom: 0.2rem;
+}
+.media-recompress-stat__value {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #222;
+}
+.media-recompress-stat--accent .media-recompress-stat__value {
+    color: #1b7a3d;
+}
+.media-recompress-chart {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+    margin-bottom: 0.65rem;
+}
+.media-recompress-chart__row {
+    display: grid;
+    grid-template-columns: 2.5rem 1fr 4.5rem;
+    align-items: center;
+    gap: 0.5rem;
+}
+.media-recompress-chart__label {
+    font-size: 0.8rem;
+    color: #555;
+}
+.media-recompress-chart__track {
+    height: 14px;
+    background: #eceff3;
+    border-radius: 999px;
+    overflow: hidden;
+}
+.media-recompress-chart__bar {
+    height: 100%;
+    border-radius: 999px;
+    min-width: 0;
+    transition: width 0.45s ease;
+}
+.media-recompress-chart__bar--before {
+    background: #94a3b8;
+}
+.media-recompress-chart__bar--after {
+    background: #1e3a8a;
+}
+.media-recompress-chart__mb {
+    font-size: 0.8rem;
+    color: #444;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+.media-recompress-hint {
+    margin: 0;
+    font-size: 0.8rem;
+    color: #777;
+    line-height: 1.4;
+}
+
 .stat-icon {
     width: 50px;
     height: 50px;

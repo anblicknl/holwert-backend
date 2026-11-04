@@ -414,6 +414,11 @@ class HolwertAdmin {
             migrateOrgLogosBtn.addEventListener('click', () => this.migrateEmbeddedLogos({ manual: true }));
         }
 
+        const recompressMediaBtn = document.getElementById('recompressMediaBtn');
+        if (recompressMediaBtn) {
+            recompressMediaBtn.addEventListener('click', () => this.recompressHostedMedia({ manual: true }));
+        }
+
         const addOrgDashboardAccountBtn = document.getElementById('addOrgDashboardAccountBtn');
         if (addOrgDashboardAccountBtn) {
             addOrgDashboardAccountBtn.addEventListener('click', () => {
@@ -2594,6 +2599,142 @@ class HolwertAdmin {
             const container = document.getElementById('organizationsTableBody');
             if (container) {
                 container.innerHTML = `<tr><td colspan="7" class="empty-message">Fout: ${error.message}</td></tr>`;
+            }
+        }
+    }
+
+    formatBytesAsMb(bytes) {
+        const n = Number(bytes) || 0;
+        return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+    }
+
+    updateMediaRecompressPanel(totals, statusText) {
+        const panel = document.getElementById('mediaRecompressPanel');
+        if (panel) panel.hidden = false;
+        const setText = (id, value) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = value;
+        };
+        setText('mediaRecompressStatus', statusText || '');
+        setText('mediaRecompressConverted', String(totals.converted || 0));
+        setText('mediaRecompressSkipped', String(totals.skipped || 0));
+        setText('mediaRecompressFailed', String(totals.failed || 0));
+        setText('mediaRecompressSaved', this.formatBytesAsMb(totals.bytesSaved));
+        setText('mediaRecompressBeforeMb', this.formatBytesAsMb(totals.bytesBefore));
+        setText('mediaRecompressAfterMb', this.formatBytesAsMb(totals.bytesAfter));
+
+        const max = Math.max(totals.bytesBefore || 0, totals.bytesAfter || 0, 1);
+        const beforeBar = document.getElementById('mediaRecompressBarBefore');
+        const afterBar = document.getElementById('mediaRecompressBarAfter');
+        if (beforeBar) beforeBar.style.width = `${Math.round(((totals.bytesBefore || 0) / max) * 100)}%`;
+        if (afterBar) afterBar.style.width = `${Math.round(((totals.bytesAfter || 0) / max) * 100)}%`;
+
+        const hint = document.getElementById('mediaRecompressHint');
+        if (hint && totals.bytesSaved > 0) {
+            const pct = totals.bytesBefore > 0
+                ? Math.round((totals.bytesSaved / totals.bytesBefore) * 100)
+                : 0;
+            hint.textContent = `Behaalde winst: ${this.formatBytesAsMb(totals.bytesSaved)} (${pct}% lichter) op ${totals.converted} foto’s.`;
+        }
+    }
+
+    async recompressHostedMedia({ manual = false } = {}) {
+        if (!this.token || this._mediaRecompressRunning) return;
+        this._mediaRecompressRunning = true;
+        const btn = document.getElementById('recompressMediaBtn');
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Foto\'s verlichten…';
+        }
+
+        const totals = {
+            converted: 0,
+            skipped: 0,
+            failed: 0,
+            bytesBefore: 0,
+            bytesAfter: 0,
+            bytesSaved: 0,
+        };
+        let afterNewsId = 0;
+        let afterEventsId = 0;
+        const maxRounds = 40;
+
+        try {
+            this.updateMediaRecompressPanel(totals, 'Bezig…');
+            for (let i = 0; i < maxRounds; i++) {
+                const response = await fetch(`${this.apiBaseUrl}/admin/media/recompress`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${this.token}`,
+                    },
+                    body: JSON.stringify({
+                        limit: 6,
+                        type: 'all',
+                        afterNewsId,
+                        afterEventsId,
+                    }),
+                });
+                if (response.status === 404) {
+                    if (manual) {
+                        this.showNotification('API is nog aan het bijwerken. Probeer zo opnieuw.', 'warning');
+                    }
+                    return;
+                }
+                if (!response.ok) {
+                    const err = await response.json().catch(() => ({}));
+                    throw new Error(err.message || err.error || `HTTP ${response.status}`);
+                }
+                const data = await response.json();
+                const st = data.stats || {};
+                totals.converted += st.convertedCount || (data.converted || []).length;
+                totals.skipped += st.skippedCount || (data.skipped || []).length;
+                totals.failed += st.failedCount || (data.failed || []).length;
+                // Alleen bytes van écht verkleinde items in de grafiek
+                for (const item of data.converted || []) {
+                    totals.bytesBefore += item.beforeBytes || 0;
+                    totals.bytesAfter += item.afterBytes || 0;
+                    totals.bytesSaved += item.savedBytes || 0;
+                }
+                if (data.cursor) {
+                    afterNewsId = data.cursor.afterNewsId || afterNewsId;
+                    afterEventsId = data.cursor.afterEventsId || afterEventsId;
+                }
+                const remaining = data.remaining != null ? data.remaining : 0;
+                this.updateMediaRecompressPanel(
+                    totals,
+                    remaining > 0
+                        ? `Bezig… nog ca. ${remaining} te scannen`
+                        : 'Scan afgerond',
+                );
+                if (data.done || remaining === 0) break;
+                if (!(data.converted || []).length && !(data.skipped || []).length && !(data.failed || []).length) {
+                    break;
+                }
+            }
+
+            if (totals.converted > 0) {
+                this.showNotification(
+                    `${totals.converted} foto’s verkleind (−${this.formatBytesAsMb(totals.bytesSaved)}).`,
+                    'success',
+                );
+                if (typeof this.loadNews === 'function') {
+                    try { await this.loadNews(); } catch (_) { /* ignore */ }
+                }
+            } else if (manual) {
+                this.showNotification('Geen foto’s gevonden die nog winst opleveren.', 'success');
+            }
+        } catch (error) {
+            console.warn('recompressHostedMedia:', error);
+            if (manual) {
+                this.showNotification(`Foto’s verlichten mislukt: ${error.message}`, 'error');
+            }
+            this.updateMediaRecompressPanel(totals, `Fout: ${error.message}`);
+        } finally {
+            this._mediaRecompressRunning = false;
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-compress"></i> Foto\'s verlichten';
             }
         }
     }

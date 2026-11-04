@@ -15,6 +15,7 @@ require('dotenv').config();
 const orgProfileBlocks = require('./orgProfileBlocks');
 const publicFallback = require('./publicDataFallback');
 const { compressImageBuffer } = require('./imageCompress');
+const { recompressHostedMediaBatch } = require('./mediaRecompress');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -5681,6 +5682,44 @@ app.post('/api/admin/organizations/migrate-logos', authenticateToken, requireAdm
     console.error('[POST /api/admin/organizations/migrate-logos]', error);
     res.status(500).json({
       error: 'Omzetten van logos mislukt',
+      message: error.message,
+    });
+  }
+});
+
+// Bestaande nieuws-/agenda-foto's op de CDN opnieuw comprimeren (zelfde limieten als nieuwe uploads).
+app.post('/api/admin/media/recompress', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const result = await recompressHostedMediaBatch({
+      executeQuery,
+      uploadImageBufferToSharedHosting,
+      folderSegmentForOrgUpload,
+      limit: body.limit != null ? body.limit : 6,
+      type: body.type || 'all',
+      afterNewsId: body.afterNewsId,
+      afterEventsId: body.afterEventsId,
+    });
+    if (result.converted.length) {
+      invalidateCache('/api/news');
+      invalidateCache('/api/events');
+      invalidateCache('/api/app/bootstrap');
+      invalidateCache('/api/admin/news');
+      invalidateCache('/api/admin/events');
+    }
+    const savedMb = ((result.stats.bytesSaved || 0) / (1024 * 1024)).toFixed(2);
+    res.json({
+      message: result.converted.length
+        ? `${result.converted.length} foto's verkleind (−${savedMb} MB in deze ronde)`
+        : result.done
+          ? 'Klaar: geen CDN-foto’s meer in deze scan'
+          : 'Geen winst in deze ronde; scan gaat verder',
+      ...result,
+    });
+  } catch (error) {
+    console.error('[POST /api/admin/media/recompress]', error);
+    res.status(500).json({
+      error: 'Afbeeldingen verkleinen mislukt',
       message: error.message,
     });
   }

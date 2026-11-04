@@ -287,9 +287,57 @@
             <section id="news" class="content-section">
                 <div class="section-header">
                     <h2><i class="fas fa-newspaper"></i> Nieuws</h2>
-                    <button id="addNewsBtn" class="btn btn-primary">
-                        <i class="fas fa-plus"></i> Nieuw Artikel
-                    </button>
+                    <div class="organizations-header-actions" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                        <button type="button" id="recompressMediaBtn" class="btn btn-secondary" title="Verklein bestaande nieuws- en agenda-foto's op de server (scherpte blijft behouden)">
+                            <i class="fas fa-compress"></i> Foto's verlichten
+                        </button>
+                        <button id="addNewsBtn" class="btn btn-primary">
+                            <i class="fas fa-plus"></i> Nieuw Artikel
+                        </button>
+                    </div>
+                </div>
+                <div id="mediaRecompressPanel" class="media-recompress-panel" hidden>
+                    <div class="media-recompress-panel__head">
+                        <strong><i class="fas fa-chart-bar"></i> Compressiewinst</strong>
+                        <span id="mediaRecompressStatus" class="media-recompress-status">Nog niet gestart</span>
+                    </div>
+                    <div class="media-recompress-stats">
+                        <div class="media-recompress-stat">
+                            <span class="media-recompress-stat__label">Verkleind</span>
+                            <span class="media-recompress-stat__value" id="mediaRecompressConverted">0</span>
+                        </div>
+                        <div class="media-recompress-stat">
+                            <span class="media-recompress-stat__label">Overgeslagen</span>
+                            <span class="media-recompress-stat__value" id="mediaRecompressSkipped">0</span>
+                        </div>
+                        <div class="media-recompress-stat">
+                            <span class="media-recompress-stat__label">Mislukt</span>
+                            <span class="media-recompress-stat__value" id="mediaRecompressFailed">0</span>
+                        </div>
+                        <div class="media-recompress-stat media-recompress-stat--accent">
+                            <span class="media-recompress-stat__label">Bespaard</span>
+                            <span class="media-recompress-stat__value" id="mediaRecompressSaved">0 MB</span>
+                        </div>
+                    </div>
+                    <div class="media-recompress-chart" aria-hidden="true">
+                        <div class="media-recompress-chart__row">
+                            <span class="media-recompress-chart__label">Voor</span>
+                            <div class="media-recompress-chart__track">
+                                <div class="media-recompress-chart__bar media-recompress-chart__bar--before" id="mediaRecompressBarBefore" style="width:0%"></div>
+                            </div>
+                            <span class="media-recompress-chart__mb" id="mediaRecompressBeforeMb">0 MB</span>
+                        </div>
+                        <div class="media-recompress-chart__row">
+                            <span class="media-recompress-chart__label">Na</span>
+                            <div class="media-recompress-chart__track">
+                                <div class="media-recompress-chart__bar media-recompress-chart__bar--after" id="mediaRecompressBarAfter" style="width:0%"></div>
+                            </div>
+                            <span class="media-recompress-chart__mb" id="mediaRecompressAfterMb">0 MB</span>
+                        </div>
+                    </div>
+                    <p class="media-recompress-hint" id="mediaRecompressHint">
+                        Vergelijkt alleen foto’s die écht verkleind zijn. Overgeslagen items waren al licht genoeg.
+                    </p>
                 </div>
                 <div id="newsList">
                     <!-- News content will be loaded here by JavaScript -->
