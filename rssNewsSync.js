@@ -3,13 +3,31 @@
 /**
  * RSS → news sync for organizations with rss_feed_url set.
  * Dedupes on organization_id + source_url (item <link>).
+ *
+ * Covers: enclosure downloaden → compress (~1600px / q0.72) → upload naar
+ * holwert.appenvloed.com/uploads/… → image_url = eigen URL (geen externe hotlink).
  */
+
+const path = require('path');
+const {
+  folderSegmentForOrgUpload,
+  uploadImageBufferToSharedHosting,
+} = require('./sharedHostingUpload');
 
 const USER_AGENT = 'HolwertDorpsappRSS/1.0 (+https://holwert.appenvloed.com)';
 const FETCH_TIMEOUT_MS = 15000;
+const IMAGE_FETCH_TIMEOUT_MS = 45000;
+const IMAGE_MAX_BYTES = 12 * 1024 * 1024;
 const NEWS_CATEGORY = 'dorpsnieuws';
 /** Only push for brand-new items published within this window (avoids spam on first sync). */
 const PUSH_MAX_AGE_MS = 48 * 60 * 60 * 1000;
+
+const OWN_MEDIA_HOSTS = new Set([
+  'holwert.appenvloed.com',
+  'www.holwert.appenvloed.com',
+  'holwert.frl',
+  'www.holwert.frl',
+]);
 
 function decodeXmlEntities(input) {
   if (input == null) return '';
@@ -236,6 +254,140 @@ function contentChanged(a, b) {
   return norm(a) !== norm(b);
 }
 
+/** True als image_url al op onze Holwert-uploads staat (niet opnieuw hosten). */
+function isOwnHostedMediaUrl(url) {
+  const s = String(url || '').trim();
+  if (!s) return false;
+  try {
+    const u = new URL(s);
+    const host = u.hostname.toLowerCase();
+    if (!OWN_MEDIA_HOSTS.has(host)) return false;
+    return /\/uploads\//i.test(u.pathname || '');
+  } catch {
+    return /holwert\.(appenvloed\.com|frl)\/uploads\//i.test(s);
+  }
+}
+
+function mimeFromContentTypeOrUrl(contentType, url) {
+  const raw = String(contentType || '')
+    .split(';')[0]
+    .trim()
+    .toLowerCase();
+  if (raw === 'image/jpg') return 'image/jpeg';
+  if (raw === 'image/jpeg' || raw === 'image/png' || raw === 'image/webp' || raw === 'image/gif') {
+    return raw;
+  }
+  const ext = path.extname(String(url || '').split('?')[0]).toLowerCase();
+  if (ext === '.png') return 'image/png';
+  if (ext === '.webp') return 'image/webp';
+  if (ext === '.gif') return 'image/gif';
+  return 'image/jpeg';
+}
+
+function extFromMime(mime) {
+  if (mime === 'image/webp') return 'webp';
+  if (mime === 'image/png') return 'png';
+  if (mime === 'image/gif') return 'gif';
+  return 'jpg';
+}
+
+/**
+ * Download remote cover. Gooit bij fout (caller faalt soft).
+ * @returns {Promise<{ buffer: Buffer, mimetype: string }>}
+ */
+async function downloadRemoteImage(url) {
+  const remote = String(url || '').trim();
+  if (!remote || !/^https?:\/\//i.test(remote)) {
+    throw new Error('Ongeldige image-URL');
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), IMAGE_FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(remote, {
+      method: 'GET',
+      redirect: 'follow',
+      signal: controller.signal,
+      headers: {
+        Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+        'User-Agent': USER_AGENT,
+      },
+    });
+    if (!res.ok) {
+      throw new Error(`Image HTTP ${res.status}`);
+    }
+    const lenHeader = res.headers.get('content-length');
+    if (lenHeader && parseInt(lenHeader, 10) > IMAGE_MAX_BYTES) {
+      throw new Error(`Image te groot (${lenHeader} bytes)`);
+    }
+    const ab = await res.arrayBuffer();
+    const buffer = Buffer.from(ab);
+    if (!buffer.length) throw new Error('Lege image-response');
+    if (buffer.length > IMAGE_MAX_BYTES) {
+      throw new Error(`Image te groot (${buffer.length} bytes)`);
+    }
+    const mimetype = mimeFromContentTypeOrUrl(res.headers.get('content-type'), remote);
+    return { buffer, mimetype };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Download → compress → upload. Faalt soft: null + log.
+ * Originelen op de bronserver worden niet aangeraakt.
+ */
+async function hostRemoteCoverImage(remoteUrl, orgId, logger = console) {
+  const source = String(remoteUrl || '').trim();
+  if (!source) return null;
+  if (isOwnHostedMediaUrl(source)) return source;
+
+  try {
+    const { buffer, mimetype } = await downloadRemoteImage(source);
+    const ext = extFromMime(mimetype);
+    const filename = `rss-cover-${orgId || 0}-${Date.now()}.${ext}`;
+    const folder = folderSegmentForOrgUpload(orgId != null ? Number(orgId) : null);
+    const hostedUrl = await uploadImageBufferToSharedHosting(buffer, filename, mimetype, folder);
+    if (!hostedUrl || !isOwnHostedMediaUrl(hostedUrl)) {
+      throw new Error('Upload gaf geen Holwert-uploads-URL terug');
+    }
+    logger.log(
+      '[rss-sync] cover gehost',
+      `org=${orgId}`,
+      `${Math.round(buffer.length / 1024)}KB →`,
+      hostedUrl,
+    );
+    return hostedUrl;
+  } catch (err) {
+    const msg = err && err.message ? err.message : String(err);
+    logger.warn('[rss-sync] cover host mislukt (behoud externe URL):', source.slice(0, 180), msg);
+    return null;
+  }
+}
+
+/**
+ * Bepaal image_url voor insert/update: eigen Holwert-URL waar mogelijk.
+ * Bestaande lokale URL blijft staan (feed blijft externe enclosure geven).
+ * Externe DB-URL → zelfde flow (sync-pass / one-shot reprocess).
+ */
+async function resolveNewsImageUrl({ feedImageUrl, existingImageUrl, orgId, logger }) {
+  const feed = feedImageUrl ? String(feedImageUrl).trim() : '';
+  const existing = existingImageUrl ? String(existingImageUrl).trim() : '';
+
+  if (isOwnHostedMediaUrl(existing)) {
+    return existing;
+  }
+
+  const candidate = feed || existing;
+  if (!candidate) return null;
+
+  if (isOwnHostedMediaUrl(candidate)) {
+    return candidate;
+  }
+
+  const hosted = await hostRemoteCoverImage(candidate, orgId, logger);
+  return hosted || existing || feed || null;
+}
+
 async function fetchFeedXml(url) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -371,6 +523,7 @@ async function runRssNewsSync(deps) {
     updated: 0,
     skipped: 0,
     suppressed: 0,
+    covers_hosted: 0,
     errors: [],
     details: [],
   };
@@ -386,6 +539,7 @@ async function runRssNewsSync(deps) {
       updated: 0,
       skipped: 0,
       suppressed: 0,
+      covers_hosted: 0,
       error: null,
     };
 
@@ -416,10 +570,22 @@ async function runRssNewsSync(deps) {
         const pubAt = toMysqlDateTime(item.pubDate) || null;
         const title = item.title.slice(0, 500);
         const content = item.html || '';
-        const imageUrl = item.imageUrl || null;
+        const feedImageUrl = item.imageUrl || null;
 
         if (existing.rows?.length) {
           const row = existing.rows[0];
+          const prevImageUrl = row.image_url || null;
+          const imageUrl = await resolveNewsImageUrl({
+            feedImageUrl,
+            existingImageUrl: prevImageUrl,
+            orgId,
+            logger,
+          });
+          if (imageUrl && isOwnHostedMediaUrl(imageUrl) && !isOwnHostedMediaUrl(prevImageUrl)) {
+            detail.covers_hosted += 1;
+            summary.covers_hosted += 1;
+          }
+
           const needsUpdate =
             contentChanged(row.title, title) ||
             contentChanged(row.content, content) ||
@@ -452,6 +618,17 @@ async function runRssNewsSync(deps) {
           detail.updated += 1;
           summary.updated += 1;
         } else {
+          const imageUrl = await resolveNewsImageUrl({
+            feedImageUrl,
+            existingImageUrl: null,
+            orgId,
+            logger,
+          });
+          if (imageUrl && isOwnHostedMediaUrl(imageUrl)) {
+            detail.covers_hosted += 1;
+            summary.covers_hosted += 1;
+          }
+
           let insertSql;
           let insertParams;
           const cols =
@@ -560,4 +737,7 @@ module.exports = {
   cleanRssHtml,
   suppressRssSourceUrl,
   ensureRssSuppressedTable,
+  isOwnHostedMediaUrl,
+  hostRemoteCoverImage,
+  resolveNewsImageUrl,
 };
