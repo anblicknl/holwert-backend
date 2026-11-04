@@ -5,13 +5,11 @@ Dit document is voor **bestaande** monster-grote bestanden op `holwert.appenvloe
 
 ## Voorkeursroute (admin)
 
-In `/admin` → menu **Foto's verlichten** → knop **Start verlichten**:
+In `/admin` → menu **Optimalisatie**:
 
-- Roept `POST /api/admin/media/recompress` aan (batches).
-- Comprimeert CDN-foto’s van nieuws + agenda (max 1600px, q≈72).
-- Upload nieuw bestand → werkt `image_url` bij.
-- Toont een grafiek met behaalde MB-winst.
-- Overschrijft niet in-place; oude files blijven staan tot handmatige opruiming.
+- **Nieuws- & agenda-foto’s** → `POST /api/admin/media/recompress` (batches, grafiek MB-winst).
+- **Organisatie-logo’s** → `POST /api/admin/organizations/migrate-logos` (base64 → CDN-bestand).
+- Comprimeert met max 1600px / q≈72; overschrijft niet in-place.
 
 ## Principes
 

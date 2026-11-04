@@ -2734,7 +2734,7 @@ class HolwertAdmin {
             this._mediaRecompressRunning = false;
             if (btn) {
                 btn.disabled = false;
-                btn.innerHTML = '<i class="fas fa-play"></i> Start verlichten';
+                btn.innerHTML = '<i class="fas fa-play"></i> Start';
             }
         }
     }
@@ -2745,8 +2745,10 @@ class HolwertAdmin {
         const btn = document.getElementById('migrateOrgLogosBtn');
         if (btn) {
             btn.disabled = true;
-            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Logo\'s verlichten…';
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Bezig…';
         }
+        const logoHint = document.getElementById('logoMigrateHint');
+        if (logoHint && manual) logoHint.textContent = 'Bezig met omzetten…';
         let converted = 0;
         try {
             for (let i = 0; i < 8; i++) {
@@ -2773,9 +2775,13 @@ class HolwertAdmin {
             }
             if (converted > 0) {
                 this.showNotification(`${converted} logo's omgezet naar lichte bestanden.`, 'success');
-                await this.loadOrganizations();
+                if (logoHint) logoHint.textContent = `${converted} logo’s omgezet naar lichte bestanden.`;
+                if (typeof this.loadOrganizations === 'function') {
+                    try { await this.loadOrganizations(); } catch (_) { /* ignore */ }
+                }
             } else if (manual && !silent) {
                 this.showNotification('Alle logo\'s staan al als bestand op de server.', 'success');
+                if (logoHint) logoHint.textContent = 'Alle logo’s staan al als bestand op de server.';
             }
             return converted;
         } catch (error) {
@@ -2783,12 +2789,13 @@ class HolwertAdmin {
             if (manual || !silent) {
                 this.showNotification(`Logo's omzetten mislukt: ${error.message}`, 'error');
             }
+            if (logoHint && manual) logoHint.textContent = `Fout: ${error.message}`;
             return converted;
         } finally {
             this._logoMigrateRunning = false;
             if (btn) {
                 btn.disabled = false;
-                btn.innerHTML = '<i class="fas fa-compress"></i> Logo\'s verlichten';
+                btn.innerHTML = '<i class="fas fa-play"></i> Start';
             }
         }
     }

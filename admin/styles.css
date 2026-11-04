@@ -632,6 +632,47 @@ body.admin-login-open {
     min-width: 0;
 }
 
+/* Optimalisatie-pagina */
+.optimize-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+}
+.optimize-card {
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 1.15rem 1.25rem 1.2rem;
+}
+.optimize-card__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.55rem;
+}
+.optimize-card__head h3 {
+    margin: 0;
+    font-size: 1.05rem;
+    color: #1e3a8a;
+    font-weight: 600;
+}
+.optimize-card__text {
+    margin: 0 0 0.85rem;
+    font-size: 0.9rem;
+    color: #555;
+    line-height: 1.45;
+}
+.optimize-card .media-recompress-panel {
+    margin: 0;
+    border: none;
+    padding: 0.75rem 0 0;
+    border-top: 1px solid #eceff3;
+    border-radius: 0;
+    background: transparent;
+}
+
 /* Media recompress (foto's verlichten) */
 .media-recompress-panel {
     background: #fff;
