@@ -14,6 +14,7 @@ require('dotenv').config();
 
 const orgProfileBlocks = require('./orgProfileBlocks');
 const publicFallback = require('./publicDataFallback');
+const { compressImageBuffer } = require('./imageCompress');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -1640,7 +1641,21 @@ async function uploadFileBufferToSharedHosting(buffer, originalname, mimetype, o
 }
 
 async function uploadImageBufferToSharedHosting(buffer, originalname, mimetype, orgFolderTwoDigits) {
-  return uploadFileBufferToSharedHosting(buffer, originalname, mimetype, orgFolderTwoDigits);
+  const compressed = await compressImageBuffer(buffer, mimetype, originalname);
+  if (compressed.compressed) {
+    console.log(
+      '[imageCompress]',
+      `${buffer.length}→${compressed.buffer.length} bytes`,
+      compressed.mimetype,
+      compressed.originalname,
+    );
+  }
+  return uploadFileBufferToSharedHosting(
+    compressed.buffer,
+    compressed.originalname,
+    compressed.mimetype,
+    orgFolderTwoDigits,
+  );
 }
 
 // Publieke logo-upload voor organisatie-aanmelding (geen account); bestanden in map 00 tot org bestaat.
@@ -1798,7 +1813,7 @@ app.post('/api/upload/image', authenticateToken, async (req, res) => {
       message: 'Image uploaded successfully to external server (for editing)',
       imageUrl: imageUrl,
       filename: uniqueFilename,
-      note: 'Uploaded to external server - high quality maintained',
+      note: 'Uploaded to external server (server-side resize/compress applied when needed)',
     });
 
   } catch (error) {

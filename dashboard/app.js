@@ -753,8 +753,8 @@
         return { blob: new Blob([arr], { type: mime }), mime };
     }
 
-    /** Foto voor nieuws/agenda: WebP als de browser het kan, anders JPEG. */
-    function compressPhotoImage(file, { maxSize = 1200, quality = 0.72 } = {}) {
+    /** Foto voor nieuws/agenda: WebP als de browser het kan, anders JPEG. Max ~1600px langste zijde. */
+    function compressPhotoImage(file, { maxSize = 1600, quality = 0.72 } = {}) {
         return new Promise((resolve, reject) => {
             const img = new Image();
             const objectUrl = URL.createObjectURL(file);
