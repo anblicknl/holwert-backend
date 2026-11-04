@@ -782,6 +782,29 @@ body.admin-login-open {
     color: #777;
     line-height: 1.4;
 }
+.optimize-result-list {
+    list-style: none;
+    margin: 0.65rem 0 0;
+    padding: 0;
+    max-height: 220px;
+    overflow: auto;
+    border: 1px solid #eceff3;
+    border-radius: 6px;
+    background: #fafbfc;
+}
+.optimize-result-list li {
+    padding: 0.45rem 0.65rem;
+    border-bottom: 1px solid #eceff3;
+    font-size: 0.8rem;
+    color: #444;
+    word-break: break-all;
+}
+.optimize-result-list li:last-child {
+    border-bottom: none;
+}
+.optimize-result-list[hidden] {
+    display: none !important;
+}
 
 .stat-icon {
     width: 50px;

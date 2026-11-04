@@ -16,6 +16,11 @@ const orgProfileBlocks = require('./orgProfileBlocks');
 const publicFallback = require('./publicDataFallback');
 const { compressImageBuffer } = require('./imageCompress');
 const { recompressHostedMediaBatch } = require('./mediaRecompress');
+const {
+  checkBrokenMediaLinks,
+  clearBrokenMediaLinks,
+  findOrphanUploads,
+} = require('./mediaHealth');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -382,7 +387,7 @@ async function deleteHostedUploadFile(fileUrl) {
   try {
     const form = new FormData();
     form.append('path', filePath);
-    form.append('secret', process.env.DELETE_SECRET || '');
+    form.append('secret', process.env.DELETE_SECRET || 'holwert-delete-2026');
     await axios.post('https://holwert.appenvloed.com/upload/delete.php', form, {
       headers: { ...form.getHeaders() },
       timeout: 10000,
@@ -5687,7 +5692,7 @@ app.post('/api/admin/organizations/migrate-logos', authenticateToken, requireAdm
   }
 });
 
-// Bestaande nieuws-/agenda-foto's op de CDN opnieuw comprimeren (zelfde limieten als nieuwe uploads).
+// Bestaande CDN-foto's opnieuw comprimeren (nieuws/agenda/profiel/praktisch).
 app.post('/api/admin/media/recompress', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const body = req.body || {};
@@ -5699,6 +5704,7 @@ app.post('/api/admin/media/recompress', authenticateToken, requireAdmin, async (
       type: body.type || 'all',
       afterNewsId: body.afterNewsId,
       afterEventsId: body.afterEventsId,
+      cursors: body.cursors,
     });
     if (result.converted.length) {
       invalidateCache('/api/news');
@@ -5706,6 +5712,8 @@ app.post('/api/admin/media/recompress', authenticateToken, requireAdmin, async (
       invalidateCache('/api/app/bootstrap');
       invalidateCache('/api/admin/news');
       invalidateCache('/api/admin/events');
+      invalidateCache('/api/admin/users');
+      invalidateCache('/api/app/practical-info');
     }
     const savedMb = ((result.stats.bytesSaved || 0) / (1024 * 1024)).toFixed(2);
     res.json({
@@ -5722,6 +5730,167 @@ app.post('/api/admin/media/recompress', authenticateToken, requireAdmin, async (
       error: 'Afbeeldingen verkleinen mislukt',
       message: error.message,
     });
+  }
+});
+
+// Profielfoto's die nog als base64 in de DB staan → CDN-bestand.
+app.post('/api/admin/media/migrate-profile-images', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(req.body?.limit, 10) || 6, 1), 12);
+    const result = await executeQuery(
+      `SELECT id, email, profile_image_url FROM users
+       WHERE profile_image_url LIKE 'data:image%'
+       ORDER BY id ASC
+       LIMIT ?`,
+      [limit],
+    );
+    const rows = result.rows || [];
+    const converted = [];
+    const failed = [];
+    for (const user of rows) {
+      try {
+        const parsed = parseImageDataUrl(user.profile_image_url);
+        if (!parsed) throw new Error('Ongeldige afbeeldingsdata');
+        const buffer = Buffer.from(parsed.base64Data, 'base64');
+        if (!buffer.length || buffer.length > 12 * 1024 * 1024) throw new Error('Leeg of te groot');
+        const filename = `profile-${user.id}-${Date.now()}.${extFromImageMime(parsed.mime)}`;
+        const imageUrl = await uploadImageBufferToSharedHosting(buffer, filename, parsed.mime, '00');
+        await executeQuery(
+          'UPDATE users SET profile_image_url = ?, updated_at = NOW() WHERE id = ?',
+          [imageUrl, user.id],
+        );
+        converted.push({ id: user.id, email: user.email, imageUrl });
+      } catch (err) {
+        failed.push({ id: user.id, email: user.email, error: err.message || String(err) });
+      }
+    }
+    const remain = await executeQuery(
+      `SELECT COUNT(*) AS total FROM users WHERE profile_image_url LIKE 'data:image%'`,
+    );
+    if (converted.length) {
+      invalidateCache('/api/admin/users');
+      invalidateCache('/api/users');
+    }
+    res.json({
+      message: converted.length ? `${converted.length} profielfoto's omgezet` : 'Geen base64-profielfoto’s meer',
+      converted,
+      failed,
+      remaining: parseInt(remain.rows?.[0]?.total || 0, 10),
+    });
+  } catch (error) {
+    console.error('[POST /api/admin/media/migrate-profile-images]', error);
+    res.status(500).json({ error: 'Profielfoto’s omzetten mislukt', message: error.message });
+  }
+});
+
+// Dode CDN-links scannen (HEAD/GET).
+app.post('/api/admin/media/check-links', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const result = await checkBrokenMediaLinks({
+      executeQuery,
+      limit: body.limit != null ? body.limit : 8,
+      cursors: body.cursors,
+    });
+    res.json({
+      message: result.broken.length
+        ? `${result.broken.length} dode link(s) in deze ronde`
+        : 'Geen dode links in deze ronde',
+      ...result,
+    });
+  } catch (error) {
+    console.error('[POST /api/admin/media/check-links]', error);
+    res.status(500).json({ error: 'Linkcheck mislukt', message: error.message });
+  }
+});
+
+// Dode links uit DB halen (kolom NULL; content blijft).
+app.post('/api/admin/media/clear-broken', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const result = await clearBrokenMediaLinks({
+      executeQuery,
+      items: req.body?.items || [],
+    });
+    if (result.cleared.length) {
+      invalidateCache('/api/news');
+      invalidateCache('/api/events');
+      invalidateCache('/api/organizations');
+      invalidateCache('/api/app/bootstrap');
+      invalidateCache('/api/app/practical-info');
+    }
+    res.json({
+      message: `${result.cleared.length} dode link(s) gewist`,
+      ...result,
+    });
+  } catch (error) {
+    console.error('[POST /api/admin/media/clear-broken]', error);
+    res.status(500).json({ error: 'Wissen mislukt', message: error.message });
+  }
+});
+
+// Weesbestanden: op CDN maar niet in DB.
+app.post('/api/admin/media/find-orphans', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const result = await findOrphanUploads({ executeQuery });
+    res.json({
+      message: result.orphanCount
+        ? `${result.orphanCount} weesbestand(en) gevonden`
+        : 'Geen weesbestanden gevonden',
+      ...result,
+    });
+  } catch (error) {
+    console.error('[POST /api/admin/media/find-orphans]', error);
+    const needsPhp = error.code === 'LIST_UPLOADS_FAILED';
+    res.status(needsPhp ? 503 : 500).json({
+      error: 'Weesscan mislukt',
+      message: error.message,
+      hint: needsPhp
+        ? 'Upload list-uploads.php via FTP naar upload/list-uploads.php (zelfde secret als delete.php).'
+        : undefined,
+    });
+  }
+});
+
+app.post('/api/admin/media/delete-orphans', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const paths = Array.isArray(req.body?.paths) ? req.body.paths.slice(0, 100) : [];
+    const deleted = [];
+    const failed = [];
+    for (const path of paths) {
+      if (typeof path !== 'string' || !path.startsWith('uploads/')) {
+        failed.push({ path, error: 'ongeldig pad' });
+        continue;
+      }
+      try {
+        await deleteHostedUploadFile(`https://holwert.appenvloed.com/${path}`);
+        deleted.push(path);
+      } catch (err) {
+        failed.push({ path, error: err.message || String(err) });
+      }
+    }
+    res.json({
+      message: `${deleted.length} weesbestand(en) verwijderd`,
+      deleted,
+      failed,
+    });
+  } catch (error) {
+    console.error('[POST /api/admin/media/delete-orphans]', error);
+    res.status(500).json({ error: 'Verwijderen mislukt', message: error.message });
+  }
+});
+
+// Leeg API-geheugencache (Vercel instance).
+app.post('/api/admin/cache/flush', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const before = cache.size;
+    cache.clear();
+    res.json({
+      message: `Cache geleegd (${before} entries)`,
+      cleared: before,
+    });
+  } catch (error) {
+    console.error('[POST /api/admin/cache/flush]', error);
+    res.status(500).json({ error: 'Cache legen mislukt', message: error.message });
   }
 });
 

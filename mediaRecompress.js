@@ -1,16 +1,43 @@
 'use strict';
 
 /**
- * Batch: bestaande nieuws-/agenda-foto's op de CDN opnieuw comprimeren
- * (zelfde limieten als imageCompress) → nieuwe URL → DB bijwerken.
+ * Batch: bestaande CDN-foto's opnieuw comprimeren → nieuwe URL → DB bijwerken.
+ * Bronnen: news, events, users (profielfoto), practical_info (icon-URL).
  */
 const axios = require('axios');
 const https = require('https');
 const { compressImageBuffer } = require('./imageCompress');
 
+const HOSTED_UPLOADS_LIKE = 'https://holwert.appenvloed.com/uploads/%';
 const HOSTED_UPLOADS_RE = /^https:\/\/holwert\.appenvloed\.com\/uploads\//i;
-/** Minimale relatieve winst om te vervangen (15%). */
 const MIN_SAVINGS_RATIO = 0.15;
+
+const MEDIA_SOURCES = {
+  news: {
+    key: 'news',
+    table: 'news',
+    column: 'image_url',
+    orgCol: 'organization_id',
+  },
+  events: {
+    key: 'events',
+    table: 'events',
+    column: 'image_url',
+    orgCol: 'organization_id',
+  },
+  profiles: {
+    key: 'profiles',
+    table: 'users',
+    column: 'profile_image_url',
+    orgCol: null,
+  },
+  practical: {
+    key: 'practical',
+    table: 'practical_info',
+    column: 'icon',
+    orgCol: null,
+  },
+};
 
 function isHostedUploadUrl(url) {
   return typeof url === 'string' && HOSTED_UPLOADS_RE.test(url.trim());
@@ -59,24 +86,24 @@ async function downloadHostedImage(url) {
   return { buffer, mimetype, originalname: basenameFromUrl(url) };
 }
 
-/**
- * @returns {Promise<{
- *   status: 'converted'|'skipped'|'failed',
- *   id: number,
- *   type: string,
- *   beforeBytes?: number,
- *   afterBytes?: number,
- *   savedBytes?: number,
- *   oldUrl?: string,
- *   newUrl?: string,
- *   reason?: string,
- *   error?: string
- * }>}
- */
-async function recompressOneRow(row, type, deps) {
+function resolveSources(typeFilter) {
+  const t = String(typeFilter || 'all').toLowerCase();
+  if (t === 'all') return [MEDIA_SOURCES.news, MEDIA_SOURCES.events];
+  if (t === 'profiles') return [MEDIA_SOURCES.profiles];
+  if (t === 'practical') return [MEDIA_SOURCES.practical];
+  if (t === 'news') return [MEDIA_SOURCES.news];
+  if (t === 'events') return [MEDIA_SOURCES.events];
+  if (t === 'media') {
+    return [MEDIA_SOURCES.news, MEDIA_SOURCES.events, MEDIA_SOURCES.profiles, MEDIA_SOURCES.practical];
+  }
+  return [MEDIA_SOURCES.news, MEDIA_SOURCES.events];
+}
+
+async function recompressOneRow(row, source, deps) {
   const { executeQuery, uploadImageBufferToSharedHosting, folderSegmentForOrgUpload } = deps;
   const id = row.id;
-  const imageUrl = String(row.image_url || '').trim();
+  const imageUrl = String(row._url || '').trim();
+  const type = source.key;
   if (!isHostedUploadUrl(imageUrl)) {
     return { status: 'skipped', id, type, reason: 'geen_cdn_url' };
   }
@@ -117,11 +144,10 @@ async function recompressOneRow(row, type, deps) {
       folder,
     );
 
-    const table = type === 'events' ? 'events' : 'news';
-    await executeQuery(`UPDATE ${table} SET image_url = ?, updated_at = NOW() WHERE id = ?`, [
-      newUrl,
-      id,
-    ]);
+    await executeQuery(
+      `UPDATE ${source.table} SET ${source.column} = ?, updated_at = NOW() WHERE id = ?`,
+      [newUrl, id],
+    );
 
     return {
       status: 'converted',
@@ -144,26 +170,24 @@ async function recompressOneRow(row, type, deps) {
   }
 }
 
-async function countAfterCursor(executeQuery, table, afterId) {
+async function countAfterCursor(executeQuery, source, afterId) {
   const r = await executeQuery(
-    `SELECT COUNT(*) AS total FROM ${table}
-     WHERE image_url LIKE 'https://holwert.appenvloed.com/uploads/%'
+    `SELECT COUNT(*) AS total FROM ${source.table}
+     WHERE ${source.column} LIKE ?
        AND id > ?`,
-    [afterId],
+    [HOSTED_UPLOADS_LIKE, afterId],
   );
   return parseInt(r.rows?.[0]?.total || 0, 10);
 }
 
 /**
- * Cursor-batch: verwerkt volgende N items (id ASC) zodat skips de run niet eindeloos herhalen.
  * @param {{
  *   executeQuery: Function,
  *   uploadImageBufferToSharedHosting: Function,
  *   folderSegmentForOrgUpload: Function,
  *   limit?: number,
  *   type?: string,
- *   afterNewsId?: number,
- *   afterEventsId?: number
+ *   cursors?: Record<string, number>
  * }} opts
  */
 async function recompressHostedMediaBatch(opts) {
@@ -174,44 +198,40 @@ async function recompressHostedMediaBatch(opts) {
     throw new Error('recompressHostedMediaBatch: upload-helpers ontbreken');
   }
   const cap = Math.min(Math.max(parseInt(opts.limit, 10) || 6, 1), 12);
-  const typeFilter = String(opts.type || 'all').toLowerCase();
-  let afterNewsId = Math.max(0, parseInt(opts.afterNewsId, 10) || 0);
-  let afterEventsId = Math.max(0, parseInt(opts.afterEventsId, 10) || 0);
-  const rowDeps = { executeQuery, uploadImageBufferToSharedHosting, folderSegmentForOrgUpload };
-
-  const wantNews = typeFilter === 'all' || typeFilter === 'news';
-  const wantEvents = typeFilter === 'all' || typeFilter === 'events';
-
-  const candidates = [];
-  if (wantNews) {
-    const r = await executeQuery(
-      `SELECT id, image_url, organization_id FROM news
-       WHERE image_url LIKE 'https://holwert.appenvloed.com/uploads/%'
-         AND id > ?
-       ORDER BY id ASC
-       LIMIT ?`,
-      [afterNewsId, cap],
-    );
-    for (const row of r.rows || []) {
-      candidates.push({ ...row, _type: 'news' });
-    }
+  const sources = resolveSources(opts.type);
+  const cursors = { ...(opts.cursors || {}) };
+  for (const s of sources) {
+    if (cursors[s.key] == null) cursors[s.key] = 0;
+    cursors[s.key] = Math.max(0, parseInt(cursors[s.key], 10) || 0);
   }
-  if (wantEvents) {
+  // legacy cursor fields
+  if (opts.afterNewsId != null) cursors.news = Math.max(cursors.news || 0, parseInt(opts.afterNewsId, 10) || 0);
+  if (opts.afterEventsId != null) {
+    cursors.events = Math.max(cursors.events || 0, parseInt(opts.afterEventsId, 10) || 0);
+  }
+
+  const rowDeps = { executeQuery, uploadImageBufferToSharedHosting, folderSegmentForOrgUpload };
+  const candidates = [];
+
+  for (const source of sources) {
+    const afterId = cursors[source.key] || 0;
+    const orgSelect = source.orgCol ? `, ${source.orgCol} AS organization_id` : ', NULL AS organization_id';
     const r = await executeQuery(
-      `SELECT id, image_url, organization_id FROM events
-       WHERE image_url LIKE 'https://holwert.appenvloed.com/uploads/%'
+      `SELECT id, ${source.column} AS _url ${orgSelect}
+       FROM ${source.table}
+       WHERE ${source.column} LIKE ?
          AND id > ?
        ORDER BY id ASC
        LIMIT ?`,
-      [afterEventsId, cap],
+      [HOSTED_UPLOADS_LIKE, afterId, cap],
     );
     for (const row of r.rows || []) {
-      candidates.push({ ...row, _type: 'events' });
+      candidates.push({ ...row, _source: source });
     }
   }
 
   candidates.sort((a, b) => {
-    if (a._type !== b._type) return a._type === 'news' ? -1 : 1;
+    if (a._source.key !== b._source.key) return a._source.key.localeCompare(b._source.key);
     return a.id - b.id;
   });
   const batch = candidates.slice(0, cap);
@@ -224,9 +244,9 @@ async function recompressHostedMediaBatch(opts) {
   let bytesSaved = 0;
 
   for (const row of batch) {
-    const result = await recompressOneRow(row, row._type, rowDeps);
-    if (row._type === 'news') afterNewsId = Math.max(afterNewsId, row.id);
-    else afterEventsId = Math.max(afterEventsId, row.id);
+    const source = row._source;
+    const result = await recompressOneRow(row, source, rowDeps);
+    cursors[source.key] = Math.max(cursors[source.key] || 0, row.id);
 
     if (result.status === 'converted') {
       converted.push(result);
@@ -241,15 +261,23 @@ async function recompressHostedMediaBatch(opts) {
   }
 
   let remaining = 0;
-  if (wantNews) remaining += await countAfterCursor(executeQuery, 'news', afterNewsId);
-  if (wantEvents) remaining += await countAfterCursor(executeQuery, 'events', afterEventsId);
+  for (const source of sources) {
+    remaining += await countAfterCursor(executeQuery, source, cursors[source.key] || 0);
+  }
 
   return {
     converted,
     skipped,
     failed,
     remaining,
-    cursor: { afterNewsId, afterEventsId },
+    cursor: {
+      afterNewsId: cursors.news || 0,
+      afterEventsId: cursors.events || 0,
+      afterProfilesId: cursors.profiles || 0,
+      afterPracticalId: cursors.practical || 0,
+      ...cursors,
+    },
+    cursors,
     done: batch.length === 0 || remaining === 0,
     stats: {
       bytesBefore,
@@ -265,5 +293,7 @@ async function recompressHostedMediaBatch(opts) {
 module.exports = {
   isHostedUploadUrl,
   recompressHostedMediaBatch,
+  MEDIA_SOURCES,
+  HOSTED_UPLOADS_LIKE,
   MIN_SAVINGS_RATIO,
 };
