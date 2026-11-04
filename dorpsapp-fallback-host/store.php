@@ -8,6 +8,7 @@
  * POST binary + headers put-media → mediabestand
  *
  * Zet FALLBACK_STORE_SECRET gelijk aan Vercel FALLBACK_STORE_SECRET.
+ * Compatibel met PHP 7.4+.
  */
 
 declare(strict_types=1);
@@ -15,10 +16,10 @@ declare(strict_types=1);
 header('X-Content-Type-Options: nosniff');
 
 const FALLBACK_STORE_SECRET = 'ZET-HIER-EEN-LANG-GEHEIM'; // zelfde als Vercel FALLBACK_STORE_SECRET
-const MAX_JSON_BYTES = 2_500_000;
-const MAX_MEDIA_BYTES = 2_000_000;
+const MAX_JSON_BYTES = 2500000;
+const MAX_MEDIA_BYTES = 2000000;
 
-function json_out(int $status, array $payload): void {
+function json_out($status, $payload) {
     http_response_code($status);
     header('Content-Type: application/json; charset=utf-8');
     header('Cache-Control: public, max-age=60');
@@ -26,40 +27,66 @@ function json_out(int $status, array $payload): void {
     exit;
 }
 
-function safe_segment(string $s): string {
-    $s = strtolower(trim($s));
-    $s = preg_replace('/[^a-z0-9_\/.-]/', '_', $s) ?? '';
-    $s = preg_replace('/\/+/', '/', $s) ?? '';
+function starts_with($haystack, $needle) {
+    return $needle === '' || strpos($haystack, $needle) === 0;
+}
+
+function ends_with($haystack, $needle) {
+    if ($needle === '') {
+        return true;
+    }
+    $len = strlen($needle);
+    return substr($haystack, -$len) === $needle;
+}
+
+function safe_segment($s) {
+    $s = strtolower(trim((string) $s));
+    $s = preg_replace('/[^a-z0-9_\\/.-]/', '_', $s);
+    if ($s === null) {
+        $s = '';
+    }
+    $s = preg_replace('/\\/+/', '/', $s);
+    if ($s === null) {
+        $s = '';
+    }
     return trim($s, '/');
 }
 
-function is_media_key(string $key): bool {
-    return str_starts_with($key, 'media/');
+function is_media_key($key) {
+    return starts_with($key, 'media/');
 }
 
-function media_filename(string $key): ?string {
+function media_filename($key) {
     // media/abcdef0123456789.jpg
     $base = basename(substr($key, strlen('media/')));
-    if (!preg_match('/^[a-f0-9]{16,64}\.(jpe?g|png|webp|gif|pdf)$/i', $base)) {
+    if (!preg_match('/^[a-f0-9]{16,64}\\.(jpe?g|png|webp|gif|pdf)$/i', $base)) {
         return null;
     }
     return strtolower($base);
 }
 
-function content_type_for_file(string $path): string {
+function content_type_for_file($path) {
     $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
-    return match ($ext) {
-        'jpg', 'jpeg' => 'image/jpeg',
-        'png' => 'image/png',
-        'webp' => 'image/webp',
-        'gif' => 'image/gif',
-        'pdf' => 'application/pdf',
-        'json' => 'application/json; charset=utf-8',
-        default => 'application/octet-stream',
-    };
+    switch ($ext) {
+        case 'jpg':
+        case 'jpeg':
+            return 'image/jpeg';
+        case 'png':
+            return 'image/png';
+        case 'webp':
+            return 'image/webp';
+        case 'gif':
+            return 'image/gif';
+        case 'pdf':
+            return 'application/pdf';
+        case 'json':
+            return 'application/json; charset=utf-8';
+        default:
+            return 'application/octet-stream';
+    }
 }
 
-function data_path(string $tenant, string $key): string {
+function data_path($tenant, $key) {
     $tenant = safe_segment($tenant);
     $key = safe_segment($key);
     if ($tenant === '' || $key === '') {
@@ -86,7 +113,7 @@ function data_path(string $tenant, string $key): string {
     return $dir . '/' . $file;
 }
 
-$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+$method = isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : 'GET';
 
 if ($method === 'OPTIONS') {
     header('Access-Control-Allow-Origin: *');
@@ -97,9 +124,9 @@ if ($method === 'OPTIONS') {
 }
 
 if ($method === 'GET') {
-    $tenant = safe_segment((string)($_GET['tenant'] ?? ''));
-    $key = safe_segment((string)($_GET['key'] ?? ''));
-    $raw = isset($_GET['raw']) && (string)$_GET['raw'] !== '0';
+    $tenant = safe_segment(isset($_GET['tenant']) ? (string) $_GET['tenant'] : '');
+    $key = safe_segment(isset($_GET['key']) ? (string) $_GET['key'] : '');
+    $raw = isset($_GET['raw']) && (string) $_GET['raw'] !== '0';
     if ($tenant === '' || $key === '') {
         json_out(400, ['ok' => false, 'error' => 'tenant en key verplicht']);
     }
@@ -110,7 +137,7 @@ if ($method === 'GET') {
     if ($raw || is_media_key($key)) {
         header('Content-Type: ' . content_type_for_file($path));
         header('Cache-Control: public, max-age=86400');
-        header('Content-Length: ' . (string)filesize($path));
+        header('Content-Length: ' . (string) filesize($path));
         readfile($path);
         exit;
     }
@@ -121,7 +148,7 @@ if ($method === 'GET') {
 }
 
 if ($method === 'POST') {
-    $secret = $_SERVER['HTTP_X_FALLBACK_SECRET'] ?? '';
+    $secret = isset($_SERVER['HTTP_X_FALLBACK_SECRET']) ? $_SERVER['HTTP_X_FALLBACK_SECRET'] : '';
     if (!is_string($secret) || $secret === '' || !hash_equals(FALLBACK_STORE_SECRET, $secret)) {
         json_out(401, ['ok' => false, 'error' => 'unauthorized']);
     }
@@ -129,12 +156,12 @@ if ($method === 'POST') {
         json_out(500, ['ok' => false, 'error' => 'Pas FALLBACK_STORE_SECRET aan in store.php']);
     }
 
-    $headerAction = (string) ($_SERVER['HTTP_X_FALLBACK_ACTION'] ?? '');
+    $headerAction = isset($_SERVER['HTTP_X_FALLBACK_ACTION']) ? (string) $_SERVER['HTTP_X_FALLBACK_ACTION'] : '';
 
     // Binary media upload
     if ($headerAction === 'put-media') {
-        $tenant = safe_segment((string) ($_SERVER['HTTP_X_FALLBACK_TENANT'] ?? ''));
-        $mediaKey = safe_segment((string) ($_SERVER['HTTP_X_FALLBACK_MEDIA_KEY'] ?? ''));
+        $tenant = safe_segment(isset($_SERVER['HTTP_X_FALLBACK_TENANT']) ? (string) $_SERVER['HTTP_X_FALLBACK_TENANT'] : '');
+        $mediaKey = safe_segment(isset($_SERVER['HTTP_X_FALLBACK_MEDIA_KEY']) ? (string) $_SERVER['HTTP_X_FALLBACK_MEDIA_KEY'] : '');
         if ($tenant === '' || !is_media_key($mediaKey) || media_filename($mediaKey) === null) {
             json_out(400, ['ok' => false, 'error' => 'tenant/media-key verplicht']);
         }
@@ -169,7 +196,7 @@ if ($method === 'POST') {
         json_out(400, ['ok' => false, 'error' => 'JSON action verplicht']);
     }
     $jsonAction = (string) $input['action'];
-    $tenant = safe_segment((string) ($input['tenant'] ?? ''));
+    $tenant = safe_segment(isset($input['tenant']) ? (string) $input['tenant'] : '');
     if ($tenant === '') {
         json_out(400, ['ok' => false, 'error' => 'tenant verplicht']);
     }
@@ -179,10 +206,18 @@ if ($method === 'POST') {
         $snapshots = [];
         $media = [];
         if (is_dir($tenantDir)) {
-            foreach (scandir($tenantDir) ?: [] as $f) {
-                if ($f === '.' || $f === '..' || $f === 'media') continue;
+            $files = scandir($tenantDir);
+            if (!is_array($files)) {
+                $files = [];
+            }
+            foreach ($files as $f) {
+                if ($f === '.' || $f === '..' || $f === 'media') {
+                    continue;
+                }
                 $path = $tenantDir . '/' . $f;
-                if (!is_file($path) || !str_ends_with(strtolower($f), '.json')) continue;
+                if (!is_file($path) || !ends_with(strtolower($f), '.json')) {
+                    continue;
+                }
                 $key = str_replace('__', '/', substr($f, 0, -5));
                 $snapshots[] = [
                     'key' => $key,
@@ -193,11 +228,21 @@ if ($method === 'POST') {
             }
             $mediaDir = $tenantDir . '/media';
             if (is_dir($mediaDir)) {
-                foreach (scandir($mediaDir) ?: [] as $f) {
-                    if ($f === '.' || $f === '..') continue;
-                    if (!preg_match('/^[a-f0-9]{16,64}\.(jpe?g|png|webp|gif|pdf)$/i', $f)) continue;
+                $mediaFiles = scandir($mediaDir);
+                if (!is_array($mediaFiles)) {
+                    $mediaFiles = [];
+                }
+                foreach ($mediaFiles as $f) {
+                    if ($f === '.' || $f === '..') {
+                        continue;
+                    }
+                    if (!preg_match('/^[a-f0-9]{16,64}\\.(jpe?g|png|webp|gif|pdf)$/i', $f)) {
+                        continue;
+                    }
                     $path = $mediaDir . '/' . $f;
-                    if (!is_file($path)) continue;
+                    if (!is_file($path)) {
+                        continue;
+                    }
                     $media[] = [
                         'name' => strtolower($f),
                         'bytes' => filesize($path) ?: 0,
@@ -217,7 +262,7 @@ if ($method === 'POST') {
     }
 
     if ($jsonAction === 'delete-media') {
-        $files = $input['files'] ?? [];
+        $files = isset($input['files']) ? $input['files'] : [];
         if (!is_array($files)) {
             json_out(400, ['ok' => false, 'error' => 'files[] verplicht']);
         }
@@ -227,7 +272,7 @@ if ($method === 'POST') {
         $missing = [];
         foreach (array_slice($files, 0, 200) as $name) {
             $name = strtolower(basename((string) $name));
-            if (!preg_match('/^[a-f0-9]{16,64}\.(jpe?g|png|webp|gif|pdf)$/i', $name)) {
+            if (!preg_match('/^[a-f0-9]{16,64}\\.(jpe?g|png|webp|gif|pdf)$/i', $name)) {
                 $failed[] = ['name' => $name, 'error' => 'ongeldige naam'];
                 continue;
             }
@@ -255,8 +300,8 @@ if ($method === 'POST') {
         json_out(400, ['ok' => false, 'error' => 'onbekende action']);
     }
 
-    $key = safe_segment((string) ($input['key'] ?? ''));
-    $body = $input['body'] ?? null;
+    $key = safe_segment(isset($input['key']) ? (string) $input['key'] : '');
+    $body = isset($input['body']) ? $input['body'] : null;
     if ($key === '' || !is_array($body)) {
         json_out(400, ['ok' => false, 'error' => 'tenant, key en body verplicht']);
     }
