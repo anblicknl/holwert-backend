@@ -3750,13 +3750,40 @@ function getOrgDashboardPublicBaseUrl() {
   return base.replace(/\/?$/, '/');
 }
 
-async function findUserRowForOrgPasswordReset(emailNormalized) {
+function parsePositiveOrgId(raw) {
+  if (raw == null || raw === '') return null;
+  const n = parseInt(String(raw).trim(), 10);
+  if (!Number.isFinite(n) || n < 1) return null;
+  return n;
+}
+
+/** URL-/form-hint: numeriek org-id, of (toekomst) slug — hier alleen positieve int. */
+function parseOrgHint(raw) {
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  return parsePositiveOrgId(s);
+}
+
+async function findUserRowForOrgPasswordReset(emailNormalized, organizationIdHint = null) {
+  const orgId = parsePositiveOrgId(organizationIdHint);
   let userResult;
   try {
-    userResult = await executeQuery(
-      'SELECT id, email, role, is_active, organization_id FROM users WHERE LOWER(TRIM(email)) = ? LIMIT 1',
-      [emailNormalized],
-    );
+    if (orgId) {
+      userResult = await executeQuery(
+        `SELECT id, email, role, is_active, organization_id
+         FROM users
+         WHERE LOWER(TRIM(email)) = ?
+           AND organization_id = ?
+         LIMIT 1`,
+        [emailNormalized, orgId],
+      );
+    } else {
+      userResult = await executeQuery(
+        'SELECT id, email, role, is_active, organization_id FROM users WHERE LOWER(TRIM(email)) = ? LIMIT 1',
+        [emailNormalized],
+      );
+    }
   } catch (colErr) {
     userResult = await executeQuery(
       'SELECT id, email, role, is_active FROM users WHERE LOWER(TRIM(email)) = ? LIMIT 1',
@@ -3764,6 +3791,20 @@ async function findUserRowForOrgPasswordReset(emailNormalized) {
     );
   }
   return userResult.rows?.[0] ?? null;
+}
+
+async function lookupOrganizationNameForReset(organizationId) {
+  const orgId = parsePositiveOrgId(organizationId);
+  if (!orgId) return null;
+  try {
+    const r = await executeQuery('SELECT id, name FROM organizations WHERE id = ? LIMIT 1', [orgId]);
+    const row = r.rows?.[0];
+    if (!row) return null;
+    const name = row.name != null ? String(row.name).trim() : '';
+    return { id: orgId, name: name || null };
+  } catch (_) {
+    return { id: orgId, name: null };
+  }
 }
 
 function isOrgDashboardPasswordResetEligible(u) {
@@ -3859,7 +3900,7 @@ Wijzig dit wachtwoord na de eerste inlog.`;
   return sendMailViaHosting({ toEmail, subject, html, text });
 }
 
-async function sendOrgPasswordResetEmailViaHosting({ toEmail, resetUrl }) {
+async function sendOrgPasswordResetEmailViaHosting({ toEmail, resetUrl, orgName }) {
   const esc = (s) =>
     String(s)
       .replace(/&/g, '&amp;')
@@ -3867,12 +3908,21 @@ async function sendOrgPasswordResetEmailViaHosting({ toEmail, resetUrl }) {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
 
-  const subject = 'Holwert: wachtwoord wijzigen (organisatie-dashboard)';
-  const html = `<p>Je hebt een nieuw wachtwoord aangevraagd voor het <strong>Holwert organisatie-dashboard</strong>.</p>
+  const orgLabel = orgName ? String(orgName).trim() : '';
+  const subject = orgLabel
+    ? `Holwert: wachtwoord wijzigen (${orgLabel})`
+    : 'Holwert: wachtwoord wijzigen (organisatie-dashboard)';
+  const contextHtml = orgLabel
+    ? `<p>Je hebt een nieuw wachtwoord aangevraagd voor het organisatie-dashboard van <strong>${esc(orgLabel)}</strong>.</p>`
+    : `<p>Je hebt een nieuw wachtwoord aangevraagd voor het <strong>Holwert organisatie-dashboard</strong>.</p>`;
+  const contextText = orgLabel
+    ? `Je hebt een nieuw wachtwoord aangevraagd voor het organisatie-dashboard van ${orgLabel}.`
+    : 'Je hebt een nieuw wachtwoord aangevraagd voor het Holwert organisatie-dashboard.';
+  const html = `${contextHtml}
 <p><a href="${esc(resetUrl)}">Klik hier om een nieuw wachtwoord in te stellen</a></p>
 <p>Of kopieer deze link in je browser:<br><span style="word-break:break-all">${esc(resetUrl)}</span></p>
 <p>Deze link is <strong>1 uur</strong> geldig. Als je dit niet zelf hebt aangevraagd, kun je deze e-mail negeren.</p>`;
-  const text = `Je hebt een nieuw wachtwoord aangevraagd voor het Holwert organisatie-dashboard.
+  const text = `${contextText}
 
 Open deze link om een nieuw wachtwoord in te stellen:
 ${resetUrl}
@@ -3880,6 +3930,38 @@ ${resetUrl}
 Deze link is 1 uur geldig. Als je dit niet zelf hebt aangevraagd, kun je deze e-mail negeren.`;
 
   return sendMailViaHosting({ toEmail, subject, html, text });
+}
+
+async function selectActiveOrgPasswordResetByHash(tokenHash) {
+  try {
+    return await executeQuery(
+      `SELECT user_id, organization_id FROM org_password_resets
+       WHERE token_hash = ?
+         AND expires_at > NOW()
+         AND created_at > DATE_SUB(NOW(), INTERVAL 1 HOUR)
+       LIMIT 1`,
+      [tokenHash],
+    );
+  } catch (colErr) {
+    const msg = String(colErr?.message || colErr?.sqlMessage || '').toLowerCase();
+    if (!msg.includes('unknown column') || !msg.includes('organization_id')) throw colErr;
+    return executeQuery(
+      `SELECT user_id FROM org_password_resets
+       WHERE token_hash = ?
+         AND expires_at > NOW()
+         AND created_at > DATE_SUB(NOW(), INTERVAL 1 HOUR)
+       LIMIT 1`,
+      [tokenHash],
+    );
+  }
+}
+
+function orgHintMismatch(storedOrgId, hintOrgId) {
+  const stored = parsePositiveOrgId(storedOrgId);
+  const hint = parsePositiveOrgId(hintOrgId);
+  if (!hint) return false;
+  if (!stored) return false;
+  return stored !== hint;
 }
 
 // Wachtwoord vergeten (alleen accounts met organisatie, geen beheerdersrollen)
@@ -3895,11 +3977,25 @@ async function handleOrgForgotPasswordRequest(req, res) {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailRaw)) {
       return res.status(200).json(generic);
     }
-    const user = await findUserRowForOrgPasswordReset(emailRaw);
+    const orgHint =
+      parseOrgHint(req.body?.organizationId) ||
+      parseOrgHint(req.body?.organization_id) ||
+      parseOrgHint(req.body?.org);
+    const user = await findUserRowForOrgPasswordReset(emailRaw, orgHint);
     if (!user || !isOrgDashboardPasswordResetEligible(user)) {
       console.log('[org-forgot-password] geen reset-mail (onbekend of niet-org-dashboard):', emailRaw);
       return res.status(200).json(generic);
     }
+    const organizationId = parsePositiveOrgId(user.organization_id);
+    if (!organizationId) {
+      console.log('[org-forgot-password] geen reset-mail (geen organization_id):', emailRaw);
+      return res.status(200).json(generic);
+    }
+    if (orgHint && orgHint !== organizationId) {
+      console.log('[org-forgot-password] org-hint mismatch:', emailRaw, orgHint, organizationId);
+      return res.status(200).json(generic);
+    }
+    const orgInfo = await lookupOrganizationNameForReset(organizationId);
     await ensureOrgPasswordResetsTable();
     await purgeExpiredOrgPasswordResets().catch(() => {});
     const rawToken = crypto.randomBytes(32).toString('hex');
@@ -3910,17 +4006,39 @@ async function handleOrgForgotPasswordRequest(req, res) {
       if (!isMysqlMissingTableError(delErr)) throw delErr;
       await ensureOrgPasswordResetsTable();
     }
-    await executeInsert(
-      'INSERT INTO org_password_resets (user_id, token_hash, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR))',
-      [user.id, tokenHash],
-    );
-    const resetUrl = `${getOrgDashboardPublicBaseUrl()}?reset=${encodeURIComponent(rawToken)}`;
-    const sent = await sendOrgPasswordResetEmailViaHosting({ toEmail: user.email, resetUrl });
+    try {
+      await executeInsert(
+        'INSERT INTO org_password_resets (user_id, organization_id, token_hash, expires_at) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR))',
+        [user.id, organizationId, tokenHash],
+      );
+    } catch (insErr) {
+      const msg = String(insErr?.message || insErr?.sqlMessage || '').toLowerCase();
+      if (!msg.includes('unknown column') || !msg.includes('organization_id')) throw insErr;
+      await ensureOrgPasswordResetsTable();
+      await executeInsert(
+        'INSERT INTO org_password_resets (user_id, organization_id, token_hash, expires_at) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR))',
+        [user.id, organizationId, tokenHash],
+      );
+    }
+    const resetUrl =
+      `${getOrgDashboardPublicBaseUrl()}?reset=${encodeURIComponent(rawToken)}` +
+      `&org=${encodeURIComponent(String(organizationId))}`;
+    const sent = await sendOrgPasswordResetEmailViaHosting({
+      toEmail: user.email,
+      resetUrl,
+      orgName: orgInfo?.name || null,
+    });
     if (!sent.ok) {
       await executeQuery('DELETE FROM org_password_resets WHERE user_id = ?', [user.id]).catch(() => {});
       console.warn('[org-forgot-password] geen e-mail verstuurd:', sent.reason, 'naar', user.email);
     } else {
-      console.log('[org-forgot-password] reset-mail verstuurd naar', user.email);
+      console.log(
+        '[org-forgot-password] reset-mail verstuurd naar',
+        user.email,
+        'org',
+        organizationId,
+        orgInfo?.name || '',
+      );
     }
     return res.status(200).json(generic);
   } catch (error) {
@@ -3947,30 +4065,67 @@ async function handleOrgResetPasswordRequest(req, res) {
   try {
     const token = req.body?.token != null ? String(req.body.token).trim() : '';
     const password = req.body?.password != null ? String(req.body.password) : '';
+    const orgHint =
+      parseOrgHint(req.body?.organizationId) ||
+      parseOrgHint(req.body?.organization_id) ||
+      parseOrgHint(req.body?.org);
     if (!/^[a-f0-9]{64}$/i.test(token)) {
       return res.status(400).json({ error: 'Ongeldige of verlopen link.' });
     }
     if (password.length < 6) {
       return res.status(400).json({ error: 'Het wachtwoord moet minimaal 6 tekens zijn.' });
     }
+    await ensureOrgPasswordResetsTable();
     const tokenHash = hashOrgPasswordResetToken(token);
     await purgeExpiredOrgPasswordResets().catch(() => {});
-    const row = await executeQuery(
-      `SELECT user_id FROM org_password_resets
-       WHERE token_hash = ?
-         AND expires_at > NOW()
-         AND created_at > DATE_SUB(NOW(), INTERVAL 1 HOUR)
-       LIMIT 1`,
-      [tokenHash],
-    );
+    const row = await selectActiveOrgPasswordResetByHash(tokenHash);
     if (!row.rows.length) {
       return res.status(400).json({ error: 'Ongeldige of verlopen link. Vraag een nieuwe aan via «Wachtwoord vergeten».' });
     }
-    const userId = row.rows[0].user_id;
+    const resetRow = row.rows[0];
+    const userId = resetRow.user_id;
+    const storedOrgId = parsePositiveOrgId(resetRow.organization_id);
+    if (orgHintMismatch(storedOrgId, orgHint)) {
+      return res.status(400).json({
+        error: 'Deze resetlink hoort niet bij deze vereniging. Open de link opnieuw vanuit de e-mail.',
+      });
+    }
+    // Bevestig dat het account nog bij deze org hoort (voorkomt stale token na org-wissel).
+    let userCheck;
+    try {
+      userCheck = await executeQuery(
+        'SELECT id, organization_id, role, is_active FROM users WHERE id = ? LIMIT 1',
+        [userId],
+      );
+    } catch (_) {
+      userCheck = await executeQuery('SELECT id, role, is_active FROM users WHERE id = ? LIMIT 1', [userId]);
+    }
+    const userRow = userCheck.rows?.[0];
+    if (!userRow || !isOrgDashboardPasswordResetEligible(userRow)) {
+      await executeQuery('DELETE FROM org_password_resets WHERE user_id = ?', [userId]).catch(() => {});
+      return res.status(400).json({ error: 'Ongeldige of verlopen link. Vraag een nieuwe aan via «Wachtwoord vergeten».' });
+    }
+    const userOrgId = parsePositiveOrgId(userRow.organization_id);
+    const expectedOrgId = storedOrgId || orgHint || userOrgId;
+    if (expectedOrgId && userOrgId && expectedOrgId !== userOrgId) {
+      return res.status(400).json({
+        error: 'Deze resetlink hoort niet bij deze vereniging. Open de link opnieuw vanuit de e-mail.',
+      });
+    }
     const hashed = await bcrypt.hash(password, 10);
-    await executeQuery('UPDATE users SET password_hash = ? WHERE id = ?', [hashed, userId]);
+    if (expectedOrgId) {
+      await executeQuery(
+        'UPDATE users SET password_hash = ? WHERE id = ? AND organization_id = ?',
+        [hashed, userId, expectedOrgId],
+      );
+    } else {
+      await executeQuery('UPDATE users SET password_hash = ? WHERE id = ?', [hashed, userId]);
+    }
     await executeQuery('DELETE FROM org_password_resets WHERE user_id = ?', [userId]);
-    return res.json({ message: 'Je wachtwoord is bijgewerkt. Je kunt nu inloggen.' });
+    return res.json({
+      message: 'Je wachtwoord is bijgewerkt. Je kunt nu inloggen.',
+      organizationId: expectedOrgId || null,
+    });
   } catch (error) {
     console.error('org-reset-password error:', error);
     return res.status(500).json({
@@ -3986,26 +4141,51 @@ async function handleOrgValidateResetTokenRequest(req, res) {
       (req.body?.token != null ? String(req.body.token) : '') ||
       (req.query?.token != null ? String(req.query.token) : '');
     const trimmed = token.trim();
+    const orgHint =
+      parseOrgHint(req.body?.organizationId) ||
+      parseOrgHint(req.body?.organization_id) ||
+      parseOrgHint(req.body?.org) ||
+      parseOrgHint(req.query?.organizationId) ||
+      parseOrgHint(req.query?.organization_id) ||
+      parseOrgHint(req.query?.org);
     if (!/^[a-f0-9]{64}$/i.test(trimmed)) {
       return res.status(400).json({ valid: false, error: 'Ongeldige of verlopen link.' });
     }
+    await ensureOrgPasswordResetsTable();
     await purgeExpiredOrgPasswordResets().catch(() => {});
     const tokenHash = hashOrgPasswordResetToken(trimmed);
-    const row = await executeQuery(
-      `SELECT user_id FROM org_password_resets
-       WHERE token_hash = ?
-         AND expires_at > NOW()
-         AND created_at > DATE_SUB(NOW(), INTERVAL 1 HOUR)
-       LIMIT 1`,
-      [tokenHash],
-    );
+    const row = await selectActiveOrgPasswordResetByHash(tokenHash);
     if (!row.rows.length) {
       return res.status(400).json({
         valid: false,
         error: 'Deze resetlink is verlopen of al gebruikt. Vraag een nieuwe aan via «Wachtwoord vergeten».',
       });
     }
-    return res.json({ valid: true });
+    const resetRow = row.rows[0];
+    let organizationId = parsePositiveOrgId(resetRow.organization_id);
+    if (!organizationId) {
+      try {
+        const u = await executeQuery(
+          'SELECT organization_id FROM users WHERE id = ? LIMIT 1',
+          [resetRow.user_id],
+        );
+        organizationId = parsePositiveOrgId(u.rows?.[0]?.organization_id);
+      } catch (_) {
+        organizationId = null;
+      }
+    }
+    if (orgHintMismatch(organizationId, orgHint)) {
+      return res.status(400).json({
+        valid: false,
+        error: 'Deze resetlink hoort niet bij deze vereniging. Open de link opnieuw vanuit de e-mail.',
+      });
+    }
+    const orgInfo = organizationId ? await lookupOrganizationNameForReset(organizationId) : null;
+    return res.json({
+      valid: true,
+      organizationId: organizationId || null,
+      organizationName: orgInfo?.name || null,
+    });
   } catch (error) {
     console.error('org-validate-reset-token error:', error);
     return res.status(500).json({ valid: false, error: 'Er ging iets mis. Probeer het later opnieuw.' });
@@ -11148,9 +11328,56 @@ async function initializePushNotificationsTables() {
   }
 }
 
+async function ensureOrgPasswordResetsOrganizationIdColumn() {
+  try {
+    await executeQuery('SELECT organization_id FROM org_password_resets LIMIT 1');
+    return;
+  } catch (probeErr) {
+    const msg = String(probeErr?.message || probeErr?.sqlMessage || '').toLowerCase();
+    if (!msg.includes('unknown column') || !msg.includes('organization_id')) {
+      if (!isMysqlMissingTableError(probeErr)) {
+        console.warn('ensureOrgPasswordResetsOrganizationIdColumn probe:', probeErr.message);
+      }
+      return;
+    }
+  }
+  try {
+    await executeQuery(
+      'ALTER TABLE org_password_resets ADD COLUMN organization_id INT NULL AFTER user_id',
+    );
+    console.log('✅ org_password_resets.organization_id toegevoegd');
+  } catch (e) {
+    if (e.code === 'ER_DUP_FIELDNAME' || String(e.message || '').includes('Duplicate')) return;
+    console.warn('ensureOrgPasswordResetsOrganizationIdColumn alter:', e.message);
+    return;
+  }
+  try {
+    await executeQuery(
+      `UPDATE org_password_resets r
+       INNER JOIN users u ON u.id = r.user_id
+       SET r.organization_id = u.organization_id
+       WHERE r.organization_id IS NULL
+         AND u.organization_id IS NOT NULL`,
+    );
+  } catch (backfillErr) {
+    console.warn('ensureOrgPasswordResetsOrganizationIdColumn backfill:', backfillErr.message);
+  }
+  try {
+    await executeQuery(
+      'ALTER TABLE org_password_resets ADD KEY idx_org_password_resets_org (organization_id)',
+    );
+  } catch (idxErr) {
+    const msg = String(idxErr.message || '');
+    if (!msg.includes('Duplicate') && !/1061|already exists/i.test(msg)) {
+      console.warn('ensureOrgPasswordResetsOrganizationIdColumn index:', idxErr.message);
+    }
+  }
+}
+
 async function ensureOrgPasswordResetsTable() {
   try {
     await executeQuery('SELECT 1 FROM org_password_resets LIMIT 1');
+    await ensureOrgPasswordResetsOrganizationIdColumn();
     return;
   } catch (probeErr) {
     if (!isMysqlMissingTableError(probeErr)) {
@@ -11163,11 +11390,13 @@ async function ensureOrgPasswordResetsTable() {
       CREATE TABLE IF NOT EXISTS org_password_resets (
         id INT AUTO_INCREMENT PRIMARY KEY,
         user_id INT NOT NULL,
+        organization_id INT NULL,
         token_hash CHAR(64) NOT NULL,
         expires_at DATETIME NOT NULL,
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         UNIQUE KEY uq_org_password_resets_user (user_id),
-        KEY idx_org_password_resets_token (token_hash)
+        KEY idx_org_password_resets_token (token_hash),
+        KEY idx_org_password_resets_org (organization_id)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
     console.log('✅ org_password_resets tabel aangemaakt');
@@ -11175,6 +11404,7 @@ async function ensureOrgPasswordResetsTable() {
     console.error('ensureOrgPasswordResetsTable create:', e.message);
     throw e;
   }
+  await ensureOrgPasswordResetsOrganizationIdColumn();
 }
 
 async function ensureAppPasswordResetsTable() {
