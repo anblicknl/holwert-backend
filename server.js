@@ -90,6 +90,31 @@ function stripHtmlForPreview(input, maxLen = 120) {
   return maxLen > 0 && text.length > maxLen ? text.slice(0, maxLen) : text;
 }
 
+/**
+ * Gebruikersinvoer (reacties e.d.) als platte tekst: geen HTML/JS opslaan.
+ * Output-escaping in dashboard/mail blijft nodig; dit is defense-in-depth.
+ */
+function sanitizeUserPlainText(input, maxLen = 4000) {
+  let s = String(input ?? '')
+    .replace(/\u0000/g, '')
+    .replace(/[\u0001-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n');
+  // Tags en veelvoorkomende XSS-vectoren verwijderen vóór opslag
+  s = s.replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '');
+  s = s.replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, '');
+  s = s.replace(/<\/?[a-z][^>]*>/gi, '');
+  s = s.replace(/javascript\s*:/gi, '');
+  s = s.replace(/vbscript\s*:/gi, '');
+  s = s.replace(/on[a-z]+\s*=/gi, '');
+  s = s.replace(/&lt;/gi, '<').replace(/&gt;/gi, '>');
+  // Eventuele overgebleven tag-achtige resten nogmaals strippen
+  s = s.replace(/<\/?[a-z][^>]*>/gi, '');
+  s = s.replace(/\n{3,}/g, '\n\n').trim();
+  if (maxLen > 0 && s.length > maxLen) s = s.slice(0, maxLen);
+  return s;
+}
+
 /** Lijst-endpoints: geen data:-URI's (vaak 50–100 KB per logo → trage app). */
 function listSafeMediaUrl(url) {
   if (url == null) return null;
@@ -8553,9 +8578,10 @@ app.post('/api/news/:id/reactions', authenticateToken, newsReactionRateLimiter, 
     const newsId = parseInt(req.params.id, 10);
     if (Number.isNaN(newsId)) return res.status(400).json({ error: 'Ongeldig bericht' });
 
-    const text = String(req.body?.body || '').trim();
+    const rawText = String(req.body?.body || '');
+    if (rawText.trim().length > 4000) return res.status(400).json({ error: 'Reactie is te lang' });
+    const text = sanitizeUserPlainText(rawText, 4000);
     if (!text) return res.status(400).json({ error: 'Schrijf een reactie' });
-    if (text.length > 4000) return res.status(400).json({ error: 'Reactie is te lang' });
 
     const articleResult = await executeQuery(
       'SELECT id, title, organization_id, is_published, reactions_open FROM news WHERE id = ? LIMIT 1',
@@ -10027,10 +10053,11 @@ async function sendNewsReactionEmails({ emails, articleTitle, authorName, author
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
   const dashboardUrl = 'https://holwert.appenvloed.com/dashboard/#reactions';
-  const snippet = String(body || '').slice(0, 800);
-  const subject = `Nieuwe reactie: ${String(articleTitle || 'nieuwsbericht').slice(0, 80)}`;
+  const snippet = sanitizeUserPlainText(body, 800);
+  const safeTitle = sanitizeUserPlainText(articleTitle || 'nieuwsbericht', 80).replace(/[\r\n]+/g, ' ');
+  const subject = `Nieuwe reactie: ${safeTitle}`;
   const html = `<h2 style="color:#1a1a2e">Nieuwe reactie op je nieuwsbericht</h2>
-<p>Iemand heeft gereageerd op <strong>${esc(articleTitle)}</strong>.</p>
+<p>Iemand heeft gereageerd op <strong>${esc(safeTitle)}</strong>.</p>
 <table style="border-collapse:collapse;margin:1rem 0">
   <tr><td style="padding:4px 12px 4px 0;color:#555">Naam</td><td><strong>${esc(authorName)}</strong></td></tr>
   <tr><td style="padding:4px 12px 4px 0;color:#555">E-mail</td><td>${esc(authorEmail)}</td></tr>
