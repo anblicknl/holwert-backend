@@ -869,6 +869,108 @@ async function sendPublicOrFallback(res, opts) {
   }
 }
 
+function collectMediaFilenamesFromNode(node, into) {
+  if (typeof node === 'string') {
+    const m = node.match(/[?&]key=media%2F([a-f0-9]+\.(?:jpe?g|png|webp|gif|pdf))/i)
+      || node.match(/[?&]key=media\/([a-f0-9]+\.(?:jpe?g|png|webp|gif|pdf))/i)
+      || node.match(/\/media\/([a-f0-9]+\.(?:jpe?g|png|webp|gif|pdf))/i);
+    if (m) into.add(m[1].toLowerCase());
+    return;
+  }
+  if (Array.isArray(node)) {
+    for (const item of node) collectMediaFilenamesFromNode(item, into);
+    return;
+  }
+  if (isPlainObject(node)) {
+    for (const v of Object.values(node)) collectMediaFilenamesFromNode(v, into);
+  }
+}
+
+async function callStoreJson(payload) {
+  if (!storeConfigured()) {
+    const err = new Error('Fallback-store niet geconfigureerd');
+    err.code = 'NO_STORE_CONFIG';
+    throw err;
+  }
+  const res = await axios.post(storeBaseUrl(), payload, {
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Fallback-Secret': storeSecret(),
+    },
+    timeout: 60000,
+    validateStatus: () => true,
+  });
+  if (!(res.status >= 200 && res.status < 300 && res.data?.ok === true)) {
+    const err = new Error(res.data?.error || `store_http_${res.status}`);
+    err.code = 'STORE_ACTION_FAILED';
+    err.status = res.status;
+    throw err;
+  }
+  return res.data;
+}
+
+/**
+ * Media op holwert.frl die in geen enkele snapshot meer voorkomen.
+ * @param {{ dryRun?: boolean }} [opts]
+ */
+async function pruneUnreferencedFallbackMedia(opts = {}) {
+  const dryRun = opts.dryRun !== false; // default: dry-run tenzij expliciet false
+  const listed = await callStoreJson({ action: 'list-store', tenant: TENANT_ID });
+  const media = Array.isArray(listed.media) ? listed.media : [];
+  const snapshots = Array.isArray(listed.snapshots) ? listed.snapshots : [];
+
+  const referenced = new Set();
+  for (const snap of snapshots) {
+    try {
+      const loaded = await loadSnapshot(snap.key);
+      if (loaded?.data) collectMediaFilenamesFromNode(loaded.data, referenced);
+    } catch {
+      /* skip */
+    }
+  }
+
+  const orphans = [];
+  let orphanBytes = 0;
+  for (const file of media) {
+    const name = String(file.name || '').toLowerCase();
+    if (!name || referenced.has(name)) continue;
+    orphans.push(file);
+    orphanBytes += Number(file.bytes) || 0;
+  }
+
+  let deleted = [];
+  let failed = [];
+  let missing = [];
+  if (!dryRun && orphans.length) {
+    const names = orphans.map((o) => o.name);
+    for (let i = 0; i < names.length; i += 100) {
+      const chunk = names.slice(i, i + 100);
+      const result = await callStoreJson({
+        action: 'delete-media',
+        tenant: TENANT_ID,
+        files: chunk,
+      });
+      deleted = deleted.concat(result.deleted || []);
+      failed = failed.concat(result.failed || []);
+      missing = missing.concat(result.missing || []);
+    }
+  }
+
+  return {
+    tenant: TENANT_ID,
+    dryRun,
+    snapshotCount: snapshots.length,
+    mediaCount: media.length,
+    referencedCount: referenced.size,
+    orphanCount: orphans.length,
+    orphanBytes,
+    orphans: orphans.slice(0, 200),
+    deleted,
+    failed,
+    missing,
+  };
+}
+
 async function getStatusSummary() {
   const base = {
     tenant: TENANT_ID,
@@ -952,4 +1054,5 @@ module.exports = {
   recordFallbackHit,
   ageLabel,
   publicJsonUrl,
+  pruneUnreferencedFallbackMedia,
 };

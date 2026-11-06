@@ -128,6 +128,10 @@
                     <i class="fas fa-check-circle"></i>
                     <span>Moderatie</span>
                 </li>
+                <li class="nav-item" data-section="optimalisatie">
+                    <i class="fas fa-bolt"></i>
+                    <span>Optimalisatie</span>
+                </li>
             </ul>
         </nav>
 
@@ -187,8 +191,8 @@
                         </div>
                     </div>
                     <div id="fallbackStatusPanel" class="settings-panel fallback-status-panel">
-                        <h3 class="settings-panel__title"><i class="fas fa-shield-alt"></i> Publieke fallback</h3>
-                        <p class="settings-panel__intro">Alleen voor jou: of de app recent read-only backup-data van holwert.frl heeft geserveerd (VDX-storing).</p>
+                        <h3 class="settings-panel__title"><i class="fas fa-shield-alt"></i> Noodbackup (fallback)</h3>
+                        <p class="settings-panel__intro">Als de hoofddatabase even uitvalt, toont de app tijdelijk read-only data vanaf holwert.frl. Hier zie je of en wanneer dat gebeurde.</p>
                         <div id="fallbackStatusBody" class="fallback-status-body">
                             <p class="muted">Status laden…</p>
                         </div>
@@ -237,9 +241,6 @@
                 <div class="section-header">
                     <h2><i class="fas fa-building"></i> Organisaties</h2>
                     <div class="organizations-header-actions" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-                        <button type="button" id="migrateOrgLogosBtn" class="btn btn-secondary" title="Zet zware logo's uit de database om naar lichte bestanden">
-                            <i class="fas fa-compress"></i> Logo's verlichten
-                        </button>
                         <button type="button" id="addOrgDashboardAccountBtn" class="btn btn-secondary" title="Alleen e-mail, wachtwoord en organisatie (web-dashboard)">
                             <i class="fas fa-id-card"></i> Dashboard-account
                         </button>
@@ -280,6 +281,159 @@
                     </table>
                 </div>
                 <div id="organizationsMobileList" class="mobile-cards-container mobile-view"></div>
+                </div>
+            </section>
+
+            <!-- Optimalisatie: media & opslag -->
+            <section id="optimalisatie" class="content-section">
+                <div class="section-header">
+                    <h2><i class="fas fa-bolt"></i> Optimalisatie</h2>
+                </div>
+                <p class="section-description">
+                    Tools om media lichter te maken, dode links te repareren en weesbestanden op te ruimen.
+                    Nieuwe uploads worden al automatisch gecomprimeerd.
+                </p>
+
+                <div class="optimize-cards">
+                    <article class="optimize-card">
+                        <div class="optimize-card__head">
+                            <h3><i class="fas fa-images"></i> Nieuws- &amp; agenda-foto’s</h3>
+                            <button type="button" id="recompressMediaBtn" class="btn btn-primary" data-recompress-type="all">
+                                <i class="fas fa-play"></i> Start
+                            </button>
+                        </div>
+                        <p class="optimize-card__text">Comprimeert bestaande nieuws- en agenda-foto’s op de CDN (scherpte blijft behouden).</p>
+                        <div id="mediaRecompressPanel" class="media-recompress-panel" data-panel="all">
+                            <div class="media-recompress-panel__head">
+                                <strong><i class="fas fa-chart-bar"></i> Compressiewinst</strong>
+                                <span class="media-recompress-status" data-role="status">Nog niet gestart</span>
+                            </div>
+                            <div class="media-recompress-stats">
+                                <div class="media-recompress-stat"><span class="media-recompress-stat__label">Verkleind</span><span class="media-recompress-stat__value" data-role="converted">0</span></div>
+                                <div class="media-recompress-stat"><span class="media-recompress-stat__label">Overgeslagen</span><span class="media-recompress-stat__value" data-role="skipped">0</span></div>
+                                <div class="media-recompress-stat"><span class="media-recompress-stat__label">Mislukt</span><span class="media-recompress-stat__value" data-role="failed">0</span></div>
+                                <div class="media-recompress-stat media-recompress-stat--accent"><span class="media-recompress-stat__label">Bespaard</span><span class="media-recompress-stat__value" data-role="saved">0 MB</span></div>
+                            </div>
+                            <div class="media-recompress-chart" aria-hidden="true">
+                                <div class="media-recompress-chart__row">
+                                    <span class="media-recompress-chart__label">Voor</span>
+                                    <div class="media-recompress-chart__track"><div class="media-recompress-chart__bar media-recompress-chart__bar--before" data-role="bar-before" style="width:0%"></div></div>
+                                    <span class="media-recompress-chart__mb" data-role="before-mb">0 MB</span>
+                                </div>
+                                <div class="media-recompress-chart__row">
+                                    <span class="media-recompress-chart__label">Na</span>
+                                    <div class="media-recompress-chart__track"><div class="media-recompress-chart__bar media-recompress-chart__bar--after" data-role="bar-after" style="width:0%"></div></div>
+                                    <span class="media-recompress-chart__mb" data-role="after-mb">0 MB</span>
+                                </div>
+                            </div>
+                            <p class="media-recompress-hint" data-role="hint">Alleen foto’s met echte winst tellen mee.</p>
+                        </div>
+                    </article>
+
+                    <article class="optimize-card">
+                        <div class="optimize-card__head">
+                            <h3><i class="fas fa-user-circle"></i> Profielfoto’s</h3>
+                            <button type="button" id="recompressProfilesBtn" class="btn btn-primary" data-recompress-type="profiles">
+                                <i class="fas fa-play"></i> Start
+                            </button>
+                        </div>
+                        <p class="optimize-card__text">Zet base64-profielfoto’s om naar CDN-bestanden en comprimeert bestaande CDN-profielfoto’s.</p>
+                        <p class="media-recompress-hint" id="profilesOptimizeHint">Nog niet gestart.</p>
+                    </article>
+
+                    <article class="optimize-card">
+                        <div class="optimize-card__head">
+                            <h3><i class="fas fa-tools"></i> Praktische iconen</h3>
+                            <button type="button" id="recompressPracticalBtn" class="btn btn-primary" data-recompress-type="practical">
+                                <i class="fas fa-play"></i> Start
+                            </button>
+                        </div>
+                        <p class="optimize-card__text">Comprimeert geüploade iconen onder Praktisch (alleen als het een CDN-afbeelding is, geen Ionicons-naam).</p>
+                        <p class="media-recompress-hint" id="practicalOptimizeHint">Nog niet gestart.</p>
+                    </article>
+
+                    <article class="optimize-card">
+                        <div class="optimize-card__head">
+                            <h3><i class="fas fa-building"></i> Organisatie-logo’s</h3>
+                            <button type="button" id="migrateOrgLogosBtn" class="btn btn-primary">
+                                <i class="fas fa-play"></i> Start
+                            </button>
+                        </div>
+                        <p class="optimize-card__text">Zet logo’s die nog als zware data in de database staan om naar lichte bestanden op de server.</p>
+                        <p class="media-recompress-hint" id="logoMigrateHint">Nog niet gestart.</p>
+                    </article>
+
+                    <article class="optimize-card">
+                        <div class="optimize-card__head">
+                            <h3><i class="fas fa-unlink"></i> Dode afbeeldingslinks</h3>
+                            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                                <button type="button" id="checkBrokenLinksBtn" class="btn btn-secondary">
+                                    <i class="fas fa-search"></i> Scannen
+                                </button>
+                                <button type="button" id="clearBrokenLinksBtn" class="btn btn-primary" disabled>
+                                    <i class="fas fa-eraser"></i> Wissen uit content
+                                </button>
+                            </div>
+                        </div>
+                        <p class="optimize-card__text">
+                            Vindt CDN-URL’s in nieuws, agenda, profielen, praktisch en logo’s die niet meer laden.
+                            Wissen haalt alleen de kapotte afbeelding weg — de tekst blijft.
+                        </p>
+                        <p class="media-recompress-hint" id="brokenLinksHint">Nog niet gescand.</p>
+                        <ul id="brokenLinksList" class="optimize-result-list" hidden></ul>
+                    </article>
+
+                    <article class="optimize-card">
+                        <div class="optimize-card__head">
+                            <h3><i class="fas fa-ghost"></i> Weesbestanden</h3>
+                            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                                <button type="button" id="findOrphansBtn" class="btn btn-secondary">
+                                    <i class="fas fa-search"></i> Scannen
+                                </button>
+                                <button type="button" id="deleteOrphansBtn" class="btn btn-primary" disabled>
+                                    <i class="fas fa-trash"></i> Verwijderen
+                                </button>
+                            </div>
+                        </div>
+                        <p class="optimize-card__text">
+                            Bestanden op de server die nergens meer in de database aan content hangen.
+                            Vereist <code>upload/list-uploads.php</code> op de hosting (eenmalig via FTP).
+                        </p>
+                        <p class="media-recompress-hint" id="orphansHint">Nog niet gescand.</p>
+                        <ul id="orphansList" class="optimize-result-list" hidden></ul>
+                    </article>
+
+                    <article class="optimize-card">
+                        <div class="optimize-card__head">
+                            <h3><i class="fas fa-cloud"></i> Fallback-media (holwert.frl)</h3>
+                            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                                <button type="button" id="scanFallbackMediaBtn" class="btn btn-secondary">
+                                    <i class="fas fa-search"></i> Scannen
+                                </button>
+                                <button type="button" id="pruneFallbackMediaBtn" class="btn btn-primary" disabled>
+                                    <i class="fas fa-trash"></i> Ongebruikte wissen
+                                </button>
+                            </div>
+                        </div>
+                        <p class="optimize-card__text">
+                            Afbeeldingen die bij een VDX-storing op holwert.frl worden gespiegeld.
+                            Wist alleen bestanden die in <strong>geen enkele</strong> huidige fallback-snapshot meer voorkomen
+                            (bijv. nieuws ouder dan ±21 dagen).
+                        </p>
+                        <p class="media-recompress-hint" id="fallbackMediaHint">Nog niet gescand. Vereist bijgewerkte <code>store.php</code> op holwert.frl.</p>
+                        <ul id="fallbackMediaList" class="optimize-result-list" hidden></ul>
+                    </article>
+
+                    <article class="optimize-card">
+                        <div class="optimize-card__head">
+                            <h3><i class="fas fa-memory"></i> API-cache legen</h3>
+                            <button type="button" id="flushCacheBtn" class="btn btn-secondary">
+                                <i class="fas fa-sync"></i> Cache legen
+                            </button>
+                        </div>
+                        <p class="optimize-card__text">Leegt de tijdelijke geheugencache van de API (handig na grote media-opruiming).</p>
+                        <p class="media-recompress-hint" id="cacheFlushHint">Nog niet uitgevoerd.</p>
+                    </article>
                 </div>
             </section>
 

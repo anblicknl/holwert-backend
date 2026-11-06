@@ -19,7 +19,16 @@ Vercel Storage nodig.
 ## Setup holwert.frl
 
 Zie map [`dorpsapp-fallback-host/`](../dorpsapp-fallback-host/README.md):
-`store.php` opnieuw uploaden (media-ondersteuning) + secret behouden.
+`store.php` opnieuw uploaden (media + `list-store` / `delete-media`) + secret behouden.
+
+## Fallback-media opruimen
+
+In `/admin` → **Optimalisatie** → **Fallback-media (holwert.frl)**:
+
+1. **Scannen** — toont bestanden die in geen snapshot meer voorkomen.
+2. **Ongebruikte wissen** — verwijdert die bestanden op holwert.frl.
+
+Snapshots houden nieuws/agenda ±21 dagen; oudere gespiegelde foto’s worden zo wees en mogen weg.
 
 ## Vercel environment
 

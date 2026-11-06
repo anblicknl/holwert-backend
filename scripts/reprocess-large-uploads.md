@@ -3,13 +3,21 @@
 Nieuwe uploads worden al gecomprimeerd (client + Node `imageCompress` + optioneel GD in `upload.php`).
 Dit document is voor **bestaande** monster-grote bestanden op `holwert.appenvloed.com/uploads/…`.
 
+## Voorkeursroute (admin)
+
+In `/admin` → menu **Optimalisatie**:
+
+- **Nieuws- & agenda-foto’s** → `POST /api/admin/media/recompress` (batches, grafiek MB-winst).
+- **Organisatie-logo’s** → `POST /api/admin/organizations/migrate-logos` (base64 → CDN-bestand).
+- Comprimeert met max 1600px / q≈72; overschrijft niet in-place.
+
 ## Principes
 
 - **Niet destructief zonder backup.** Overschrijf geen bestanden in-place via FTP tenzij Douwe-Jan dat bewust doet met een lokale kopie.
 - **Liever nieuw pad forceren:** nieuwe gecomprimeerde file uploaden → DB `image_url` (en eventueel `large_url`) bijwerken → oude file later opruimen.
 - Geen aparte mappen per org buiten `uploads/YYYY/MM/NN/`.
 
-## Handmatige route (aanbevolen eerst)
+## Handmatige route (één-off / offline)
 
 1. Download de grote JPEG/PNG via browser of FTP (bewaar als backup).
 2. Open in Preview/Photoshop of gebruik lokaal:

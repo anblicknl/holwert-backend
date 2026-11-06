@@ -6,9 +6,10 @@ Draait op **Antagonist** (los van VDX).
 ## Upload (FTP / File Manager)
 
 1. Map op holwert.frl, bv. `/dorpsapp-fallback-host/` in de webroot.
-2. Upload `store.php` (overschrijven bij updates).
+2. Upload `store.php` (overschrijven bij updates — bevat o.a. `list-store` / `delete-media` voor opruimen).
 3. Zet in `store.php` `FALLBACK_STORE_SECRET` op **hetzelfde** geheim als
-   Vercel `FALLBACK_STORE_SECRET` (niet de placeholder uit de repo).
+   Vercel `FALLBACK_STORE_SECRET` (niet de placeholder uit de repo). **Let op:** bij overschrijven
+   opnieuw het echte secret zetten als je een clean repo-bestand uploadt.
 4. PHP moet kunnen schrijven in die map (`data/` + `data/{tenant}/media/`).
 
 Test-URL’s:

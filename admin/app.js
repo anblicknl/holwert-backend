@@ -414,6 +414,50 @@ class HolwertAdmin {
             migrateOrgLogosBtn.addEventListener('click', () => this.migrateEmbeddedLogos({ manual: true }));
         }
 
+        const bindRecompress = (id, type, hintId) => {
+            const btn = document.getElementById(id);
+            if (btn) {
+                btn.addEventListener('click', () => this.recompressHostedMedia({
+                    manual: true,
+                    type,
+                    hintId,
+                    buttonId: id,
+                }));
+            }
+        };
+        bindRecompress('recompressMediaBtn', 'all', null);
+        bindRecompress('recompressProfilesBtn', 'profiles', 'profilesOptimizeHint');
+        bindRecompress('recompressPracticalBtn', 'practical', 'practicalOptimizeHint');
+
+        const checkBrokenLinksBtn = document.getElementById('checkBrokenLinksBtn');
+        if (checkBrokenLinksBtn) {
+            checkBrokenLinksBtn.addEventListener('click', () => this.scanBrokenMediaLinks());
+        }
+        const clearBrokenLinksBtn = document.getElementById('clearBrokenLinksBtn');
+        if (clearBrokenLinksBtn) {
+            clearBrokenLinksBtn.addEventListener('click', () => this.clearBrokenMediaLinks());
+        }
+        const findOrphansBtn = document.getElementById('findOrphansBtn');
+        if (findOrphansBtn) {
+            findOrphansBtn.addEventListener('click', () => this.scanOrphanUploads());
+        }
+        const deleteOrphansBtn = document.getElementById('deleteOrphansBtn');
+        if (deleteOrphansBtn) {
+            deleteOrphansBtn.addEventListener('click', () => this.deleteOrphanUploads());
+        }
+        const flushCacheBtn = document.getElementById('flushCacheBtn');
+        if (flushCacheBtn) {
+            flushCacheBtn.addEventListener('click', () => this.flushApiCache());
+        }
+        const scanFallbackMediaBtn = document.getElementById('scanFallbackMediaBtn');
+        if (scanFallbackMediaBtn) {
+            scanFallbackMediaBtn.addEventListener('click', () => this.scanFallbackMedia({ delete: false }));
+        }
+        const pruneFallbackMediaBtn = document.getElementById('pruneFallbackMediaBtn');
+        if (pruneFallbackMediaBtn) {
+            pruneFallbackMediaBtn.addEventListener('click', () => this.pruneFallbackMedia());
+        }
+
         const addOrgDashboardAccountBtn = document.getElementById('addOrgDashboardAccountBtn');
         if (addOrgDashboardAccountBtn) {
             addOrgDashboardAccountBtn.addEventListener('click', () => {
@@ -1199,6 +1243,55 @@ class HolwertAdmin {
         }
     }
 
+    formatFallbackRelative(iso) {
+        if (!iso) return null;
+        const t = new Date(iso).getTime();
+        if (!Number.isFinite(t)) return null;
+        const sec = Math.round((Date.now() - t) / 1000);
+        if (sec < 0) return 'zojuist';
+        if (sec < 60) return `${sec} seconden geleden`;
+        const min = Math.round(sec / 60);
+        if (min < 60) return `${min} minuut${min === 1 ? '' : 'en'} geleden`;
+        const hr = Math.round(min / 60);
+        if (hr < 48) return `${hr} uur geleden`;
+        const days = Math.round(hr / 24);
+        return `${days} dag${days === 1 ? '' : 'en'} geleden`;
+    }
+
+    fallbackReasonLabel(reason) {
+        const map = {
+            live_unavailable: 'Hoofddatabase was tijdelijk niet bereikbaar',
+            live_unavailable_no_snapshot: 'Database niet bereikbaar — voor dit onderdeel was geen backup klaar',
+            no_snapshot: 'Geen backup beschikbaar voor dit onderdeel',
+            forced: 'Handmatige testmodus (FORCE_PUBLIC_FALLBACK)',
+            forced_no_snapshot: 'Testmodus zonder beschikbare backup',
+        };
+        return map[reason] || (reason ? String(reason) : 'Onbekende reden');
+    }
+
+    fallbackKeyLabel(key) {
+        const map = {
+            bootstrap: 'App-start',
+            'news-list': 'Nieuwslijst',
+            'news-list-minimal': 'Nieuwslijst (licht)',
+            'news-list-filtered': 'Nieuws (gefilterd)',
+            'news-head': 'Nieuws (eerste berichten)',
+            'events-list': 'Agenda',
+            'events-list-filtered': 'Agenda (gefilterd)',
+            'organizations-list': 'Organisaties',
+            'organizations-list-minimal': 'Organisaties (licht)',
+            'organizations-list-filtered': 'Organisaties (gefilterd)',
+            'practical-info': 'Praktisch',
+            afvalkalender: 'Afvalkalender',
+            dorpsomroeper: 'Dorpsomroeper',
+        };
+        if (map[key]) return map[key];
+        if (String(key || '').startsWith('news/')) return `Nieuwsbericht #${String(key).slice(5)}`;
+        if (String(key || '').startsWith('events/')) return `Evenement #${String(key).slice(7)}`;
+        if (String(key || '').startsWith('organizations/')) return `Organisatie #${String(key).slice(14)}`;
+        return key || 'Onbekend onderdeel';
+    }
+
     async loadFallbackStatus() {
         const body = document.getElementById('fallbackStatusBody');
         if (!body) return;
@@ -1212,47 +1305,100 @@ class HolwertAdmin {
             }
             const data = await response.json();
             const u = data.usage || {};
+            const configured = data.storeConfigured !== false;
             const active = u.activeNow === true;
             const lastHit = u.lastHitAt;
-            const snaps = Array.isArray(data.snapshots) ? data.snapshots.length : 0;
-            const recent = Array.isArray(u.recent) ? u.recent.slice(0, 5) : [];
+            const relative = this.formatFallbackRelative(lastHit);
+            const snaps = Array.isArray(data.snapshots) ? data.snapshots : [];
+            const recent = Array.isArray(u.recent) ? u.recent.slice(0, 6) : [];
+            const retention = data.retentionDays || 21;
+
+            let oldestSnap = null;
+            let newestSnap = null;
+            for (const s of snaps) {
+                if (!s?.lastUpdated) continue;
+                const t = new Date(s.lastUpdated).getTime();
+                if (!Number.isFinite(t)) continue;
+                if (!oldestSnap || t < oldestSnap.t) oldestSnap = { t, age: s.age, key: s.key };
+                if (!newestSnap || t > newestSnap.t) newestSnap = { t, age: s.age, key: s.key };
+            }
 
             let stateClass = 'fallback-ok';
-            let stateLabel = 'Geen recente fallback';
-            if (active) {
+            let badge = 'Stabiel';
+            let title = 'Noodbackup niet nodig';
+            let whenHtml = 'Er is recent geen beroep gedaan op de noodbackup.';
+            if (!configured) {
+                stateClass = 'fallback-off';
+                badge = 'Niet geconfigureerd';
+                title = 'Fallback-store staat niet aan';
+                whenHtml = 'Controleer FALLBACK_STORE_URL / FALLBACK_STORE_SECRET in Vercel.';
+            } else if (active) {
                 stateClass = 'fallback-active';
-                stateLabel = 'Nu actief (laatste 15 min)';
+                badge = 'Nu actief';
+                title = 'Noodbackup wordt nu gebruikt';
+                whenHtml = relative
+                    ? `Laatste beroep: <strong>${this.formatFallbackTime(lastHit)}</strong> <span class="muted">(${relative})</span>`
+                    : 'Actief in de laatste 15 minuten.';
             } else if (lastHit) {
                 stateClass = 'fallback-recent';
-                stateLabel = `Laatst gebruikt ${u.lastHitAge || ''}`;
+                badge = 'Eerder gebruikt';
+                title = 'Noodbackup is eerder aangesproken';
+                whenHtml = `Laatste beroep: <strong>${this.formatFallbackTime(lastHit)}</strong>${relative ? ` <span class="muted">(${relative})</span>` : ''}`;
             }
+
+            const whyHtml = lastHit
+                ? `<p class="fallback-hero__why"><strong>Waarom:</strong> ${this.escapeHtml(this.fallbackReasonLabel(u.lastHitReason))}
+                   ${u.lastHitKey ? ` · <strong>Onderdeel:</strong> ${this.escapeHtml(this.fallbackKeyLabel(u.lastHitKey))}` : ''}</p>`
+                : '';
 
             const recentHtml = recent.length
                 ? `<ul class="fallback-recent-list">${recent
-                      .map(
-                          (e) =>
-                              `<li><span class="fallback-recent-at">${this.formatFallbackTime(e.at)}</span> · <code>${this.escapeHtml(e.key || '')}</code> · ${this.escapeHtml(e.reason || '')}</li>`
-                      )
+                      .map((e) => {
+                          const rel = this.formatFallbackRelative(e.at);
+                          return `<li>
+                            <span class="fallback-recent-at">${this.formatFallbackTime(e.at)}${rel ? `<br><span class="muted" style="font-weight:500">${this.escapeHtml(rel)}</span>` : ''}</span>
+                            <span class="fallback-recent-main">
+                              <span class="fallback-recent-key">${this.escapeHtml(this.fallbackKeyLabel(e.key))}</span>
+                              <span class="fallback-recent-reason">${this.escapeHtml(this.fallbackReasonLabel(e.reason))}</span>
+                            </span>
+                          </li>`;
+                      })
                       .join('')}</ul>`
-                : `<p class="muted">Nog geen hits gelogd. Dit vult zich zodra VDX even niet bereikbaar is (of bij een test met FORCE_PUBLIC_FALLBACK).</p>`;
+                : `<p class="muted">Nog geen eerdere berichten. Dit vult zich zodra de hoofddatabase even niet bereikbaar is.</p>`;
 
             body.innerHTML = `
-                <div class="fallback-status-row ${stateClass}">
-                    <strong>${stateLabel}</strong>
-                    <span>Snapshots: ${snaps} · Hits totaal: ${u.hitsTotal || 0}</span>
+                <div class="fallback-hero ${stateClass}">
+                    <span class="fallback-hero__badge"><i class="fas fa-${active ? 'exclamation-triangle' : lastHit ? 'history' : 'check'}"></i> ${badge}</span>
+                    <p class="fallback-hero__title">${title}</p>
+                    <p class="fallback-hero__when">${whenHtml}</p>
+                    ${whyHtml}
                 </div>
-                <p class="fallback-status-meta">
-                    Laatste hit: <strong>${this.formatFallbackTime(lastHit)}</strong>
-                    ${u.lastHitKey ? ` · key <code>${this.escapeHtml(u.lastHitKey)}</code>` : ''}
-                    ${u.lastHitReason ? ` · ${this.escapeHtml(u.lastHitReason)}` : ''}
-                </p>
+                <div class="fallback-stat-grid">
+                    <div class="fallback-stat">
+                        <span class="fallback-stat__label">Backup-pakketten</span>
+                        <span class="fallback-stat__value">${snaps.length} klaar</span>
+                    </div>
+                    <div class="fallback-stat">
+                        <span class="fallback-stat__label">Keer gebruikt</span>
+                        <span class="fallback-stat__value">${u.hitsTotal || 0}×</span>
+                    </div>
+                    <div class="fallback-stat">
+                        <span class="fallback-stat__label">Bewaartermijn</span>
+                        <span class="fallback-stat__value">±${retention} dagen</span>
+                    </div>
+                    <div class="fallback-stat">
+                        <span class="fallback-stat__label">Backup bijgewerkt</span>
+                        <span class="fallback-stat__value">${newestSnap?.age || '—'}</span>
+                    </div>
+                </div>
                 <div class="fallback-recent">
-                    <h4>Recente hits</h4>
+                    <h4>Recente momenten</h4>
                     ${recentHtml}
                 </div>
                 <p class="fallback-status-link muted">
-                    Detail-JSON:
-                    <a href="${this.apiBaseUrl}/app/fallback-status" target="_blank" rel="noopener">/api/app/fallback-status</a>
+                    Technisch detail:
+                    <a href="${this.apiBaseUrl}/app/fallback-status" target="_blank" rel="noopener">status-JSON</a>
+                    ${data.forceFallback ? ' · <strong>testmodus aan</strong>' : ''}
                 </p>
             `;
         } catch (error) {
@@ -2598,14 +2744,505 @@ class HolwertAdmin {
         }
     }
 
+    formatBytesAsMb(bytes) {
+        const n = Number(bytes) || 0;
+        return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+    }
+
+    updateMediaRecompressPanel(totals, statusText) {
+        const panel = document.getElementById('mediaRecompressPanel');
+        if (!panel) return;
+        const q = (role) => panel.querySelector(`[data-role="${role}"]`);
+        const set = (role, value) => {
+            const el = q(role);
+            if (el) el.textContent = value;
+        };
+        set('status', statusText || '');
+        set('converted', String(totals.converted || 0));
+        set('skipped', String(totals.skipped || 0));
+        set('failed', String(totals.failed || 0));
+        set('saved', this.formatBytesAsMb(totals.bytesSaved));
+        set('before-mb', this.formatBytesAsMb(totals.bytesBefore));
+        set('after-mb', this.formatBytesAsMb(totals.bytesAfter));
+
+        const max = Math.max(totals.bytesBefore || 0, totals.bytesAfter || 0, 1);
+        const beforeBar = q('bar-before');
+        const afterBar = q('bar-after');
+        if (beforeBar) beforeBar.style.width = `${Math.round(((totals.bytesBefore || 0) / max) * 100)}%`;
+        if (afterBar) afterBar.style.width = `${Math.round(((totals.bytesAfter || 0) / max) * 100)}%`;
+
+        const hint = q('hint');
+        if (hint && totals.bytesSaved > 0) {
+            const pct = totals.bytesBefore > 0
+                ? Math.round((totals.bytesSaved / totals.bytesBefore) * 100)
+                : 0;
+            hint.textContent = `Behaalde winst: ${this.formatBytesAsMb(totals.bytesSaved)} (${pct}% lichter) op ${totals.converted} foto’s.`;
+        }
+    }
+
+    async recompressHostedMedia({
+        manual = false,
+        type = 'all',
+        hintId = null,
+        buttonId = 'recompressMediaBtn',
+    } = {}) {
+        if (!this.token || this._mediaRecompressRunning) return;
+        this._mediaRecompressRunning = true;
+        const btn = document.getElementById(buttonId);
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Bezig…';
+        }
+        const hintEl = hintId ? document.getElementById(hintId) : null;
+        if (hintEl) hintEl.textContent = 'Bezig…';
+
+        // Profielfoto's: eerst base64 → CDN
+        if (type === 'profiles') {
+            try {
+                for (let i = 0; i < 12; i++) {
+                    const mig = await fetch(`${this.apiBaseUrl}/admin/media/migrate-profile-images`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            Authorization: `Bearer ${this.token}`,
+                        },
+                        body: JSON.stringify({ limit: 6 }),
+                    });
+                    if (!mig.ok) break;
+                    const migData = await mig.json();
+                    if (!migData.remaining) break;
+                    if (!(migData.converted || []).length) break;
+                }
+            } catch (e) {
+                console.warn('migrate-profile-images:', e);
+            }
+        }
+
+        const totals = {
+            converted: 0,
+            skipped: 0,
+            failed: 0,
+            bytesBefore: 0,
+            bytesAfter: 0,
+            bytesSaved: 0,
+        };
+        let cursors = {};
+        const maxRounds = 40;
+
+        try {
+            if (type === 'all') this.updateMediaRecompressPanel(totals, 'Bezig…');
+            for (let i = 0; i < maxRounds; i++) {
+                const response = await fetch(`${this.apiBaseUrl}/admin/media/recompress`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${this.token}`,
+                    },
+                    body: JSON.stringify({
+                        limit: 6,
+                        type,
+                        cursors,
+                        afterNewsId: cursors.news || 0,
+                        afterEventsId: cursors.events || 0,
+                    }),
+                });
+                if (response.status === 404) {
+                    if (manual) {
+                        this.showNotification('API is nog aan het bijwerken. Probeer zo opnieuw.', 'warning');
+                    }
+                    return;
+                }
+                if (!response.ok) {
+                    const err = await response.json().catch(() => ({}));
+                    throw new Error(err.message || err.error || `HTTP ${response.status}`);
+                }
+                const data = await response.json();
+                const st = data.stats || {};
+                totals.converted += st.convertedCount || (data.converted || []).length;
+                totals.skipped += st.skippedCount || (data.skipped || []).length;
+                totals.failed += st.failedCount || (data.failed || []).length;
+                for (const item of data.converted || []) {
+                    totals.bytesBefore += item.beforeBytes || 0;
+                    totals.bytesAfter += item.afterBytes || 0;
+                    totals.bytesSaved += item.savedBytes || 0;
+                }
+                if (data.cursors) cursors = data.cursors;
+                else if (data.cursor) cursors = data.cursor;
+                const remaining = data.remaining != null ? data.remaining : 0;
+                const status = remaining > 0 ? `Bezig… nog ca. ${remaining}` : 'Klaar';
+                if (type === 'all') this.updateMediaRecompressPanel(totals, status);
+                if (hintEl) {
+                    hintEl.textContent = totals.converted
+                        ? `${totals.converted} verkleind (−${this.formatBytesAsMb(totals.bytesSaved)}). ${status}`
+                        : status;
+                }
+                if (data.done || remaining === 0) break;
+                if (!(data.converted || []).length && !(data.skipped || []).length && !(data.failed || []).length) {
+                    break;
+                }
+            }
+
+            if (totals.converted > 0) {
+                this.showNotification(
+                    `${totals.converted} foto’s verkleind (−${this.formatBytesAsMb(totals.bytesSaved)}).`,
+                    'success',
+                );
+            } else if (manual) {
+                this.showNotification('Geen foto’s gevonden die nog winst opleveren.', 'success');
+                if (hintEl) hintEl.textContent = 'Geen winst meer — alles is al licht genoeg.';
+            }
+        } catch (error) {
+            console.warn('recompressHostedMedia:', error);
+            if (manual) {
+                this.showNotification(`Optimalisatie mislukt: ${error.message}`, 'error');
+            }
+            if (type === 'all') this.updateMediaRecompressPanel(totals, `Fout: ${error.message}`);
+            if (hintEl) hintEl.textContent = `Fout: ${error.message}`;
+        } finally {
+            this._mediaRecompressRunning = false;
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-play"></i> Start';
+            }
+        }
+    }
+
+    async scanBrokenMediaLinks() {
+        if (!this.token || this._brokenScanRunning) return;
+        this._brokenScanRunning = true;
+        this._brokenLinkItems = [];
+        const hint = document.getElementById('brokenLinksHint');
+        const list = document.getElementById('brokenLinksList');
+        const clearBtn = document.getElementById('clearBrokenLinksBtn');
+        const scanBtn = document.getElementById('checkBrokenLinksBtn');
+        if (scanBtn) {
+            scanBtn.disabled = true;
+            scanBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Scannen…';
+        }
+        if (clearBtn) clearBtn.disabled = true;
+        if (list) {
+            list.innerHTML = '';
+            list.hidden = true;
+        }
+        if (hint) hint.textContent = 'Bezig met scannen…';
+
+        let cursors = {};
+        try {
+            for (let i = 0; i < 50; i++) {
+                const response = await fetch(`${this.apiBaseUrl}/admin/media/check-links`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${this.token}`,
+                    },
+                    body: JSON.stringify({ limit: 8, cursors }),
+                });
+                if (!response.ok) {
+                    const err = await response.json().catch(() => ({}));
+                    throw new Error(err.message || err.error || `HTTP ${response.status}`);
+                }
+                const data = await response.json();
+                if (data.cursors) cursors = data.cursors;
+                for (const item of data.broken || []) this._brokenLinkItems.push(item);
+                if (hint) {
+                    hint.textContent = `Gevonden: ${this._brokenLinkItems.length} dode link(s). Nog ca. ${data.remaining || 0} te scannen…`;
+                }
+                if (data.done || !data.remaining) break;
+            }
+
+            if (list && this._brokenLinkItems.length) {
+                list.hidden = false;
+                list.innerHTML = this._brokenLinkItems.slice(0, 80).map((item) =>
+                    `<li><strong>${item.type}</strong> #${item.id} ${item.label || ''} — HTTP ${item.status || '?'}<br><span style="color:#888">${item.url}</span></li>`
+                ).join('');
+            }
+            if (hint) {
+                hint.textContent = this._brokenLinkItems.length
+                    ? `${this._brokenLinkItems.length} dode link(s). Klik “Wissen uit content” om de kapotte afbeelding te ontkoppelen.`
+                    : 'Geen dode CDN-links gevonden.';
+            }
+            if (clearBtn) clearBtn.disabled = this._brokenLinkItems.length === 0;
+            this.showNotification(
+                this._brokenLinkItems.length
+                    ? `${this._brokenLinkItems.length} dode link(s) gevonden`
+                    : 'Geen dode links',
+                this._brokenLinkItems.length ? 'warning' : 'success',
+            );
+        } catch (error) {
+            if (hint) hint.textContent = `Fout: ${error.message}`;
+            this.showNotification(`Linkcheck mislukt: ${error.message}`, 'error');
+        } finally {
+            this._brokenScanRunning = false;
+            if (scanBtn) {
+                scanBtn.disabled = false;
+                scanBtn.innerHTML = '<i class="fas fa-search"></i> Scannen';
+            }
+        }
+    }
+
+    async clearBrokenMediaLinks() {
+        if (!this.token || !this._brokenLinkItems?.length) return;
+        if (!confirm(`Weet je zeker dat je ${this._brokenLinkItems.length} dode afbeeldingslink(s) wilt wissen uit de content? Tekst blijft bewaard.`)) {
+            return;
+        }
+        const hint = document.getElementById('brokenLinksHint');
+        const clearBtn = document.getElementById('clearBrokenLinksBtn');
+        if (clearBtn) clearBtn.disabled = true;
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/admin/media/clear-broken`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${this.token}`,
+                },
+                body: JSON.stringify({ items: this._brokenLinkItems }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.message || data.error || `HTTP ${response.status}`);
+            this.showNotification(data.message || 'Dode links gewist', 'success');
+            if (hint) hint.textContent = data.message || 'Klaar.';
+            this._brokenLinkItems = [];
+            const list = document.getElementById('brokenLinksList');
+            if (list) {
+                list.innerHTML = '';
+                list.hidden = true;
+            }
+        } catch (error) {
+            this.showNotification(`Wissen mislukt: ${error.message}`, 'error');
+            if (clearBtn) clearBtn.disabled = false;
+        }
+    }
+
+    async scanOrphanUploads() {
+        if (!this.token || this._orphanScanRunning) return;
+        this._orphanScanRunning = true;
+        this._orphanPaths = [];
+        const hint = document.getElementById('orphansHint');
+        const list = document.getElementById('orphansList');
+        const findBtn = document.getElementById('findOrphansBtn');
+        const delBtn = document.getElementById('deleteOrphansBtn');
+        if (findBtn) {
+            findBtn.disabled = true;
+            findBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Scannen…';
+        }
+        if (delBtn) delBtn.disabled = true;
+        if (hint) hint.textContent = 'Bezig…';
+        if (list) {
+            list.innerHTML = '';
+            list.hidden = true;
+        }
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/admin/media/find-orphans`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${this.token}`,
+                },
+                body: '{}',
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(
+                    (data.hint ? `${data.message} ${data.hint}` : null)
+                    || data.message
+                    || data.error
+                    || `HTTP ${response.status}`,
+                );
+            }
+            this._orphanPaths = (data.orphans || []).map((o) => o.path).filter(Boolean);
+            if (list && data.orphans?.length) {
+                list.hidden = false;
+                list.innerHTML = data.orphans.slice(0, 100).map((o) =>
+                    `<li>${o.path}${o.size != null ? ` <span style="color:#888">(${Math.round(o.size / 1024)} KB)</span>` : ''}</li>`
+                ).join('');
+            }
+            if (hint) {
+                hint.textContent = data.orphanCount
+                    ? `${data.orphanCount} weesbestand(en) (getoond max. 200). ${data.truncated ? 'Lijst is afgekapt.' : ''}`
+                    : 'Geen weesbestanden gevonden.';
+            }
+            if (delBtn) delBtn.disabled = this._orphanPaths.length === 0;
+            this.showNotification(data.message || 'Scan klaar', data.orphanCount ? 'warning' : 'success');
+        } catch (error) {
+            if (hint) hint.textContent = `Fout: ${error.message}`;
+            this.showNotification(`Weesscan mislukt: ${error.message}`, 'error');
+        } finally {
+            this._orphanScanRunning = false;
+            if (findBtn) {
+                findBtn.disabled = false;
+                findBtn.innerHTML = '<i class="fas fa-search"></i> Scannen';
+            }
+        }
+    }
+
+    async deleteOrphanUploads() {
+        if (!this.token || !this._orphanPaths?.length) return;
+        if (!confirm(`Weet je zeker dat je ${this._orphanPaths.length} weesbestand(en) wilt verwijderen van de server? Dit kan niet ongedaan worden.`)) {
+            return;
+        }
+        const hint = document.getElementById('orphansHint');
+        const delBtn = document.getElementById('deleteOrphansBtn');
+        if (delBtn) delBtn.disabled = true;
+        try {
+            // In chunks van 40
+            let deleted = 0;
+            for (let i = 0; i < this._orphanPaths.length; i += 40) {
+                const chunk = this._orphanPaths.slice(i, i + 40);
+                const response = await fetch(`${this.apiBaseUrl}/admin/media/delete-orphans`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${this.token}`,
+                    },
+                    body: JSON.stringify({ paths: chunk }),
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(data.message || data.error || `HTTP ${response.status}`);
+                deleted += (data.deleted || []).length;
+            }
+            this.showNotification(`${deleted} weesbestand(en) verwijderd`, 'success');
+            if (hint) hint.textContent = `${deleted} verwijderd. Scan opnieuw om te controleren.`;
+            this._orphanPaths = [];
+            const list = document.getElementById('orphansList');
+            if (list) {
+                list.innerHTML = '';
+                list.hidden = true;
+            }
+        } catch (error) {
+            this.showNotification(`Verwijderen mislukt: ${error.message}`, 'error');
+            if (delBtn) delBtn.disabled = false;
+        }
+    }
+
+    async flushApiCache() {
+        if (!this.token) return;
+        const hint = document.getElementById('cacheFlushHint');
+        const btn = document.getElementById('flushCacheBtn');
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Bezig…';
+        }
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/admin/cache/flush`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${this.token}`,
+                },
+                body: '{}',
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.message || data.error || `HTTP ${response.status}`);
+            if (hint) hint.textContent = data.message || 'Cache geleegd.';
+            this.showNotification(data.message || 'Cache geleegd', 'success');
+        } catch (error) {
+            if (hint) hint.textContent = `Fout: ${error.message}`;
+            this.showNotification(`Cache legen mislukt: ${error.message}`, 'error');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-sync"></i> Cache legen';
+            }
+        }
+    }
+
+    async scanFallbackMedia({ delete: doDelete = false } = {}) {
+        if (!this.token || this._fallbackMediaRunning) return;
+        this._fallbackMediaRunning = true;
+        const hint = document.getElementById('fallbackMediaHint');
+        const list = document.getElementById('fallbackMediaList');
+        const scanBtn = document.getElementById('scanFallbackMediaBtn');
+        const pruneBtn = document.getElementById('pruneFallbackMediaBtn');
+        if (scanBtn) {
+            scanBtn.disabled = true;
+            scanBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Scannen…';
+        }
+        if (pruneBtn) pruneBtn.disabled = true;
+        if (hint) hint.textContent = 'Bezig…';
+        if (list) {
+            list.innerHTML = '';
+            list.hidden = true;
+        }
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/admin/fallback/prune-media`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${this.token}`,
+                },
+                body: JSON.stringify({ dryRun: !doDelete, delete: !!doDelete }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(
+                    (data.hint ? `${data.message} ${data.hint}` : null)
+                    || data.message
+                    || data.error
+                    || `HTTP ${response.status}`,
+                );
+            }
+            this._fallbackOrphans = (data.orphans || []).map((o) => o.name).filter(Boolean);
+            if (list && data.orphans?.length) {
+                list.hidden = false;
+                list.innerHTML = data.orphans.slice(0, 100).map((o) =>
+                    `<li>${o.name}${o.bytes != null ? ` <span style="color:#888">(${Math.round(o.bytes / 1024)} KB)</span>` : ''}</li>`
+                ).join('');
+            }
+            const mb = ((data.orphanBytes || 0) / (1024 * 1024)).toFixed(2);
+            if (hint) {
+                hint.textContent = doDelete
+                    ? (data.message || 'Klaar.')
+                    : (data.orphanCount
+                      ? `${data.orphanCount} ongebruikt (±${mb} MB) op ${data.mediaCount || 0} media-bestanden / ${data.snapshotCount || 0} snapshots.`
+                      : `Geen ongebruikte media (${data.mediaCount || 0} bestanden in ${data.snapshotCount || 0} snapshots).`);
+            }
+            if (pruneBtn) pruneBtn.disabled = !this._fallbackOrphans?.length;
+            this.showNotification(data.message || 'Scan klaar', data.orphanCount ? 'warning' : 'success');
+            if (doDelete) {
+                this._fallbackOrphans = [];
+                if (pruneBtn) pruneBtn.disabled = true;
+            }
+        } catch (error) {
+            if (hint) hint.textContent = `Fout: ${error.message}`;
+            this.showNotification(`Fallback-media: ${error.message}`, 'error');
+        } finally {
+            this._fallbackMediaRunning = false;
+            if (scanBtn) {
+                scanBtn.disabled = false;
+                scanBtn.innerHTML = '<i class="fas fa-search"></i> Scannen';
+            }
+        }
+    }
+
+    async pruneFallbackMedia() {
+        if (!this._fallbackOrphans?.length) return;
+        if (!confirm(`Weet je zeker dat je ${this._fallbackOrphans.length} ongebruikte fallback-bestanden op holwert.frl wilt verwijderen?`)) {
+            return;
+        }
+        const pruneBtn = document.getElementById('pruneFallbackMediaBtn');
+        if (pruneBtn) {
+            pruneBtn.disabled = true;
+            pruneBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Wissen…';
+        }
+        try {
+            await this.scanFallbackMedia({ delete: true });
+        } finally {
+            if (pruneBtn) {
+                pruneBtn.innerHTML = '<i class="fas fa-trash"></i> Ongebruikte wissen';
+            }
+        }
+    }
+
     async migrateEmbeddedLogos({ silent = false, manual = false } = {}) {
         if (!this.token || this._logoMigrateRunning) return 0;
         this._logoMigrateRunning = true;
         const btn = document.getElementById('migrateOrgLogosBtn');
         if (btn) {
             btn.disabled = true;
-            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Logo\'s verlichten…';
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Bezig…';
         }
+        const logoHint = document.getElementById('logoMigrateHint');
+        if (logoHint && manual) logoHint.textContent = 'Bezig met omzetten…';
         let converted = 0;
         try {
             for (let i = 0; i < 8; i++) {
@@ -2632,9 +3269,13 @@ class HolwertAdmin {
             }
             if (converted > 0) {
                 this.showNotification(`${converted} logo's omgezet naar lichte bestanden.`, 'success');
-                await this.loadOrganizations();
+                if (logoHint) logoHint.textContent = `${converted} logo’s omgezet naar lichte bestanden.`;
+                if (typeof this.loadOrganizations === 'function') {
+                    try { await this.loadOrganizations(); } catch (_) { /* ignore */ }
+                }
             } else if (manual && !silent) {
                 this.showNotification('Alle logo\'s staan al als bestand op de server.', 'success');
+                if (logoHint) logoHint.textContent = 'Alle logo’s staan al als bestand op de server.';
             }
             return converted;
         } catch (error) {
@@ -2642,12 +3283,13 @@ class HolwertAdmin {
             if (manual || !silent) {
                 this.showNotification(`Logo's omzetten mislukt: ${error.message}`, 'error');
             }
+            if (logoHint && manual) logoHint.textContent = `Fout: ${error.message}`;
             return converted;
         } finally {
             this._logoMigrateRunning = false;
             if (btn) {
                 btn.disabled = false;
-                btn.innerHTML = '<i class="fas fa-compress"></i> Logo\'s verlichten';
+                btn.innerHTML = '<i class="fas fa-play"></i> Start';
             }
         }
     }

@@ -18,6 +18,12 @@ const {
   uploadFileBufferToSharedHosting,
   uploadImageBufferToSharedHosting,
 } = require('./sharedHostingUpload');
+const { recompressHostedMediaBatch } = require('./mediaRecompress');
+const {
+  checkBrokenMediaLinks,
+  clearBrokenMediaLinks,
+  findOrphanUploads,
+} = require('./mediaHealth');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -87,6 +93,31 @@ function stripHtmlForPreview(input, maxLen = 120) {
   return maxLen > 0 && text.length > maxLen ? text.slice(0, maxLen) : text;
 }
 
+/**
+ * Gebruikersinvoer (reacties e.d.) als platte tekst: geen HTML/JS opslaan.
+ * Output-escaping in dashboard/mail blijft nodig; dit is defense-in-depth.
+ */
+function sanitizeUserPlainText(input, maxLen = 4000) {
+  let s = String(input ?? '')
+    .replace(/\u0000/g, '')
+    .replace(/[\u0001-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n');
+  // Tags en veelvoorkomende XSS-vectoren verwijderen vóór opslag
+  s = s.replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '');
+  s = s.replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, '');
+  s = s.replace(/<\/?[a-z][^>]*>/gi, '');
+  s = s.replace(/javascript\s*:/gi, '');
+  s = s.replace(/vbscript\s*:/gi, '');
+  s = s.replace(/on[a-z]+\s*=/gi, '');
+  s = s.replace(/&lt;/gi, '<').replace(/&gt;/gi, '>');
+  // Eventuele overgebleven tag-achtige resten nogmaals strippen
+  s = s.replace(/<\/?[a-z][^>]*>/gi, '');
+  s = s.replace(/\n{3,}/g, '\n\n').trim();
+  if (maxLen > 0 && s.length > maxLen) s = s.slice(0, maxLen);
+  return s;
+}
+
 /** Lijst-endpoints: geen data:-URI's (vaak 50–100 KB per logo → trage app). */
 function listSafeMediaUrl(url) {
   if (url == null) return null;
@@ -144,6 +175,18 @@ function formatRichTextForWeb(raw) {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
   }
+  return s.replace(/\n/g, '<br />');
+}
+
+/**
+ * API-content voor app/clients: bij lichte textarea-HTML (\n + strong/em/a)
+ * enters omzetten naar <br />, zodat ook oudere app-builds en HTML-renderers
+ * alinea's tonen. Blok-HTML (RSS) onaangeroerd laten.
+ */
+function prepareNewsContentForClient(raw) {
+  if (raw == null || raw === '') return raw == null ? raw : '';
+  let s = String(raw).replace(/\r\n/g, '\n');
+  if (RICH_TEXT_BLOCK_TAG.test(s)) return s;
   return s.replace(/\n/g, '<br />');
 }
 
@@ -384,7 +427,7 @@ async function deleteHostedUploadFile(fileUrl) {
   try {
     const form = new FormData();
     form.append('path', filePath);
-    form.append('secret', process.env.DELETE_SECRET || '');
+    form.append('secret', process.env.DELETE_SECRET || 'holwert-delete-2026');
     await axios.post('https://holwert.appenvloed.com/upload/delete.php', form, {
       headers: { ...form.getHeaders() },
       timeout: 10000,
@@ -3187,23 +3230,26 @@ app.get('/api/news/:id', async (req, res) => {
 
       const article = result.rows[0];
       let content = article.content || '';
+      // Alleen echte RSS/CMS-blok-HTML opschonen. Admin-artikelen met bron-URL +
+      // <strong>/enters mogen niet door cleanRssHtml (dat at regeleinden op).
       if (article.source_url && content) {
         try {
-          const { cleanRssHtml } = require('./rssNewsSync');
-          const cleaned = cleanRssHtml(content, article.source_url);
-          if (cleaned && cleaned !== content) {
-            content = cleaned;
-            executeQuery('UPDATE news SET content = ?, updated_at = NOW() WHERE id = ?', [
-              cleaned,
-              article.id,
-            ]).catch(() => {});
+          const { cleanRssHtml, looksLikeRssBlockHtml } = require('./rssNewsSync');
+          if (looksLikeRssBlockHtml(content)) {
+            const cleaned = cleanRssHtml(content, article.source_url);
+            if (cleaned && cleaned !== content) {
+              content = cleaned;
+              executeQuery('UPDATE news SET content = ?, updated_at = NOW() WHERE id = ?', [
+                cleaned,
+                article.id,
+              ]).catch(() => {});
+            }
           }
         } catch (e) {
           console.warn('[news] cleanRssHtml on read:', e.message);
         }
-      } else if (content && /<[a-z][\s\S]*>/i.test(content)) {
-        content = content.replace(/>\s+</g, '><').replace(/>\s*,\s*</g, '><').trim();
       }
+      content = prepareNewsContentForClient(content);
 
       const imageVariants = {
         original: article.image_url,
@@ -5613,6 +5659,235 @@ app.post('/api/admin/organizations/migrate-logos', authenticateToken, requireAdm
     res.status(500).json({
       error: 'Omzetten van logos mislukt',
       message: error.message,
+    });
+  }
+});
+
+// Bestaande CDN-foto's opnieuw comprimeren (nieuws/agenda/profiel/praktisch).
+app.post('/api/admin/media/recompress', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const result = await recompressHostedMediaBatch({
+      executeQuery,
+      uploadImageBufferToSharedHosting,
+      folderSegmentForOrgUpload,
+      limit: body.limit != null ? body.limit : 6,
+      type: body.type || 'all',
+      afterNewsId: body.afterNewsId,
+      afterEventsId: body.afterEventsId,
+      cursors: body.cursors,
+    });
+    if (result.converted.length) {
+      invalidateCache('/api/news');
+      invalidateCache('/api/events');
+      invalidateCache('/api/app/bootstrap');
+      invalidateCache('/api/admin/news');
+      invalidateCache('/api/admin/events');
+      invalidateCache('/api/admin/users');
+      invalidateCache('/api/app/practical-info');
+    }
+    const savedMb = ((result.stats.bytesSaved || 0) / (1024 * 1024)).toFixed(2);
+    res.json({
+      message: result.converted.length
+        ? `${result.converted.length} foto's verkleind (−${savedMb} MB in deze ronde)`
+        : result.done
+          ? 'Klaar: geen CDN-foto’s meer in deze scan'
+          : 'Geen winst in deze ronde; scan gaat verder',
+      ...result,
+    });
+  } catch (error) {
+    console.error('[POST /api/admin/media/recompress]', error);
+    res.status(500).json({
+      error: 'Afbeeldingen verkleinen mislukt',
+      message: error.message,
+    });
+  }
+});
+
+// Profielfoto's die nog als base64 in de DB staan → CDN-bestand.
+app.post('/api/admin/media/migrate-profile-images', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(req.body?.limit, 10) || 6, 1), 12);
+    const result = await executeQuery(
+      `SELECT id, email, profile_image_url FROM users
+       WHERE profile_image_url LIKE 'data:image%'
+       ORDER BY id ASC
+       LIMIT ?`,
+      [limit],
+    );
+    const rows = result.rows || [];
+    const converted = [];
+    const failed = [];
+    for (const user of rows) {
+      try {
+        const parsed = parseImageDataUrl(user.profile_image_url);
+        if (!parsed) throw new Error('Ongeldige afbeeldingsdata');
+        const buffer = Buffer.from(parsed.base64Data, 'base64');
+        if (!buffer.length || buffer.length > 12 * 1024 * 1024) throw new Error('Leeg of te groot');
+        const filename = `profile-${user.id}-${Date.now()}.${extFromImageMime(parsed.mime)}`;
+        const imageUrl = await uploadImageBufferToSharedHosting(buffer, filename, parsed.mime, '00');
+        await executeQuery(
+          'UPDATE users SET profile_image_url = ?, updated_at = NOW() WHERE id = ?',
+          [imageUrl, user.id],
+        );
+        converted.push({ id: user.id, email: user.email, imageUrl });
+      } catch (err) {
+        failed.push({ id: user.id, email: user.email, error: err.message || String(err) });
+      }
+    }
+    const remain = await executeQuery(
+      `SELECT COUNT(*) AS total FROM users WHERE profile_image_url LIKE 'data:image%'`,
+    );
+    if (converted.length) {
+      invalidateCache('/api/admin/users');
+      invalidateCache('/api/users');
+    }
+    res.json({
+      message: converted.length ? `${converted.length} profielfoto's omgezet` : 'Geen base64-profielfoto’s meer',
+      converted,
+      failed,
+      remaining: parseInt(remain.rows?.[0]?.total || 0, 10),
+    });
+  } catch (error) {
+    console.error('[POST /api/admin/media/migrate-profile-images]', error);
+    res.status(500).json({ error: 'Profielfoto’s omzetten mislukt', message: error.message });
+  }
+});
+
+// Dode CDN-links scannen (HEAD/GET).
+app.post('/api/admin/media/check-links', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const result = await checkBrokenMediaLinks({
+      executeQuery,
+      limit: body.limit != null ? body.limit : 8,
+      cursors: body.cursors,
+    });
+    res.json({
+      message: result.broken.length
+        ? `${result.broken.length} dode link(s) in deze ronde`
+        : 'Geen dode links in deze ronde',
+      ...result,
+    });
+  } catch (error) {
+    console.error('[POST /api/admin/media/check-links]', error);
+    res.status(500).json({ error: 'Linkcheck mislukt', message: error.message });
+  }
+});
+
+// Dode links uit DB halen (kolom NULL; content blijft).
+app.post('/api/admin/media/clear-broken', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const result = await clearBrokenMediaLinks({
+      executeQuery,
+      items: req.body?.items || [],
+    });
+    if (result.cleared.length) {
+      invalidateCache('/api/news');
+      invalidateCache('/api/events');
+      invalidateCache('/api/organizations');
+      invalidateCache('/api/app/bootstrap');
+      invalidateCache('/api/app/practical-info');
+    }
+    res.json({
+      message: `${result.cleared.length} dode link(s) gewist`,
+      ...result,
+    });
+  } catch (error) {
+    console.error('[POST /api/admin/media/clear-broken]', error);
+    res.status(500).json({ error: 'Wissen mislukt', message: error.message });
+  }
+});
+
+// Weesbestanden: op CDN maar niet in DB.
+app.post('/api/admin/media/find-orphans', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const result = await findOrphanUploads({ executeQuery });
+    res.json({
+      message: result.orphanCount
+        ? `${result.orphanCount} weesbestand(en) gevonden`
+        : 'Geen weesbestanden gevonden',
+      ...result,
+    });
+  } catch (error) {
+    console.error('[POST /api/admin/media/find-orphans]', error);
+    const needsPhp = error.code === 'LIST_UPLOADS_FAILED';
+    res.status(needsPhp ? 503 : 500).json({
+      error: 'Weesscan mislukt',
+      message: error.message,
+      hint: needsPhp
+        ? 'Upload list-uploads.php via FTP naar upload/list-uploads.php (zelfde secret als delete.php).'
+        : undefined,
+    });
+  }
+});
+
+app.post('/api/admin/media/delete-orphans', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const paths = Array.isArray(req.body?.paths) ? req.body.paths.slice(0, 100) : [];
+    const deleted = [];
+    const failed = [];
+    for (const path of paths) {
+      if (typeof path !== 'string' || !path.startsWith('uploads/')) {
+        failed.push({ path, error: 'ongeldig pad' });
+        continue;
+      }
+      try {
+        await deleteHostedUploadFile(`https://holwert.appenvloed.com/${path}`);
+        deleted.push(path);
+      } catch (err) {
+        failed.push({ path, error: err.message || String(err) });
+      }
+    }
+    res.json({
+      message: `${deleted.length} weesbestand(en) verwijderd`,
+      deleted,
+      failed,
+    });
+  } catch (error) {
+    console.error('[POST /api/admin/media/delete-orphans]', error);
+    res.status(500).json({ error: 'Verwijderen mislukt', message: error.message });
+  }
+});
+
+// Leeg API-geheugencache (Vercel instance).
+app.post('/api/admin/cache/flush', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const before = cache.size;
+    cache.clear();
+    res.json({
+      message: `Cache geleegd (${before} entries)`,
+      cleared: before,
+    });
+  } catch (error) {
+    console.error('[POST /api/admin/cache/flush]', error);
+    res.status(500).json({ error: 'Cache legen mislukt', message: error.message });
+  }
+});
+
+// Fallback-media op holwert.frl: scan of verwijder bestanden die niet meer in snapshots staan.
+app.post('/api/admin/fallback/prune-media', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const dryRun = req.body?.dryRun !== false && req.body?.delete !== true;
+    const result = await publicFallback.pruneUnreferencedFallbackMedia({ dryRun });
+    const mb = ((result.orphanBytes || 0) / (1024 * 1024)).toFixed(2);
+    res.json({
+      message: dryRun
+        ? (result.orphanCount
+          ? `${result.orphanCount} ongebruikte fallback-bestanden (±${mb} MB) — nog niet verwijderd`
+          : 'Geen ongebruikte fallback-media')
+        : `${(result.deleted || []).length} fallback-bestanden verwijderd`,
+      ...result,
+    });
+  } catch (error) {
+    console.error('[POST /api/admin/fallback/prune-media]', error);
+    res.status(error.code === 'NO_STORE_CONFIG' ? 503 : 500).json({
+      error: 'Fallback-media opruimen mislukt',
+      message: error.message,
+      hint:
+        error.code === 'STORE_ACTION_FAILED'
+          ? 'Upload de bijgewerkte store.php naar holwert.frl (list-store / delete-media).'
+          : undefined,
     });
   }
 });
@@ -8234,9 +8509,10 @@ app.post('/api/news/:id/reactions', authenticateToken, newsReactionRateLimiter, 
     const newsId = parseInt(req.params.id, 10);
     if (Number.isNaN(newsId)) return res.status(400).json({ error: 'Ongeldig bericht' });
 
-    const text = String(req.body?.body || '').trim();
+    const rawText = String(req.body?.body || '');
+    if (rawText.trim().length > 4000) return res.status(400).json({ error: 'Reactie is te lang' });
+    const text = sanitizeUserPlainText(rawText, 4000);
     if (!text) return res.status(400).json({ error: 'Schrijf een reactie' });
-    if (text.length > 4000) return res.status(400).json({ error: 'Reactie is te lang' });
 
     const articleResult = await executeQuery(
       'SELECT id, title, organization_id, is_published, reactions_open FROM news WHERE id = ? LIMIT 1',
@@ -9708,10 +9984,11 @@ async function sendNewsReactionEmails({ emails, articleTitle, authorName, author
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
   const dashboardUrl = 'https://holwert.appenvloed.com/dashboard/#reactions';
-  const snippet = String(body || '').slice(0, 800);
-  const subject = `Nieuwe reactie: ${String(articleTitle || 'nieuwsbericht').slice(0, 80)}`;
+  const snippet = sanitizeUserPlainText(body, 800);
+  const safeTitle = sanitizeUserPlainText(articleTitle || 'nieuwsbericht', 80).replace(/[\r\n]+/g, ' ');
+  const subject = `Nieuwe reactie: ${safeTitle}`;
   const html = `<h2 style="color:#1a1a2e">Nieuwe reactie op je nieuwsbericht</h2>
-<p>Iemand heeft gereageerd op <strong>${esc(articleTitle)}</strong>.</p>
+<p>Iemand heeft gereageerd op <strong>${esc(safeTitle)}</strong>.</p>
 <table style="border-collapse:collapse;margin:1rem 0">
   <tr><td style="padding:4px 12px 4px 0;color:#555">Naam</td><td><strong>${esc(authorName)}</strong></td></tr>
   <tr><td style="padding:4px 12px 4px 0;color:#555">E-mail</td><td>${esc(authorEmail)}</td></tr>
