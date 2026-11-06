@@ -150,6 +150,18 @@ function formatRichTextForWeb(raw) {
   return s.replace(/\n/g, '<br />');
 }
 
+/**
+ * API-content voor app/clients: bij lichte textarea-HTML (\n + strong/em/a)
+ * enters omzetten naar <br />, zodat ook oudere app-builds en HTML-renderers
+ * alinea's tonen. Blok-HTML (RSS) onaangeroerd laten.
+ */
+function prepareNewsContentForClient(raw) {
+  if (raw == null || raw === '') return raw == null ? raw : '';
+  let s = String(raw).replace(/\r\n/g, '\n');
+  if (RICH_TEXT_BLOCK_TAG.test(s)) return s;
+  return s.replace(/\n/g, '<br />');
+}
+
 function getCacheKey(endpoint, params = {}) {
   return `${endpoint}:${JSON.stringify(params)}`;
 }
@@ -3281,6 +3293,7 @@ app.get('/api/news/:id', async (req, res) => {
           console.warn('[news] cleanRssHtml on read:', e.message);
         }
       }
+      content = prepareNewsContentForClient(content);
 
       const imageVariants = {
         original: article.image_url,
