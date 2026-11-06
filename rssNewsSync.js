@@ -62,6 +62,17 @@ function absolutizeHtmlUrls(html, baseUrl) {
   );
 }
 
+/**
+ * Echte feed/CMS-HTML (Drupal, gemeente) met blok-tags of body-afbeeldingen.
+ * Lichte admin-opmaak (<strong>, <em>, <a>, <br> + enters) hoort hier niet bij.
+ */
+const RSS_BLOCK_HTML_TAG =
+  /<\/?(?:p|div|h[1-6]|ul|ol|li|blockquote|section|article|figure|figcaption|picture|table|tr|td|th|thead|tbody|img)\b/i;
+
+function looksLikeRssBlockHtml(html) {
+  return RSS_BLOCK_HTML_TAG.test(String(html || ''));
+}
+
 /** Drupal/gemeente-HTML opschonen tot leesbare paragrafen, koppen en afbeeldingen. */
 function cleanRssHtml(html, baseUrl) {
   let s = String(html || '');
@@ -129,11 +140,12 @@ function cleanRssHtml(html, baseUrl) {
     return `<a href="${href}">`;
   });
 
-  // Compact: geen newlines tussen tags (oude app-builds zetten \n om naar <br />)
+  // Compact whitespace tussen tags, maar eet geen regeleinden in platte tekst op.
+  // (\s{2,} → spatie vernietigde admin-artikelen met <strong> + enters + bron-URL.)
   s = s.replace(/\r\n/g, '\n');
   s = s.replace(/[ \t]+\n/g, '\n');
   s = s.replace(/\n{3,}/g, '\n\n');
-  s = s.replace(/\s{2,}/g, ' ');
+  s = s.replace(/[ \t]{2,}/g, ' ');
   s = s.replace(/>\s+</g, '><');
   s = s.trim();
 
@@ -558,6 +570,7 @@ module.exports = {
   parseRssItems,
   decodeXmlEntities,
   cleanRssHtml,
+  looksLikeRssBlockHtml,
   suppressRssSourceUrl,
   ensureRssSuppressedTable,
 };

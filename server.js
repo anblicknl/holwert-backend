@@ -3262,22 +3262,24 @@ app.get('/api/news/:id', async (req, res) => {
 
       const article = result.rows[0];
       let content = article.content || '';
+      // Alleen echte RSS/CMS-blok-HTML opschonen. Admin-artikelen met bron-URL +
+      // <strong>/enters mogen niet door cleanRssHtml (dat at regeleinden op).
       if (article.source_url && content) {
         try {
-          const { cleanRssHtml } = require('./rssNewsSync');
-          const cleaned = cleanRssHtml(content, article.source_url);
-          if (cleaned && cleaned !== content) {
-            content = cleaned;
-            executeQuery('UPDATE news SET content = ?, updated_at = NOW() WHERE id = ?', [
-              cleaned,
-              article.id,
-            ]).catch(() => {});
+          const { cleanRssHtml, looksLikeRssBlockHtml } = require('./rssNewsSync');
+          if (looksLikeRssBlockHtml(content)) {
+            const cleaned = cleanRssHtml(content, article.source_url);
+            if (cleaned && cleaned !== content) {
+              content = cleaned;
+              executeQuery('UPDATE news SET content = ?, updated_at = NOW() WHERE id = ?', [
+                cleaned,
+                article.id,
+              ]).catch(() => {});
+            }
           }
         } catch (e) {
           console.warn('[news] cleanRssHtml on read:', e.message);
         }
-      } else if (content && /<[a-z][\s\S]*>/i.test(content)) {
-        content = content.replace(/>\s+</g, '><').replace(/>\s*,\s*</g, '><').trim();
       }
 
       const imageVariants = {
