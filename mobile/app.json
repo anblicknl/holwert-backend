@@ -15,8 +15,10 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.holwert.dorpsapp",
+      "buildNumber": "1",
       "infoPlist": {
-        "NSCalendarsUsageDescription": "Deze app gebruikt je agenda om evenementen toe te voegen."
+        "NSCalendarsUsageDescription": "Deze app gebruikt je agenda om evenementen toe te voegen.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
