@@ -906,7 +906,7 @@ function normalizeEventPrice(value) {
   return n;
 }
 
-/** Ticket-URL normaliseren: trim, optioneel https://, max lengte. */
+/** Ticket-/meer-info-URL normaliseren: trim, optioneel https://, max lengte. */
 function normalizeTicketUrl(value) {
   if (value === undefined) return undefined;
   if (value === null) return null;
@@ -914,6 +914,16 @@ function normalizeTicketUrl(value) {
   if (!s) return null;
   if (!/^https?:\/\//i.test(s)) s = `https://${s}`;
   if (s.length > 2000) s = s.slice(0, 2000);
+  return s;
+}
+
+/** Korte knoptekst (ticket / meer info). */
+function normalizeOptionalShortLabel(value, maxLen = 255) {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  let s = String(value).trim();
+  if (!s) return null;
+  if (s.length > maxLen) s = s.slice(0, maxLen);
   return s;
 }
 
@@ -2030,6 +2040,8 @@ async function ensureEventColumns() {
     `ALTER TABLE events ADD COLUMN pdf_url VARCHAR(500)`,
     `ALTER TABLE events ADD COLUMN ticket_url VARCHAR(500)`,
     `ALTER TABLE events ADD COLUMN ticket_label VARCHAR(255)`,
+    `ALTER TABLE events ADD COLUMN more_info_url VARCHAR(2000)`,
+    `ALTER TABLE events ADD COLUMN more_info_label VARCHAR(255)`,
     `ALTER TABLE events ADD COLUMN presale_price DECIMAL(10,2) NULL`,
   ];
   for (const sql of cols) {
@@ -7088,7 +7100,7 @@ app.get('/api/admin/events/:id', authenticateToken, requireAdmin, async (req, re
 app.post('/api/admin/events', authenticateToken, requireAdmin, async (req, res) => {
   try {
     await ensureEventColumns();
-    const { title, description, event_date, end_date, event_end_date, location, organization_id, status = 'scheduled', price, presale_price, image_url, pdf_url, ticket_url, ticket_label } = req.body;
+    const { title, description, event_date, end_date, event_end_date, location, organization_id, status = 'scheduled', price, presale_price, image_url, pdf_url, ticket_url, ticket_label, more_info_url, more_info_label } = req.body;
     if (!title || !event_date) return res.status(400).json({ error: 'title and event_date are required' });
     const eventDateSql = toMysqlDateTime(event_date);
     if (!eventDateSql) return res.status(400).json({ error: 'Invalid event_date', message: 'Use a valid date/time (YYYY-MM-DD or datetime-local).' });
@@ -7098,8 +7110,9 @@ app.post('/api/admin/events', authenticateToken, requireAdmin, async (req, res) 
     const priceVal = normalizeEventPrice(price);
     const presalePriceVal = normalizeEventPrice(presale_price);
     const ticketUrlVal = normalizeTicketUrl(ticket_url) ?? null;
-    const ticketLabelVal =
-      ticket_label != null && String(ticket_label).trim() !== '' ? String(ticket_label).trim() : null;
+    const ticketLabelVal = normalizeOptionalShortLabel(ticket_label) ?? null;
+    const moreInfoUrlVal = normalizeTicketUrl(more_info_url) ?? null;
+    const moreInfoLabelVal = normalizeOptionalShortLabel(more_info_label) ?? null;
 
     // Organizer mag ontbreken; als user niet bestaat, zet organizer_id op null
     let organizerId = req.user?.userId || null;
@@ -7113,9 +7126,9 @@ app.post('/api/admin/events', authenticateToken, requireAdmin, async (req, res) 
     }
 
     const insertResult = await executeInsert(
-      `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, presale_price, image_url, pdf_url, ticket_url, ticket_label, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-      [title, description || null, eventDateSql, endSql, location || null, organization_id || null, status, organizerId, priceVal, presalePriceVal, image_url || null, pdf_url || null, ticketUrlVal, ticketLabelVal]
+      `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, presale_price, image_url, pdf_url, ticket_url, ticket_label, more_info_url, more_info_label, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [title, description || null, eventDateSql, endSql, location || null, organization_id || null, status, organizerId, priceVal, presalePriceVal, image_url || null, pdf_url || null, ticketUrlVal, ticketLabelVal, moreInfoUrlVal, moreInfoLabelVal]
     );
 
     if (!insertResult.insertId) {
@@ -7123,7 +7136,7 @@ app.post('/api/admin/events', authenticateToken, requireAdmin, async (req, res) 
     }
 
     const fetchResult = await executeQuery(
-      `SELECT id, title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, presale_price, image_url, pdf_url, ticket_url, ticket_label, created_at, updated_at
+      `SELECT id, title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, presale_price, image_url, pdf_url, ticket_url, ticket_label, more_info_url, more_info_label, created_at, updated_at
        FROM events WHERE id = ? LIMIT 1`,
       [insertResult.insertId]
     );
@@ -7149,7 +7162,7 @@ app.put('/api/admin/events/:id', authenticateToken, requireAdmin, async (req, re
   try {
     await ensureEventColumns();
     const { id } = req.params;
-    const { title, description, event_date, end_date, event_end_date, location, organization_id, status, price, presale_price, image_url, pdf_url, ticket_url, ticket_label } = req.body;
+    const { title, description, event_date, end_date, event_end_date, location, organization_id, status, price, presale_price, image_url, pdf_url, ticket_url, ticket_label, more_info_url, more_info_label } = req.body;
     const prevEv = await executeQuery('SELECT pdf_url FROM events WHERE id = ? LIMIT 1', [id]);
     const oldPdfUrl = prevEv.rows?.[0]?.pdf_url || null;
     const sets = [];
@@ -7167,7 +7180,9 @@ app.put('/api/admin/events/:id', authenticateToken, requireAdmin, async (req, re
     if (image_url !== undefined) sets.push(`image_url = ${push(image_url)}`);
     if (pdf_url !== undefined) sets.push(`pdf_url = ${push(pdf_url)}`);
     if (ticket_url !== undefined) sets.push(`ticket_url = ${push(normalizeTicketUrl(ticket_url))}`);
-    if (ticket_label !== undefined) sets.push(`ticket_label = ${push(ticket_label || null)}`);
+    if (ticket_label !== undefined) sets.push(`ticket_label = ${push(normalizeOptionalShortLabel(ticket_label))}`);
+    if (more_info_url !== undefined) sets.push(`more_info_url = ${push(normalizeTicketUrl(more_info_url))}`);
+    if (more_info_label !== undefined) sets.push(`more_info_label = ${push(normalizeOptionalShortLabel(more_info_label))}`);
     if (!sets.length) return res.status(400).json({ error: 'No fields to update' });
     params.push(id);
     await executeQuery(
@@ -7176,7 +7191,7 @@ app.put('/api/admin/events/:id', authenticateToken, requireAdmin, async (req, re
     );
 
     const fetchResult = await executeQuery(
-      `SELECT id, title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, presale_price, image_url, pdf_url, ticket_url, ticket_label, created_at, updated_at
+      `SELECT id, title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, presale_price, image_url, pdf_url, ticket_url, ticket_label, more_info_url, more_info_label, created_at, updated_at
        FROM events WHERE id = ? LIMIT 1`,
       [id]
     );
@@ -8817,7 +8832,7 @@ app.get('/api/org/events', authenticateToken, requireOrgPortal, async (req, res)
     const { page = 1, limit = 20, status } = req.query;
     const offset = (page - 1) * limit;
     const orgId = req.organizationId;
-    let query = `SELECT e.id, e.title, e.description, e.event_date, e.event_end_date, e.location, e.status, e.price, e.presale_price, e.image_url, e.pdf_url, e.ticket_url, e.ticket_label, e.organization_id, e.created_at, e.updated_at
+    let query = `SELECT e.id, e.title, e.description, e.event_date, e.event_end_date, e.location, e.status, e.price, e.presale_price, e.image_url, e.pdf_url, e.ticket_url, e.ticket_label, e.more_info_url, e.more_info_label, e.organization_id, e.created_at, e.updated_at
       FROM events e WHERE e.organization_id = ?`;
     const params = [orgId];
     if (status === 'scheduled') { query += ` AND (e.status = 'scheduled' OR e.status IS NULL)`; }
@@ -8844,7 +8859,7 @@ app.get('/api/org/events/:id', authenticateToken, requireOrgPortal, async (req, 
     await ensureEventColumns();
     const orgId = req.organizationId;
     const result = await executeQuery(
-      'SELECT id, title, description, event_date, event_end_date, location, status, price, presale_price, image_url, pdf_url, ticket_url, ticket_label, organization_id, created_at, updated_at FROM events WHERE id = ? AND organization_id = ?',
+      'SELECT id, title, description, event_date, event_end_date, location, status, price, presale_price, image_url, pdf_url, ticket_url, ticket_label, more_info_url, more_info_label, organization_id, created_at, updated_at FROM events WHERE id = ? AND organization_id = ?',
       [req.params.id, orgId]
     );
     if (!result.rows?.length) return res.status(404).json({ error: 'Evenement niet gevonden' });
@@ -8863,7 +8878,7 @@ app.post('/api/org/events', authenticateToken, requireOrgPortal, async (req, res
     if (!organizerId || Number.isNaN(organizerId)) {
       return res.status(400).json({ error: 'Gebruiker ontbreekt in token', message: 'Log opnieuw in.' });
     }
-    const { title, description, event_date, end_date, event_end_date, location, status, price, presale_price, image_url, pdf_url, ticket_url, ticket_label } = req.body || {};
+    const { title, description, event_date, end_date, event_end_date, location, status, price, presale_price, image_url, pdf_url, ticket_url, ticket_label, more_info_url, more_info_label } = req.body || {};
     if (!title) return res.status(400).json({ error: 'title is required' });
     if (!event_date) return res.status(400).json({ error: 'event_date is required' });
     const eventDateSql = toMysqlDateTime(event_date);
@@ -8885,7 +8900,9 @@ app.post('/api/org/events', authenticateToken, requireOrgPortal, async (req, res
     const imageUrlSafe = sanitizeEventImageUrlForDb(image_url);
     const pdfUrlSafe = pdf_url != null && String(pdf_url).trim() !== '' ? String(pdf_url).trim() : null;
     const ticketUrlSafe = normalizeTicketUrl(ticket_url) ?? null;
-    const ticketLabelSafe = ticket_label != null && String(ticket_label).trim() !== '' ? String(ticket_label).trim() : null;
+    const ticketLabelSafe = normalizeOptionalShortLabel(ticket_label) ?? null;
+    const moreInfoUrlSafe = normalizeTicketUrl(more_info_url) ?? null;
+    const moreInfoLabelSafe = normalizeOptionalShortLabel(more_info_label) ?? null;
     const orgCheck = await executeQuery('SELECT is_approved FROM organizations WHERE id = ?', [orgId]);
     const approved =
       orgCheck.rows?.[0] &&
@@ -8908,25 +8925,37 @@ app.post('/api/org/events', authenticateToken, requireOrgPortal, async (req, res
     let result;
     try {
       result = await executeInsert(
-        `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, pdf_url, ticket_url, ticket_label, is_published, presale_price, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-        [...baseInsertParams, pdfUrlSafe, ticketUrlSafe, ticketLabelSafe, publishFlag, presalePriceVal]
+        `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, pdf_url, ticket_url, ticket_label, more_info_url, more_info_label, is_published, presale_price, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        [...baseInsertParams, pdfUrlSafe, ticketUrlSafe, ticketLabelSafe, moreInfoUrlSafe, moreInfoLabelSafe, publishFlag, presalePriceVal]
       );
     } catch (insErr) {
       if (isMysqlMissingColumnError(insErr)) {
         try {
           result = await executeInsert(
-            `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, pdf_url, is_published, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-            [...baseInsertParams, pdfUrlSafe, publishFlag]
+            `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, pdf_url, ticket_url, ticket_label, is_published, presale_price, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+            [...baseInsertParams, pdfUrlSafe, ticketUrlSafe, ticketLabelSafe, publishFlag, presalePriceVal]
           );
         } catch (e2) {
           if (isMysqlMissingColumnError(e2)) {
-            result = await executeInsert(
-              `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-              baseInsertParams
-            );
+            try {
+              result = await executeInsert(
+                `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, pdf_url, is_published, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+                [...baseInsertParams, pdfUrlSafe, publishFlag]
+              );
+            } catch (e3) {
+              if (isMysqlMissingColumnError(e3)) {
+                result = await executeInsert(
+                  `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+                  baseInsertParams
+                );
+              } else {
+                throw e3;
+              }
+            }
           } else {
             throw e2;
           }
@@ -8936,9 +8965,9 @@ app.post('/api/org/events', authenticateToken, requireOrgPortal, async (req, res
         baseNoImg[9] = null;
         try {
           result = await executeInsert(
-            `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, pdf_url, ticket_url, ticket_label, is_published, presale_price, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-            [...baseNoImg, pdfUrlSafe, ticketUrlSafe, ticketLabelSafe, publishFlag, presalePriceVal]
+            `INSERT INTO events (title, description, event_date, event_end_date, location, organization_id, status, organizer_id, price, image_url, pdf_url, ticket_url, ticket_label, more_info_url, more_info_label, is_published, presale_price, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+            [...baseNoImg, pdfUrlSafe, ticketUrlSafe, ticketLabelSafe, moreInfoUrlSafe, moreInfoLabelSafe, publishFlag, presalePriceVal]
           );
         } catch (e2) {
           if (isMysqlMissingColumnError(e2)) {
@@ -9000,6 +9029,18 @@ app.post('/api/org/events', authenticateToken, requireOrgPortal, async (req, res
         }
       }
     }
+    if (id && (more_info_url !== undefined || more_info_label !== undefined)) {
+      try {
+        await executeQuery(
+          'UPDATE events SET more_info_url = ?, more_info_label = ?, updated_at = NOW() WHERE id = ? AND organization_id = ?',
+          [moreInfoUrlSafe, moreInfoLabelSafe, id, orgId]
+        );
+      } catch (moreInfoErr) {
+        if (!isMysqlMissingColumnError(moreInfoErr)) {
+          console.warn('POST /api/org/events more_info fields:', moreInfoErr.message);
+        }
+      }
+    }
     const finalStatus = status || 'scheduled';
     if (finalStatus === 'scheduled' && orgId && id && title) {
       await awaitPushSafe('org event create', () =>
@@ -9007,7 +9048,7 @@ app.post('/api/org/events', authenticateToken, requireOrgPortal, async (req, res
       );
     }
     const row = await executeQuery(
-      'SELECT id, title, event_date, organization_id, price, presale_price, ticket_url, ticket_label, created_at FROM events WHERE id = ?',
+      'SELECT id, title, event_date, organization_id, price, presale_price, ticket_url, ticket_label, more_info_url, more_info_label, created_at FROM events WHERE id = ?',
       [id]
     );
     res.status(201).json({ event: normalizePublicEventRow(row.rows[0]) });
@@ -9022,9 +9063,9 @@ app.put('/api/org/events/:id', authenticateToken, requireOrgPortal, async (req, 
     await ensureEventColumns();
     const orgId = req.organizationId;
     const id = parseInt(req.params.id);
-    const { title, description, event_date, end_date, event_end_date, location, status, price, presale_price, image_url, pdf_url, ticket_url, ticket_label } = req.body || {};
+    const { title, description, event_date, end_date, event_end_date, location, status, price, presale_price, image_url, pdf_url, ticket_url, ticket_label, more_info_url, more_info_label } = req.body || {};
     const prev = await executeQuery(
-      'SELECT id, event_date, event_end_date, pdf_url, ticket_url, ticket_label FROM events WHERE id = ? AND organization_id = ?',
+      'SELECT id, event_date, event_end_date, pdf_url, ticket_url, ticket_label, more_info_url, more_info_label FROM events WHERE id = ? AND organization_id = ?',
       [id, orgId]
     );
     if (!prev.rows?.length) return res.status(404).json({ error: 'Evenement niet gevonden' });
@@ -9062,7 +9103,9 @@ app.put('/api/org/events/:id', authenticateToken, requireOrgPortal, async (req, 
     const imageUrlSafe = sanitizeEventImageUrlForDb(image_url ?? null);
     const pdfUrlSafe = pdf_url != null && String(pdf_url).trim() !== '' ? String(pdf_url).trim() : null;
     const ticketUrlSafe = normalizeTicketUrl(ticket_url) ?? null;
-    const ticketLabelSafe = ticket_label != null && String(ticket_label).trim() !== '' ? String(ticket_label).trim() : null;
+    const ticketLabelSafe = normalizeOptionalShortLabel(ticket_label) ?? null;
+    const moreInfoUrlSafe = normalizeTicketUrl(more_info_url) ?? null;
+    const moreInfoLabelSafe = normalizeOptionalShortLabel(more_info_label) ?? null;
     const orgAppr = await executeQuery('SELECT is_approved FROM organizations WHERE id = ?', [orgId]);
     const orgApproved =
       orgAppr.rows?.[0] &&
@@ -9080,6 +9123,8 @@ app.put('/api/org/events/:id', authenticateToken, requireOrgPortal, async (req, 
       pdfUrlSafe,
       ticketUrlSafe,
       ticketLabelSafe,
+      moreInfoUrlSafe,
+      moreInfoLabelSafe,
       publishVal,
       presalePriceVal,
       id,
@@ -9099,15 +9144,42 @@ app.put('/api/org/events/:id', authenticateToken, requireOrgPortal, async (req, 
     ];
     try {
       await executeQuery(
-        'UPDATE events SET title = ?, description = ?, event_date = ?, event_end_date = ?, location = ?, status = ?, price = ?, image_url = ?, pdf_url = ?, ticket_url = ?, ticket_label = ?, is_published = ?, presale_price = ?, updated_at = NOW() WHERE id = ? AND organization_id = ?',
+        'UPDATE events SET title = ?, description = ?, event_date = ?, event_end_date = ?, location = ?, status = ?, price = ?, image_url = ?, pdf_url = ?, ticket_url = ?, ticket_label = ?, more_info_url = ?, more_info_label = ?, is_published = ?, presale_price = ?, updated_at = NOW() WHERE id = ? AND organization_id = ?',
         updateParamsWithPub
       );
     } catch (updErr) {
       if (isMysqlMissingColumnError(updErr)) {
-        await executeQuery(
-          'UPDATE events SET title = ?, description = ?, event_date = ?, event_end_date = ?, location = ?, status = ?, price = ?, image_url = ?, updated_at = NOW() WHERE id = ? AND organization_id = ?',
-          updateParamsLegacy
-        );
+        try {
+          await executeQuery(
+            'UPDATE events SET title = ?, description = ?, event_date = ?, event_end_date = ?, location = ?, status = ?, price = ?, image_url = ?, pdf_url = ?, ticket_url = ?, ticket_label = ?, is_published = ?, presale_price = ?, updated_at = NOW() WHERE id = ? AND organization_id = ?',
+            [
+              title ?? '',
+              description ?? null,
+              eventDateSql,
+              endDt,
+              location ?? null,
+              status ?? 'scheduled',
+              priceVal,
+              imageUrlSafe,
+              pdfUrlSafe,
+              ticketUrlSafe,
+              ticketLabelSafe,
+              publishVal,
+              presalePriceVal,
+              id,
+              orgId,
+            ]
+          );
+        } catch (e2) {
+          if (isMysqlMissingColumnError(e2)) {
+            await executeQuery(
+              'UPDATE events SET title = ?, description = ?, event_date = ?, event_end_date = ?, location = ?, status = ?, price = ?, image_url = ?, updated_at = NOW() WHERE id = ? AND organization_id = ?',
+              updateParamsLegacy
+            );
+          } else {
+            throw e2;
+          }
+        }
       } else if (isMysqlDataTooLongError(updErr)) {
         const noImgPub = [...updateParamsWithPub];
         noImgPub[7] = null;
@@ -9115,7 +9187,7 @@ app.put('/api/org/events/:id', authenticateToken, requireOrgPortal, async (req, 
         noImgLegacy[7] = null;
         try {
           await executeQuery(
-            'UPDATE events SET title = ?, description = ?, event_date = ?, event_end_date = ?, location = ?, status = ?, price = ?, image_url = ?, pdf_url = ?, ticket_url = ?, ticket_label = ?, is_published = ?, presale_price = ?, updated_at = NOW() WHERE id = ? AND organization_id = ?',
+            'UPDATE events SET title = ?, description = ?, event_date = ?, event_end_date = ?, location = ?, status = ?, price = ?, image_url = ?, pdf_url = ?, ticket_url = ?, ticket_label = ?, more_info_url = ?, more_info_label = ?, is_published = ?, presale_price = ?, updated_at = NOW() WHERE id = ? AND organization_id = ?',
             noImgPub
           );
         } catch (e2) {
@@ -9142,6 +9214,17 @@ app.put('/api/org/events/:id', authenticateToken, requireOrgPortal, async (req, 
       } catch (ticketErr) {
         console.warn('PUT /api/org/events ticket fields:', ticketErr.message);
         if (!isMysqlMissingColumnError(ticketErr)) throw ticketErr;
+      }
+    }
+    if (more_info_url !== undefined || more_info_label !== undefined) {
+      try {
+        await executeQuery(
+          'UPDATE events SET more_info_url = ?, more_info_label = ?, updated_at = NOW() WHERE id = ? AND organization_id = ?',
+          [moreInfoUrlSafe, moreInfoLabelSafe, id, orgId]
+        );
+      } catch (moreInfoErr) {
+        console.warn('PUT /api/org/events more_info fields:', moreInfoErr.message);
+        if (!isMysqlMissingColumnError(moreInfoErr)) throw moreInfoErr;
       }
     }
     if (price !== undefined || presale_price !== undefined) {
@@ -9171,7 +9254,7 @@ app.put('/api/org/events/:id', authenticateToken, requireOrgPortal, async (req, 
       cleanupHostedPdfIfUnreferenced(oldPdfUrl).catch(() => {});
     }
     const row = await executeQuery(
-      'SELECT id, title, event_date, status, price, presale_price, ticket_url, ticket_label, updated_at FROM events WHERE id = ?',
+      'SELECT id, title, event_date, status, price, presale_price, ticket_url, ticket_label, more_info_url, more_info_label, updated_at FROM events WHERE id = ?',
       [id]
     );
     res.json({ event: normalizePublicEventRow(row.rows[0]) });
@@ -10420,6 +10503,8 @@ app.get('/api/migrate-columns', async (req, res) => {
     { table: 'events',        column: 'ticket_url',   sql: `ALTER TABLE events ADD COLUMN ticket_url VARCHAR(500)` },
     { table: 'events',        column: 'ticket_label', sql: `ALTER TABLE events ADD COLUMN ticket_label VARCHAR(255)` },
     { table: 'events',        column: 'ticket_url_widen', sql: `ALTER TABLE events MODIFY COLUMN ticket_url VARCHAR(2000)` },
+    { table: 'events',        column: 'more_info_url', sql: `ALTER TABLE events ADD COLUMN more_info_url VARCHAR(2000)` },
+    { table: 'events',        column: 'more_info_label', sql: `ALTER TABLE events ADD COLUMN more_info_label VARCHAR(255)` },
     { table: 'organizations', column: 'is_ondernemer', sql: `ALTER TABLE organizations ADD COLUMN is_ondernemer BOOLEAN DEFAULT false` },
   ];
   for (const m of migrations) {

@@ -2035,6 +2035,23 @@
                                 : `<p>${escapeHtml(event?.ticket_label || 'Koop hier de tickets')}</p>`
                             }
                         </div>
+                        <div class="form-group">
+                            <label>Meer-informatie link (optioneel)</label>
+                            ${!isView
+                                ? `<input type="text" inputmode="url" autocomplete="url" id="eventMoreInfoUrl" placeholder="https://…" value="${escapeHtml(event?.more_info_url || '')}">
+                                   <p class="form-hint">Grijze knop in de app (zoals bronvermelding bij nieuws). Mag met of zonder https://.</p>`
+                                : (event?.more_info_url
+                                    ? `<a href="${escapeHtml(event.more_info_url)}" target="_blank" rel="noopener">${escapeHtml(event.more_info_url)}</a>`
+                                    : '<p class="form-hint">Geen meer-informatielink</p>')
+                            }
+                        </div>
+                        <div class="form-group">
+                            <label>Tekst meer-informatieknop (optioneel)</label>
+                            ${!isView
+                                ? `<input type="text" id="eventMoreInfoLabel" placeholder="Meer informatie" value="${escapeHtml(event?.more_info_label || '')}">`
+                                : `<p>${escapeHtml(event?.more_info_label || 'Meer informatie')}</p>`
+                            }
+                        </div>
                     </div>
                     <div class="modal-footer">
                         ${isView
@@ -2108,6 +2125,8 @@
                         }
                         let ticketUrl = (overlay.querySelector('#eventTicketUrl')?.value || '').trim();
                         if (ticketUrl && !/^https?:\/\//i.test(ticketUrl)) ticketUrl = `https://${ticketUrl}`;
+                        let moreInfoUrl = (overlay.querySelector('#eventMoreInfoUrl')?.value || '').trim();
+                        if (moreInfoUrl && !/^https?:\/\//i.test(moreInfoUrl)) moreInfoUrl = `https://${moreInfoUrl}`;
                         const parsePrice = (raw) => {
                             const s = String(raw ?? '').trim();
                             if (!s) return null;
@@ -2126,6 +2145,8 @@
                             pdf_url: pdfUrl,
                             ticket_url: ticketUrl || null,
                             ticket_label: (overlay.querySelector('#eventTicketLabel')?.value || '').trim() || null,
+                            more_info_url: moreInfoUrl || null,
+                            more_info_label: (overlay.querySelector('#eventMoreInfoLabel')?.value || '').trim() || null,
                         };
                         const url = saveId ? `${apiBase}/org/events/${saveId}` : `${apiBase}/org/events`;
                         const method = saveId ? 'PUT' : 'POST';

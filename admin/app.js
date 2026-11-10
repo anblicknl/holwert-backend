@@ -8521,6 +8521,8 @@ class HolwertAdmin {
                         pdf_url: ev.pdf_url || '',
                         ticket_url: ev.ticket_url || '',
                         ticket_label: ev.ticket_label || '',
+                        more_info_url: ev.more_info_url || '',
+                        more_info_label: ev.more_info_label || '',
                         price: ev.price != null && ev.price !== '' ? ev.price : '',
                         presale_price: ev.presale_price != null && ev.presale_price !== '' ? ev.presale_price : ''
                     };
@@ -8670,6 +8672,15 @@ class HolwertAdmin {
                                 <div class="form-group">
                                     <label>Tekst op ticketknop (optioneel)</label>
                                     <input type="text" id="evTicketLabel" value="${String(initial.ticket_label || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}" placeholder="Koop hier de tickets">
+                                </div>
+                                <div class="form-group">
+                                    <label>Meer-informatie link (optioneel)</label>
+                                    <input type="text" inputmode="url" autocomplete="url" id="evMoreInfoUrl" value="${String(initial.more_info_url || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}" placeholder="https://…">
+                                    <small class="form-hint">Grijze knop in de app (zoals bronvermelding bij nieuws). Mag met of zonder https://.</small>
+                                </div>
+                                <div class="form-group">
+                                    <label>Tekst meer-informatieknop (optioneel)</label>
+                                    <input type="text" id="evMoreInfoLabel" value="${String(initial.more_info_label || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}" placeholder="Meer informatie">
                                 </div>
                             </form>
                         </div>
@@ -8879,6 +8890,13 @@ class HolwertAdmin {
                 return s;
             })();
             body.ticket_label = (document.getElementById('evTicketLabel')?.value || '').trim() || null;
+            body.more_info_url = (() => {
+                let s = (document.getElementById('evMoreInfoUrl')?.value || '').trim();
+                if (!s) return null;
+                if (!/^https?:\/\//i.test(s)) s = `https://${s}`;
+                return s;
+            })();
+            body.more_info_label = (document.getElementById('evMoreInfoLabel')?.value || '').trim() || null;
             const rawPrice = document.getElementById('evPrice')?.value || '';
             const rawPresale = document.getElementById('evPresalePrice')?.value || '';
             body.price = rawPrice !== '' ? parseFloat(rawPrice) : null;
