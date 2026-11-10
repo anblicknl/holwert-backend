@@ -8652,35 +8652,52 @@ class HolwertAdmin {
                                     <small class="form-hint">Downloadlink onder het evenement in de app (max 15 MB).</small>
                                     ${this.pdfAttachmentControlsHtml(initial.pdf_url, 'evPdfRemove')}
                                 </div>
-                                <div class="form-row">
-                                    <div class="form-group">
-                                        <label>Prijs (optioneel)</label>
-                                        <input type="number" id="evPrice" min="0" step="0.01" value="${initial.price ?? ''}" placeholder="bijv. 12.50">
-                                        <small class="form-hint">Leeg laten als er geen prijs is.</small>
+                                <div class="form-block">
+                                    <div class="form-block__head">
+                                        <h4 class="form-block__title">Prijzen</h4>
+                                        <p class="form-block__intro">Optioneel. Leeg laten als het evenement gratis is of geen prijs toont.</p>
+                                    </div>
+                                    <div class="form-row">
+                                        <div class="form-group">
+                                            <label>Prijs</label>
+                                            <input type="number" id="evPrice" min="0" step="0.01" value="${initial.price ?? ''}" placeholder="bijv. 12.50">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Voorverkoop</label>
+                                            <input type="number" id="evPresalePrice" min="0" step="0.01" value="${initial.presale_price ?? ''}" placeholder="bijv. 10.00">
+                                            <small class="form-hint">Alleen zichtbaar in de app als ingevuld.</small>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="form-block">
+                                    <div class="form-block__head">
+                                        <h4 class="form-block__title">Tickets</h4>
+                                        <p class="form-block__intro">Optionele knop in de app voor ticketverkoop (bijv. MGTickets).</p>
                                     </div>
                                     <div class="form-group">
-                                        <label>Voorverkoop (optioneel)</label>
-                                        <input type="number" id="evPresalePrice" min="0" step="0.01" value="${initial.presale_price ?? ''}" placeholder="bijv. 10.00">
-                                        <small class="form-hint">Alleen tonen in de app als ingevuld.</small>
+                                        <label>Link</label>
+                                        <input type="text" inputmode="url" autocomplete="url" id="evTicketUrl" value="${String(initial.ticket_url || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}" placeholder="https://…">
+                                        <small class="form-hint">Mag met of zonder https://.</small>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Tekst op de knop</label>
+                                        <input type="text" id="evTicketLabel" value="${String(initial.ticket_label || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}" placeholder="Koop hier de tickets">
                                     </div>
                                 </div>
-                                <div class="form-group">
-                                    <label>Ticketlink (optioneel)</label>
-                                    <input type="text" inputmode="url" autocomplete="url" id="evTicketUrl" value="${String(initial.ticket_url || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}" placeholder="https://… (bijv. MGTickets)">
-                                    <small class="form-hint">Wordt in de app een knop onder de omschrijving. Mag met of zonder https://.</small>
-                                </div>
-                                <div class="form-group">
-                                    <label>Tekst op ticketknop (optioneel)</label>
-                                    <input type="text" id="evTicketLabel" value="${String(initial.ticket_label || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}" placeholder="Koop hier de tickets">
-                                </div>
-                                <div class="form-group">
-                                    <label>Meer-informatie link (optioneel)</label>
-                                    <input type="text" inputmode="url" autocomplete="url" id="evMoreInfoUrl" value="${String(initial.more_info_url || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}" placeholder="https://…">
-                                    <small class="form-hint">Grijze knop in de app (zoals bronvermelding bij nieuws). Mag met of zonder https://.</small>
-                                </div>
-                                <div class="form-group">
-                                    <label>Tekst meer-informatieknop (optioneel)</label>
-                                    <input type="text" id="evMoreInfoLabel" value="${String(initial.more_info_label || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}" placeholder="Meer informatie">
+                                <div class="form-block">
+                                    <div class="form-block__head">
+                                        <h4 class="form-block__title">Meer informatie</h4>
+                                        <p class="form-block__intro">Apart van tickets: grijze knop in de app, zoals bronvermelding bij nieuws.</p>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Link</label>
+                                        <input type="text" inputmode="url" autocomplete="url" id="evMoreInfoUrl" value="${String(initial.more_info_url || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}" placeholder="https://…">
+                                        <small class="form-hint">Mag met of zonder https://.</small>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Tekst op de knop</label>
+                                        <input type="text" id="evMoreInfoLabel" value="${String(initial.more_info_label || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}" placeholder="Meer informatie">
+                                    </div>
                                 </div>
                             </form>
                         </div>

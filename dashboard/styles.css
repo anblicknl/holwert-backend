@@ -549,6 +549,36 @@ body {
 .btn-sm { padding: 0.35rem 0.75rem; font-size: 0.85rem; }
 
 .form-group { margin-bottom: 1rem; }
+
+/* Geneste kaarten in modals: groepeert bij elkaar horende velden */
+.form-block {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 1rem 1.15rem 1.05rem;
+    margin: 0 0 1rem;
+}
+.form-block__head { margin-bottom: 0.85rem; }
+.form-block__title {
+    margin: 0 0 0.2rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #0f172a;
+    letter-spacing: -0.01em;
+}
+.form-block__intro {
+    margin: 0;
+    font-size: 0.8125rem;
+    line-height: 1.45;
+    color: #64748b;
+}
+.form-block .form-group { margin-bottom: 0.9rem; }
+.form-block .form-group:last-child,
+.form-block .form-row:last-child { margin-bottom: 0; }
+.form-block .form-row { margin-bottom: 0; }
+.form-block .form-row .form-group { margin-bottom: 0.9rem; }
+.form-block .form-row .form-group:last-child { margin-bottom: 0; }
+
 .form-group label:not(.checkbox-label) {
     display: block;
     margin-bottom: 0.5rem;

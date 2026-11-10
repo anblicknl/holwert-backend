@@ -1987,21 +1987,9 @@
                                 <p class="form-hint">Leeg laten voor eendaags evenement.</p>
                             </div>
                         </div>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label>Locatie</label>
-                                <input type="text" id="eventLocation" value="${escapeHtml(event?.location || '')}" ${ro}>
-                            </div>
-                            <div class="form-group">
-                                <label>Prijs</label>
-                                <input type="number" id="eventPrice" min="0" step="0.01" placeholder="bijv. 12.50" value="${formatPriceInput(event?.price)}" ${ro}>
-                                <p class="form-hint">Leeg laten als er geen prijs is.</p>
-                            </div>
-                        </div>
                         <div class="form-group">
-                            <label>Voorverkoop (optioneel)</label>
-                            <input type="number" id="eventPresalePrice" min="0" step="0.01" placeholder="bijv. 10.00" value="${formatPriceInput(event?.presale_price)}" ${ro}>
-                            <p class="form-hint">Alleen zichtbaar in de app als ingevuld.</p>
+                            <label>Locatie</label>
+                            <input type="text" id="eventLocation" value="${escapeHtml(event?.location || '')}" ${ro}>
                         </div>
                         <div class="form-group">
                             <label>Afbeelding</label>
@@ -2018,39 +2006,68 @@
                                     : '<p class="form-hint">Geen PDF</p>')
                             }
                         </div>
-                        <div class="form-group">
-                            <label>Ticketlink (optioneel)</label>
-                            ${!isView
-                                ? `<input type="text" inputmode="url" autocomplete="url" id="eventTicketUrl" placeholder="https://…" value="${escapeHtml(event?.ticket_url || '')}">
-                                   <p class="form-hint">Wordt in de app een knop (bijv. ticketverkoop). Mag met of zonder https://.</p>`
-                                : (event?.ticket_url
-                                    ? `<a href="${escapeHtml(event.ticket_url)}" target="_blank" rel="noopener">${escapeHtml(event.ticket_url)}</a>`
-                                    : '<p class="form-hint">Geen ticketlink</p>')
-                            }
+                        <div class="form-block">
+                            <div class="form-block__head">
+                                <h4 class="form-block__title">Prijzen</h4>
+                                <p class="form-block__intro">Optioneel. Leeg laten als het evenement gratis is of geen prijs toont.</p>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>Prijs</label>
+                                    <input type="number" id="eventPrice" min="0" step="0.01" placeholder="bijv. 12.50" value="${formatPriceInput(event?.price)}" ${ro}>
+                                </div>
+                                <div class="form-group">
+                                    <label>Voorverkoop</label>
+                                    <input type="number" id="eventPresalePrice" min="0" step="0.01" placeholder="bijv. 10.00" value="${formatPriceInput(event?.presale_price)}" ${ro}>
+                                    <p class="form-hint">Alleen zichtbaar in de app als ingevuld.</p>
+                                </div>
+                            </div>
                         </div>
-                        <div class="form-group">
-                            <label>Tekst ticketknop (optioneel)</label>
-                            ${!isView
-                                ? `<input type="text" id="eventTicketLabel" placeholder="Koop hier de tickets" value="${escapeHtml(event?.ticket_label || '')}">`
-                                : `<p>${escapeHtml(event?.ticket_label || 'Koop hier de tickets')}</p>`
-                            }
+                        <div class="form-block">
+                            <div class="form-block__head">
+                                <h4 class="form-block__title">Tickets</h4>
+                                <p class="form-block__intro">Optionele knop in de app voor ticketverkoop.</p>
+                            </div>
+                            <div class="form-group">
+                                <label>Link</label>
+                                ${!isView
+                                    ? `<input type="text" inputmode="url" autocomplete="url" id="eventTicketUrl" placeholder="https://…" value="${escapeHtml(event?.ticket_url || '')}">
+                                       <p class="form-hint">Mag met of zonder https://.</p>`
+                                    : (event?.ticket_url
+                                        ? `<a href="${escapeHtml(event.ticket_url)}" target="_blank" rel="noopener">${escapeHtml(event.ticket_url)}</a>`
+                                        : '<p class="form-hint">Geen ticketlink</p>')
+                                }
+                            </div>
+                            <div class="form-group">
+                                <label>Tekst op de knop</label>
+                                ${!isView
+                                    ? `<input type="text" id="eventTicketLabel" placeholder="Koop hier de tickets" value="${escapeHtml(event?.ticket_label || '')}">`
+                                    : `<p>${escapeHtml(event?.ticket_label || 'Koop hier de tickets')}</p>`
+                                }
+                            </div>
                         </div>
-                        <div class="form-group">
-                            <label>Meer-informatie link (optioneel)</label>
-                            ${!isView
-                                ? `<input type="text" inputmode="url" autocomplete="url" id="eventMoreInfoUrl" placeholder="https://…" value="${escapeHtml(event?.more_info_url || '')}">
-                                   <p class="form-hint">Grijze knop in de app (zoals bronvermelding bij nieuws). Mag met of zonder https://.</p>`
-                                : (event?.more_info_url
-                                    ? `<a href="${escapeHtml(event.more_info_url)}" target="_blank" rel="noopener">${escapeHtml(event.more_info_url)}</a>`
-                                    : '<p class="form-hint">Geen meer-informatielink</p>')
-                            }
-                        </div>
-                        <div class="form-group">
-                            <label>Tekst meer-informatieknop (optioneel)</label>
-                            ${!isView
-                                ? `<input type="text" id="eventMoreInfoLabel" placeholder="Meer informatie" value="${escapeHtml(event?.more_info_label || '')}">`
-                                : `<p>${escapeHtml(event?.more_info_label || 'Meer informatie')}</p>`
-                            }
+                        <div class="form-block">
+                            <div class="form-block__head">
+                                <h4 class="form-block__title">Meer informatie</h4>
+                                <p class="form-block__intro">Apart van tickets: grijze knop in de app, zoals bronvermelding bij nieuws.</p>
+                            </div>
+                            <div class="form-group">
+                                <label>Link</label>
+                                ${!isView
+                                    ? `<input type="text" inputmode="url" autocomplete="url" id="eventMoreInfoUrl" placeholder="https://…" value="${escapeHtml(event?.more_info_url || '')}">
+                                       <p class="form-hint">Mag met of zonder https://.</p>`
+                                    : (event?.more_info_url
+                                        ? `<a href="${escapeHtml(event.more_info_url)}" target="_blank" rel="noopener">${escapeHtml(event.more_info_url)}</a>`
+                                        : '<p class="form-hint">Geen meer-informatielink</p>')
+                                }
+                            </div>
+                            <div class="form-group">
+                                <label>Tekst op de knop</label>
+                                ${!isView
+                                    ? `<input type="text" id="eventMoreInfoLabel" placeholder="Meer informatie" value="${escapeHtml(event?.more_info_label || '')}">`
+                                    : `<p>${escapeHtml(event?.more_info_label || 'Meer informatie')}</p>`
+                                }
+                            </div>
                         </div>
                     </div>
                     <div class="modal-footer">
