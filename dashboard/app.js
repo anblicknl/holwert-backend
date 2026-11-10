@@ -1966,49 +1966,67 @@
                         <button type="button" class="modal-close">&times;</button>
                     </div>
                     <div class="modal-body">
-                        <div class="form-group">
-                            <label>Titel</label>
-                            <input type="text" id="eventTitle" value="${escapeHtml(event?.title || '')}" ${ro}>
-                        </div>
-                        <div class="form-group">
-                            <label>Beschrijving</label>
-                            <textarea id="eventDescription" rows="3" ${ro}>${escapeHtml(event?.description || '')}</textarea>
-                        </div>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label>Begindatum &amp; -tijd *</label>
-                                <input type="datetime-local" id="eventDate" value="${event?.event_date ? toDatetimeInputValue(event.event_date) : ''}" ${dis}>
-                                <div id="eventSameDayWarning" class="event-same-day-warning" hidden role="status" aria-live="polite"></div>
-                                ${isDuplicate ? '<p class="form-hint">Vul een nieuwe begindatum in.</p>' : ''}
+                        <div class="form-block">
+                            <div class="form-block__head">
+                                <h4 class="form-block__title"><i class="fas fa-align-left" aria-hidden="true"></i> Basis</h4>
+                                <p class="form-block__intro">Titel en omschrijving zoals die in de app verschijnen.</p>
                             </div>
                             <div class="form-group">
-                                <label>Einddatum &amp; -tijd</label>
-                                <input type="datetime-local" id="eventEndDate" value="${event?.event_end_date ? toDatetimeInputValue(event.event_end_date) : ''}" ${dis}>
-                                <p class="form-hint">Leeg laten voor eendaags evenement.</p>
+                                <label>Titel</label>
+                                <input type="text" id="eventTitle" value="${escapeHtml(event?.title || '')}" ${ro}>
                             </div>
-                        </div>
-                        <div class="form-group">
-                            <label>Locatie</label>
-                            <input type="text" id="eventLocation" value="${escapeHtml(event?.location || '')}" ${ro}>
-                        </div>
-                        <div class="form-group">
-                            <label>Afbeelding</label>
-                            ${imageEditable}
-                        </div>
-                        <div class="form-group">
-                            <label>PDF-bijlage (optioneel)</label>
-                            ${!isView
-                                ? `<input type="file" id="eventPdfFile" accept="application/pdf,.pdf">
-                                   <p class="form-hint">Downloadlink onder het evenement in de app (max 15 MB).</p>
-                                   ${pdfAttachmentControlsHtml(event?.pdf_url, 'eventPdfRemove')}`
-                                : (event?.pdf_url
-                                    ? `<a href="${escapeHtml(event.pdf_url)}" target="_blank" rel="noopener">PDF openen</a>`
-                                    : '<p class="form-hint">Geen PDF</p>')
-                            }
+                            <div class="form-group">
+                                <label>Beschrijving</label>
+                                <textarea id="eventDescription" rows="3" ${ro}>${escapeHtml(event?.description || '')}</textarea>
+                            </div>
                         </div>
                         <div class="form-block">
                             <div class="form-block__head">
-                                <h4 class="form-block__title">Prijzen</h4>
+                                <h4 class="form-block__title"><i class="fas fa-calendar-alt" aria-hidden="true"></i> Wanneer &amp; waar</h4>
+                                <p class="form-block__intro">Datum, tijd en locatie van het evenement.</p>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>Begindatum &amp; -tijd *</label>
+                                    <input type="datetime-local" id="eventDate" value="${event?.event_date ? toDatetimeInputValue(event.event_date) : ''}" ${dis}>
+                                    <div id="eventSameDayWarning" class="event-same-day-warning" hidden role="status" aria-live="polite"></div>
+                                    ${isDuplicate ? '<p class="form-hint">Vul een nieuwe begindatum in.</p>' : ''}
+                                </div>
+                                <div class="form-group">
+                                    <label>Einddatum &amp; -tijd</label>
+                                    <input type="datetime-local" id="eventEndDate" value="${event?.event_end_date ? toDatetimeInputValue(event.event_end_date) : ''}" ${dis}>
+                                    <p class="form-hint">Leeg laten voor eendaags evenement.</p>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Locatie</label>
+                                <input type="text" id="eventLocation" value="${escapeHtml(event?.location || '')}" ${ro}>
+                            </div>
+                        </div>
+                        <div class="form-block">
+                            <div class="form-block__head">
+                                <h4 class="form-block__title"><i class="fas fa-image" aria-hidden="true"></i> Media</h4>
+                                <p class="form-block__intro">Afbeelding en optionele PDF-bijlage voor in de app.</p>
+                            </div>
+                            <div class="form-group">
+                                <label>Afbeelding</label>
+                                ${imageEditable}
+                            </div>
+                            <div class="form-group">
+                                <label>PDF-bijlage (optioneel)</label>
+                                ${!isView
+                                    ? `<input type="file" id="eventPdfFile" accept="application/pdf,.pdf">
+                                       <p class="form-hint">Downloadlink onder het evenement in de app (max 15 MB).</p>
+                                       ${pdfAttachmentControlsHtml(event?.pdf_url, 'eventPdfRemove')}`
+                                    : (event?.pdf_url
+                                        ? `<a href="${escapeHtml(event.pdf_url)}" target="_blank" rel="noopener">PDF openen</a>`
+                                        : '<p class="form-hint">Geen PDF</p>')
+                                }
+                            </div>
+                        </div>
+                        <div class="form-block">
+                            <div class="form-block__head">
+                                <h4 class="form-block__title"><i class="fas fa-euro-sign" aria-hidden="true"></i> Prijzen</h4>
                                 <p class="form-block__intro">Optioneel. Leeg laten als het evenement gratis is of geen prijs toont.</p>
                             </div>
                             <div class="form-row">
@@ -2025,7 +2043,7 @@
                         </div>
                         <div class="form-block">
                             <div class="form-block__head">
-                                <h4 class="form-block__title">Tickets</h4>
+                                <h4 class="form-block__title"><i class="fas fa-ticket-alt" aria-hidden="true"></i> Tickets</h4>
                                 <p class="form-block__intro">Optionele knop in de app voor ticketverkoop.</p>
                             </div>
                             <div class="form-group">
@@ -2048,7 +2066,7 @@
                         </div>
                         <div class="form-block">
                             <div class="form-block__head">
-                                <h4 class="form-block__title">Meer informatie</h4>
+                                <h4 class="form-block__title"><i class="fas fa-external-link-alt" aria-hidden="true"></i> Meer informatie</h4>
                                 <p class="form-block__intro">Apart van tickets: grijze knop in de app, zoals bronvermelding bij nieuws.</p>
                             </div>
                             <div class="form-group">

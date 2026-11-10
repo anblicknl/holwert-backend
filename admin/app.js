@@ -8598,63 +8598,81 @@ class HolwertAdmin {
                         <div class="modal-body">
                             <form id="eventForm" class="form">
                                 ${initial.pdf_url ? `<input type="hidden" id="evExistingPdf" value="${initial.pdf_url}">` : ''}
-                                <div class="form-group">
-                                    <label>Titel</label>
-                                    <input type="text" id="evTitle" value="${initial.title}" placeholder="Titel">
-                                </div>
-                                <div class="form-group">
-                                    <label>Omschrijving</label>
-                                    <textarea id="evDesc" style="min-height:120px" placeholder="Omschrijving">${initial.description}</textarea>
-                                </div>
-                                <div class="form-row">
-                                    <div class="form-group">
-                                        <label>Begindatum</label>
-                                        <input type="datetime-local" id="evStart" value="${initial.event_date}">
-                                        ${mode === 'duplicate' ? '<small class="form-hint">Vul een nieuwe begindatum in.</small>' : ''}
+                                <div class="form-block">
+                                    <div class="form-block__head">
+                                        <h4 class="form-block__title"><i class="fas fa-align-left" aria-hidden="true"></i> Basis</h4>
+                                        <p class="form-block__intro">Titel en omschrijving zoals die in de app verschijnen.</p>
                                     </div>
                                     <div class="form-group">
-                                        <label>Einddatum</label>
-                                        <input type="datetime-local" id="evEnd" value="${initial.event_end_date}">
-                                        ${mode === 'duplicate' ? '<small class="form-hint">Optioneel; leeg = eendaags.</small>' : ''}
+                                        <label>Titel</label>
+                                        <input type="text" id="evTitle" value="${initial.title}" placeholder="Titel">
                                     </div>
-                                </div>
-                                <div class="form-group">
-                                    <label>Locatie</label>
-                                    <input type="text" id="evLocation" value="${initial.location}" placeholder="Locatie">
-                                </div>
-                                <div class="form-group">
-                                    <label>Organisatie (optioneel)</label>
-                                    <select id="evOrg">
-                                        <option value="">Geen organisatie</option>
-                                        ${organizations.map(org => `
-                                            <option value="${org.id}" ${org.id == initial.organization_id ? 'selected' : ''}>${org.name || `Organisatie ${org.id}`}</option>
-                                        `).join('')}
-                                    </select>
-                                </div>
-                                <div class="form-group">
-                                    <label>Afbeelding (optioneel)</label>
-                                    <input type="file" id="evImage" accept="image/*">
-                                    <small class="form-hint">JPG, PNG of WebP — wordt als WebP opgeslagen (JPEG als fallback).</small>
-                                    <div id="evImagePreview" class="image-preview-box" style="display: none;">
-                                        <img id="evImagePreviewImg" src="" alt="Preview">
-                                        <button type="button" class="btn btn-sm btn-secondary" id="evImageClearBtn" style="margin-top: 0.5rem;">Verwijder afbeelding</button>
+                                    <div class="form-group">
+                                        <label>Omschrijving</label>
+                                        <textarea id="evDesc" style="min-height:120px" placeholder="Omschrijving">${initial.description}</textarea>
                                     </div>
-                                    ${initial.image_url ? `
-                                        <div class="current-image" data-existing-image="${initial.image_url}">
-                                            <span class="form-hint">Huidige afbeelding:</span>
-                                            <img src="${initial.image_url}" alt="Huidige afbeelding">
-                                        </div>
-                                    ` : ''}
-                                </div>
-                                <div class="form-group">
-                                    <label>PDF-bijlage (optioneel)</label>
-                                    <input type="file" id="evPdf" accept="application/pdf,.pdf">
-                                    <small class="form-hint">Downloadlink onder het evenement in de app (max 15 MB).</small>
-                                    ${this.pdfAttachmentControlsHtml(initial.pdf_url, 'evPdfRemove')}
                                 </div>
                                 <div class="form-block">
                                     <div class="form-block__head">
-                                        <h4 class="form-block__title">Prijzen</h4>
+                                        <h4 class="form-block__title"><i class="fas fa-calendar-alt" aria-hidden="true"></i> Wanneer &amp; waar</h4>
+                                        <p class="form-block__intro">Datum, tijd, locatie en eventueel de organisatie.</p>
+                                    </div>
+                                    <div class="form-row">
+                                        <div class="form-group">
+                                            <label>Begindatum</label>
+                                            <input type="datetime-local" id="evStart" value="${initial.event_date}">
+                                            ${mode === 'duplicate' ? '<small class="form-hint">Vul een nieuwe begindatum in.</small>' : ''}
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Einddatum</label>
+                                            <input type="datetime-local" id="evEnd" value="${initial.event_end_date}">
+                                            ${mode === 'duplicate' ? '<small class="form-hint">Optioneel; leeg = eendaags.</small>' : ''}
+                                        </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Locatie</label>
+                                        <input type="text" id="evLocation" value="${initial.location}" placeholder="Locatie">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Organisatie (optioneel)</label>
+                                        <select id="evOrg">
+                                            <option value="">Geen organisatie</option>
+                                            ${organizations.map(org => `
+                                                <option value="${org.id}" ${org.id == initial.organization_id ? 'selected' : ''}>${org.name || `Organisatie ${org.id}`}</option>
+                                            `).join('')}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="form-block">
+                                    <div class="form-block__head">
+                                        <h4 class="form-block__title"><i class="fas fa-image" aria-hidden="true"></i> Media</h4>
+                                        <p class="form-block__intro">Afbeelding en optionele PDF-bijlage voor in de app.</p>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Afbeelding (optioneel)</label>
+                                        <input type="file" id="evImage" accept="image/*">
+                                        <small class="form-hint">JPG, PNG of WebP — wordt als WebP opgeslagen (JPEG als fallback).</small>
+                                        <div id="evImagePreview" class="image-preview-box" style="display: none;">
+                                            <img id="evImagePreviewImg" src="" alt="Preview">
+                                            <button type="button" class="btn btn-sm btn-secondary" id="evImageClearBtn" style="margin-top: 0.5rem;">Verwijder afbeelding</button>
+                                        </div>
+                                        ${initial.image_url ? `
+                                            <div class="current-image" data-existing-image="${initial.image_url}">
+                                                <span class="form-hint">Huidige afbeelding:</span>
+                                                <img src="${initial.image_url}" alt="Huidige afbeelding">
+                                            </div>
+                                        ` : ''}
+                                    </div>
+                                    <div class="form-group">
+                                        <label>PDF-bijlage (optioneel)</label>
+                                        <input type="file" id="evPdf" accept="application/pdf,.pdf">
+                                        <small class="form-hint">Downloadlink onder het evenement in de app (max 15 MB).</small>
+                                        ${this.pdfAttachmentControlsHtml(initial.pdf_url, 'evPdfRemove')}
+                                    </div>
+                                </div>
+                                <div class="form-block">
+                                    <div class="form-block__head">
+                                        <h4 class="form-block__title"><i class="fas fa-euro-sign" aria-hidden="true"></i> Prijzen</h4>
                                         <p class="form-block__intro">Optioneel. Leeg laten als het evenement gratis is of geen prijs toont.</p>
                                     </div>
                                     <div class="form-row">
@@ -8671,7 +8689,7 @@ class HolwertAdmin {
                                 </div>
                                 <div class="form-block">
                                     <div class="form-block__head">
-                                        <h4 class="form-block__title">Tickets</h4>
+                                        <h4 class="form-block__title"><i class="fas fa-ticket-alt" aria-hidden="true"></i> Tickets</h4>
                                         <p class="form-block__intro">Optionele knop in de app voor ticketverkoop (bijv. MGTickets).</p>
                                     </div>
                                     <div class="form-group">
@@ -8686,7 +8704,7 @@ class HolwertAdmin {
                                 </div>
                                 <div class="form-block">
                                     <div class="form-block__head">
-                                        <h4 class="form-block__title">Meer informatie</h4>
+                                        <h4 class="form-block__title"><i class="fas fa-external-link-alt" aria-hidden="true"></i> Meer informatie</h4>
                                         <p class="form-block__intro">Apart van tickets: grijze knop in de app, zoals bronvermelding bij nieuws.</p>
                                     </div>
                                     <div class="form-group">
