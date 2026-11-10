@@ -1588,78 +1588,106 @@
                         <button type="button" class="modal-close">&times;</button>
                     </div>
                     <div class="modal-body">
-                        <div class="form-group">
-                            <label>Titel</label>
-                            <input type="text" id="newsTitle" value="${escapeHtml(article?.title || '')}" ${ro}>
+                        <div class="form-block">
+                            <div class="form-block__head">
+                                <h4 class="form-block__title"><i class="fas fa-newspaper" aria-hidden="true"></i> Basis</h4>
+                                <p class="form-block__intro">Titel en onderwerp van het bericht.</p>
+                            </div>
+                            <div class="form-group">
+                                <label>Titel</label>
+                                <input type="text" id="newsTitle" value="${escapeHtml(article?.title || '')}" ${ro}>
+                            </div>
+                            ${categoryFieldsHtml}
                         </div>
-                        ${categoryFieldsHtml}
-                        <div class="form-group">
-                            <label>Inhoud</label>
-                            ${editorToolbar}
-                            <textarea id="newsContent" rows="6" ${ro}>${escapeHtml(article?.content || '')}</textarea>
+                        <div class="form-block">
+                            <div class="form-block__head">
+                                <h4 class="form-block__title"><i class="fas fa-align-left" aria-hidden="true"></i> Inhoud</h4>
+                                <p class="form-block__intro">De tekst van het artikel zoals die in de app verschijnt.</p>
+                            </div>
+                            <div class="form-group">
+                                <label>Inhoud</label>
+                                ${editorToolbar}
+                                <textarea id="newsContent" rows="6" ${ro}>${escapeHtml(article?.content || '')}</textarea>
+                            </div>
                         </div>
-                        <div class="form-group">
-                            <label>Bronvermelding (optioneel)</label>
-                            ${!isPreview
-                                ? `<div class="form-subfields">
-                                       <div class="form-subfield">
-                                           <label for="newsSourceName">Naam bron</label>
-                                           <input type="text" id="newsSourceName" placeholder="bijv. NOS, Leeuwarder Courant…" value="${escapeHtml(article?.source_name || '')}">
-                                       </div>
-                                       <div class="form-subfield form-subfield--wide">
-                                           <label for="newsSourceUrl">URL (link naar bron)</label>
-                                           <input type="url" id="newsSourceUrl" placeholder="https://…" value="${escapeHtml(article?.source_url || '')}">
-                                       </div>
-                                   </div>
-                                   <p class="form-hint">Wordt onder het artikel in de app getoond als &quot;Bron: …&quot; (zelfde als in /admin).</p>`
-                                : (article?.source_name
-                                    ? `<p class="readonly-value">Bron: <a href="${escapeHtml(article.source_url || '#')}" target="_blank" rel="noopener">${escapeHtml(article.source_name)}</a></p>`
-                                    : '<p class="form-hint">Geen bronvermelding ingesteld. Klik op <strong>Bewerken</strong> (potlood) om naam en URL toe te voegen.</p>')
-                            }
+                        <div class="form-block">
+                            <div class="form-block__head">
+                                <h4 class="form-block__title"><i class="fas fa-image" aria-hidden="true"></i> Media</h4>
+                                <p class="form-block__intro">Afbeelding, optionele video en PDF-bijlage.</p>
+                            </div>
+                            <div class="form-group">
+                                <label>Afbeelding</label>
+                                ${imageEditable}
+                            </div>
+                            <div class="form-group">
+                                <label>YouTube-video (optioneel)</label>
+                                ${!isPreview
+                                    ? `<input type="url" id="newsYoutubeUrl" placeholder="https://www.youtube.com/watch?v=... of https://youtu.be/..." value="${escapeHtml(article?.youtube_url || '')}">
+                                       <p class="form-hint">Als je een YouTube-link invult, wordt de video als Hero getoond in de app (vervangt de afbeelding).</p>`
+                                    : (article?.youtube_url
+                                        ? `<a href="${escapeHtml(article.youtube_url)}" target="_blank" rel="noopener">${escapeHtml(article.youtube_url)}</a>`
+                                        : '<p class="form-hint">Geen video</p>')
+                                }
+                            </div>
+                            <div class="form-group">
+                                <label>PDF-bijlage (optioneel)</label>
+                                ${!isPreview
+                                    ? `<input type="file" id="newsPdfFile" accept="application/pdf,.pdf">
+                                       <p class="form-hint">Wordt in de app als downloadlink onder het artikel getoond (max 15 MB).</p>
+                                       ${pdfAttachmentControlsHtml(article?.pdf_url, 'newsPdfRemove')}`
+                                    : (article?.pdf_url
+                                        ? `<a href="${escapeHtml(article.pdf_url)}" target="_blank" rel="noopener">PDF openen</a>`
+                                        : '<p class="form-hint">Geen PDF</p>')
+                                }
+                            </div>
                         </div>
-                        <div class="form-group">
-                            <label>Publicatiedatum</label>
-                            <input type="datetime-local" id="newsPublishedAt" value="${publishedAtValue}" ${ro}>
-                            <p class="form-hint">Leeg laten = nu. Toekomstige datum + “Gepubliceerd” = automatisch live vanaf dat moment (push ook pas dan).</p>
+                        <div class="form-block">
+                            <div class="form-block__head">
+                                <h4 class="form-block__title"><i class="fas fa-link" aria-hidden="true"></i> Bronvermelding</h4>
+                                <p class="form-block__intro">Optioneel. Wordt onder het artikel in de app getoond als &quot;Bron: …&quot;.</p>
+                            </div>
+                            <div class="form-group">
+                                ${!isPreview
+                                    ? `<div class="form-subfields">
+                                           <div class="form-subfield">
+                                               <label for="newsSourceName">Naam bron</label>
+                                               <input type="text" id="newsSourceName" placeholder="bijv. NOS, Leeuwarder Courant…" value="${escapeHtml(article?.source_name || '')}">
+                                           </div>
+                                           <div class="form-subfield form-subfield--wide">
+                                               <label for="newsSourceUrl">URL (link naar bron)</label>
+                                               <input type="url" id="newsSourceUrl" placeholder="https://…" value="${escapeHtml(article?.source_url || '')}">
+                                           </div>
+                                       </div>`
+                                    : (article?.source_name
+                                        ? `<p class="readonly-value">Bron: <a href="${escapeHtml(article.source_url || '#')}" target="_blank" rel="noopener">${escapeHtml(article.source_name)}</a></p>`
+                                        : '<p class="form-hint">Geen bronvermelding ingesteld. Klik op <strong>Bewerken</strong> (potlood) om naam en URL toe te voegen.</p>')
+                                }
+                            </div>
                         </div>
-                        <div class="form-group">
-                            <label>Afbeelding</label>
-                            ${imageEditable}
+                        <div class="form-block">
+                            <div class="form-block__head">
+                                <h4 class="form-block__title"><i class="fas fa-clock" aria-hidden="true"></i> Publicatie</h4>
+                                <p class="form-block__intro">Wanneer het bericht live gaat, reacties en delen.</p>
+                            </div>
+                            <div class="form-group">
+                                <label>Publicatiedatum</label>
+                                <input type="datetime-local" id="newsPublishedAt" value="${publishedAtValue}" ${ro}>
+                                <p class="form-hint">Leeg laten = nu. Toekomstige datum + “Gepubliceerd” = automatisch live vanaf dat moment (push ook pas dan).</p>
+                            </div>
+                            ${checkboxFieldHtml('newsReactionsOpen', 'Reageren open', {
+                                checked: !!article?.reactions_open,
+                                disabled: isPreview,
+                                hint: 'Inwoners met een account kunnen in de app een reactie sturen, eventueel met een foto. Anderen zien die reacties niet.',
+                            })}
+                            ${checkboxFieldHtml('newsPublished', 'Gepubliceerd (of inplannen met datum hierboven)', {
+                                checked: !!article?.is_published,
+                                disabled: isPreview,
+                                hint: 'Met een toekomstige publicatiedatum blijft het bericht verborgen tot die tijd.',
+                            })}
+                            ${!isPreview ? checkboxFieldHtml('newsShareFacebook', 'Na opslaan delen op Facebook', {
+                                hint: 'Opent Facebook met linkpreview van dit bericht. Titel en begin van de inhoud staan op je klembord om te plakken.',
+                            }) : ''}
                         </div>
-                        <div class="form-group">
-                            <label>YouTube-video (optioneel)</label>
-                            ${!isPreview
-                                ? `<input type="url" id="newsYoutubeUrl" placeholder="https://www.youtube.com/watch?v=... of https://youtu.be/..." value="${escapeHtml(article?.youtube_url || '')}">
-                                   <p class="form-hint">Als je een YouTube-link invult, wordt de video als Hero getoond in de app (vervangt de afbeelding).</p>`
-                                : (article?.youtube_url
-                                    ? `<a href="${escapeHtml(article.youtube_url)}" target="_blank" rel="noopener">${escapeHtml(article.youtube_url)}</a>`
-                                    : '<p class="form-hint">Geen video</p>')
-                            }
-                        </div>
-                        <div class="form-group">
-                            <label>PDF-bijlage (optioneel)</label>
-                            ${!isPreview
-                                ? `<input type="file" id="newsPdfFile" accept="application/pdf,.pdf">
-                                   <p class="form-hint">Wordt in de app als downloadlink onder het artikel getoond (max 15 MB).</p>
-                                   ${pdfAttachmentControlsHtml(article?.pdf_url, 'newsPdfRemove')}`
-                                : (article?.pdf_url
-                                    ? `<a href="${escapeHtml(article.pdf_url)}" target="_blank" rel="noopener">PDF openen</a>`
-                                    : '<p class="form-hint">Geen PDF</p>')
-                            }
-                        </div>
-                        ${checkboxFieldHtml('newsReactionsOpen', 'Reageren open', {
-                            checked: !!article?.reactions_open,
-                            disabled: isPreview,
-                            hint: 'Inwoners met een account kunnen in de app een reactie sturen, eventueel met een foto. Anderen zien die reacties niet.',
-                        })}
-                        ${checkboxFieldHtml('newsPublished', 'Gepubliceerd (of inplannen met datum hierboven)', {
-                            checked: !!article?.is_published,
-                            disabled: isPreview,
-                            hint: 'Met een toekomstige publicatiedatum blijft het bericht verborgen tot die tijd.',
-                        })}
-                        ${!isPreview ? checkboxFieldHtml('newsShareFacebook', 'Na opslaan delen op Facebook', {
-                            hint: 'Opent Facebook met linkpreview van dit bericht. Titel en begin van de inhoud staan op je klembord om te plakken.',
-                        }) : ''}
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary modal-close-btn">${isPreview ? 'Sluiten' : 'Annuleren'}</button>

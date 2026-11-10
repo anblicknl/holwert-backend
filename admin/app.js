@@ -4745,133 +4745,156 @@ class HolwertAdmin {
                     </div>
                     <div class="modal-body">
                         <form id="newsForm" class="event-form">
-                            <div class="form-group">
-                                <label for="newsTitle">Titel *</label>
-                                <input type="text" id="newsTitle" name="title" 
-                                    value="${escAttr(article?.title || '')}" 
-                                    placeholder="Titel van het artikel" required>
-                            </div>
-                            
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label for="newsCategory">Onderwerp / categorie</label>
-                                    <select id="newsCategory" name="category" onchange="admin.syncNewsCustomCategoryField()">
-                                        ${categories.map(cat => `
-                                            <option value="${cat.id}" ${selectedCategory === cat.id ? 'selected' : ''}>
-                                                ${cat.label}
-                                            </option>
-                                        `).join('')}
-                                    </select>
-                                </div>
-                                <div class="form-group" id="newsCustomCategoryGroup" style="display: ${selectedCategory === 'overig' ? 'block' : 'none'}">
-                                    <label for="newsCustomCategory">Eigen onderwerp</label>
-                                    <input type="text" id="newsCustomCategory" name="custom_category" maxlength="100"
-                                        value="${article?.custom_category || ''}"
-                                        placeholder="bijv. Jaarverslag, Weersverwachting">
-                                    <small class="form-hint">Wordt boven het artikel in de app getoond (alleen bij Overig)</small>
+                            <div class="form-block">
+                                <div class="form-block__head">
+                                    <h4 class="form-block__title"><i class="fas fa-newspaper" aria-hidden="true"></i> Basis</h4>
+                                    <p class="form-block__intro">Titel, onderwerp en organisatie van het bericht.</p>
                                 </div>
                                 <div class="form-group">
-                                    <label for="newsOrganization">Organisatie</label>
-                                    <select id="newsOrganization" name="organization_id">
-                                        <option value="">Geen organisatie</option>
-                                        ${organizations.map(org => `
-                                            <option value="${org.id}" ${article?.organization_id == org.id ? 'selected' : ''}>
-                                                ${escAttr(org.name)}
-                                            </option>
-                                        `).join('')}
-                                    </select>
+                                    <label for="newsTitle">Titel *</label>
+                                    <input type="text" id="newsTitle" name="title"
+                                        value="${escAttr(article?.title || '')}"
+                                        placeholder="Titel van het artikel" required>
                                 </div>
-                            </div>
-                            
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label for="newsPubDate">Publicatiedatum *</label>
-                                    <input type="date" id="newsPubDate" name="published_date" 
-                                        value="${pubDate}" required>
-                                    <small class="form-hint">Toekomstige datum + publiceren = gepland tot die dag/tijd</small>
-                                </div>
-                                <div class="form-group">
-                                    <label for="newsPubTime">Publicatietijd</label>
-                                    <input type="time" id="newsPubTime" name="published_time" 
-                                        value="${pubTime}">
-                                    <small class="form-hint">Leeg = 00:00 die dag</small>
-                                </div>
-                            </div>
-                            
-                            <div class="form-group">
-                                <label for="newsImage">Afbeelding</label>
-                                <input type="file" id="newsImage" accept="image/*" class="file-input"
-                                    onchange="admin.previewNewsImage(this)">
-                                <small class="form-hint">JPG, PNG of WebP — wordt als WebP opgeslagen (JPEG als fallback). Leeg laten behoudt de huidige afbeelding.</small>
-                                <div id="newsImagePreview" class="image-preview" style="display: none;">
-                                    <img id="newsImagePreviewImg" src="" alt="Preview">
-                                    <button type="button" class="btn-remove-image" 
-                                        onclick="admin.removeNewsImagePreview()">
-                                        <i class="fas fa-times"></i>
-                                    </button>
-                                </div>
-                                ${article?.image_url ? `
-                                    <div class="current-image">
-                                        <small>Huidige afbeelding:</small>
-                                        <img src="${article.image_url}" alt="Current" style="max-width: 200px; margin-top: 8px;">
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="newsCategory">Onderwerp / categorie</label>
+                                        <select id="newsCategory" name="category" onchange="admin.syncNewsCustomCategoryField()">
+                                            ${categories.map(cat => `
+                                                <option value="${cat.id}" ${selectedCategory === cat.id ? 'selected' : ''}>
+                                                    ${cat.label}
+                                                </option>
+                                            `).join('')}
+                                        </select>
                                     </div>
-                                ` : ''}
-                            </div>
-                            
-                            <div class="form-group">
-                                <label for="newsYoutubeUrl">YouTube-video (optioneel)</label>
-                                <input type="url" id="newsYoutubeUrl" name="youtube_url"
-                                    value="${article?.youtube_url || ''}"
-                                    placeholder="https://www.youtube.com/watch?v=... of https://youtu.be/...">
-                                <small class="form-hint">Als je een YouTube-link invult, wordt de video getoond als Hero-afbeelding in de app. De afbeelding hierboven wordt dan niet gebruikt.</small>
-                            </div>
-
-                            <div class="form-group">
-                                <label for="newsPdfFile">PDF-bijlage (optioneel)</label>
-                                <input type="file" id="newsPdfFile" accept="application/pdf,.pdf" class="file-input">
-                                <small class="form-hint">Wordt in de app als downloadlink onder het artikel getoond (max 15 MB).</small>
-                                ${this.pdfAttachmentControlsHtml(article?.pdf_url, 'newsPdfRemove')}
-                            </div>
-                            
-                            <div class="form-group">
-                                <label for="newsArticleContent">Inhoud *</label>
-                                <div class="editor-toolbar">
-                                    <button type="button" class="editor-btn" onclick="adminFormatText('newsArticleContent','bold')" title="Vet (Ctrl+B)"><b>B</b></button>
-                                    <button type="button" class="editor-btn" onclick="adminFormatText('newsArticleContent','italic')" title="Cursief (Ctrl+I)"><i>I</i></button>
-                                    <button type="button" class="editor-btn" onclick="adminFormatText('newsArticleContent','link')" title="Link invoegen">&#128279;</button>
-                                </div>
-                                <textarea id="newsArticleContent" name="content" rows="10" 
-                                    placeholder="De volledige inhoud van het artikel..." required>${escTextarea(article?.content || '')}</textarea>
-                                <small class="form-hint">Selecteer tekst en klik een knop om op te maken. HTML-tags worden opgeslagen en getoond in de app. De eerste regels verschijnen automatisch in het nieuwsoverzicht.</small>
-                            </div>
-
-                            <div class="form-group">
-                                <label>Bronvermelding (optioneel)</label>
-                                <div class="form-subfields">
-                                    <div class="form-subfield">
-                                        <label for="newsSourceName">Naam bron</label>
-                                        <input type="text" id="newsSourceName" value="${article?.source_name || ''}" placeholder="bijv. NOS, Omrop Fryslân…">
+                                    <div class="form-group" id="newsCustomCategoryGroup" style="display: ${selectedCategory === 'overig' ? 'block' : 'none'}">
+                                        <label for="newsCustomCategory">Eigen onderwerp</label>
+                                        <input type="text" id="newsCustomCategory" name="custom_category" maxlength="100"
+                                            value="${article?.custom_category || ''}"
+                                            placeholder="bijv. Jaarverslag, Weersverwachting">
+                                        <small class="form-hint">Wordt boven het artikel in de app getoond (alleen bij Overig)</small>
                                     </div>
-                                    <div class="form-subfield" style="flex:2;">
-                                        <label for="newsSourceUrl">URL (link naar bron)</label>
-                                        <input type="url" id="newsSourceUrl" value="${article?.source_url || ''}" placeholder="https://…">
+                                    <div class="form-group">
+                                        <label for="newsOrganization">Organisatie</label>
+                                        <select id="newsOrganization" name="organization_id">
+                                            <option value="">Geen organisatie</option>
+                                            ${organizations.map(org => `
+                                                <option value="${org.id}" ${article?.organization_id == org.id ? 'selected' : ''}>
+                                                    ${escAttr(org.name)}
+                                                </option>
+                                            `).join('')}
+                                        </select>
                                     </div>
                                 </div>
                             </div>
-                            
-                            ${this.checkboxFieldHtml('newsReactionsOpen', 'Reageren open', {
-                                checked: !!article?.reactions_open,
-                                hint: 'Inwoners met een account kunnen in de app reageren. De reactie gaat naar de gekozen organisatie, niet naar dit paneel.',
-                            })}
 
-                            ${this.checkboxFieldHtml('newsPublished', 'Publiceren / inplannen (toon in app)', {
-                                checked: article?.is_published !== false,
-                                hint: 'Aan + toekomstige publicatiedatum = automatisch live vanaf dat moment. Uit = concept.',
-                            })}
+                            <div class="form-block">
+                                <div class="form-block__head">
+                                    <h4 class="form-block__title"><i class="fas fa-align-left" aria-hidden="true"></i> Inhoud</h4>
+                                    <p class="form-block__intro">De tekst van het artikel zoals die in de app verschijnt.</p>
+                                </div>
+                                <div class="form-group">
+                                    <label for="newsArticleContent">Inhoud *</label>
+                                    <div class="editor-toolbar">
+                                        <button type="button" class="editor-btn" onclick="adminFormatText('newsArticleContent','bold')" title="Vet (Ctrl+B)"><b>B</b></button>
+                                        <button type="button" class="editor-btn" onclick="adminFormatText('newsArticleContent','italic')" title="Cursief (Ctrl+I)"><i>I</i></button>
+                                        <button type="button" class="editor-btn" onclick="adminFormatText('newsArticleContent','link')" title="Link invoegen">&#128279;</button>
+                                    </div>
+                                    <textarea id="newsArticleContent" name="content" rows="10"
+                                        placeholder="De volledige inhoud van het artikel..." required>${escTextarea(article?.content || '')}</textarea>
+                                    <small class="form-hint">Selecteer tekst en klik een knop om op te maken. HTML-tags worden opgeslagen en getoond in de app. De eerste regels verschijnen automatisch in het nieuwsoverzicht.</small>
+                                </div>
+                            </div>
 
-                            ${this.checkboxFieldHtml('newsShareFacebook', 'Na opslaan delen op Facebook', {
-                                hint: 'Linkpreview opent automatisch. Titel en begin van de inhoud staan op je klembord om te plakken.',
-                            })}
+                            <div class="form-block">
+                                <div class="form-block__head">
+                                    <h4 class="form-block__title"><i class="fas fa-image" aria-hidden="true"></i> Media</h4>
+                                    <p class="form-block__intro">Afbeelding, optionele video en PDF-bijlage.</p>
+                                </div>
+                                <div class="form-group">
+                                    <label for="newsImage">Afbeelding</label>
+                                    <input type="file" id="newsImage" accept="image/*" class="file-input"
+                                        onchange="admin.previewNewsImage(this)">
+                                    <small class="form-hint">JPG, PNG of WebP — wordt als WebP opgeslagen (JPEG als fallback). Leeg laten behoudt de huidige afbeelding.</small>
+                                    <div id="newsImagePreview" class="image-preview" style="display: none;">
+                                        <img id="newsImagePreviewImg" src="" alt="Preview">
+                                        <button type="button" class="btn-remove-image"
+                                            onclick="admin.removeNewsImagePreview()">
+                                            <i class="fas fa-times"></i>
+                                        </button>
+                                    </div>
+                                    ${article?.image_url ? `
+                                        <div class="current-image">
+                                            <small>Huidige afbeelding:</small>
+                                            <img src="${article.image_url}" alt="Current" style="max-width: 200px; margin-top: 8px;">
+                                        </div>
+                                    ` : ''}
+                                </div>
+                                <div class="form-group">
+                                    <label for="newsYoutubeUrl">YouTube-video (optioneel)</label>
+                                    <input type="url" id="newsYoutubeUrl" name="youtube_url"
+                                        value="${article?.youtube_url || ''}"
+                                        placeholder="https://www.youtube.com/watch?v=... of https://youtu.be/...">
+                                    <small class="form-hint">Als je een YouTube-link invult, wordt de video getoond als Hero-afbeelding in de app. De afbeelding hierboven wordt dan niet gebruikt.</small>
+                                </div>
+                                <div class="form-group">
+                                    <label for="newsPdfFile">PDF-bijlage (optioneel)</label>
+                                    <input type="file" id="newsPdfFile" accept="application/pdf,.pdf" class="file-input">
+                                    <small class="form-hint">Wordt in de app als downloadlink onder het artikel getoond (max 15 MB).</small>
+                                    ${this.pdfAttachmentControlsHtml(article?.pdf_url, 'newsPdfRemove')}
+                                </div>
+                            </div>
+
+                            <div class="form-block">
+                                <div class="form-block__head">
+                                    <h4 class="form-block__title"><i class="fas fa-link" aria-hidden="true"></i> Bronvermelding</h4>
+                                    <p class="form-block__intro">Optioneel. Wordt onder het artikel in de app getoond als &quot;Bron: …&quot;.</p>
+                                </div>
+                                <div class="form-group">
+                                    <div class="form-subfields">
+                                        <div class="form-subfield">
+                                            <label for="newsSourceName">Naam bron</label>
+                                            <input type="text" id="newsSourceName" value="${article?.source_name || ''}" placeholder="bijv. NOS, Omrop Fryslân…">
+                                        </div>
+                                        <div class="form-subfield" style="flex:2;">
+                                            <label for="newsSourceUrl">URL (link naar bron)</label>
+                                            <input type="url" id="newsSourceUrl" value="${article?.source_url || ''}" placeholder="https://…">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="form-block">
+                                <div class="form-block__head">
+                                    <h4 class="form-block__title"><i class="fas fa-clock" aria-hidden="true"></i> Publicatie</h4>
+                                    <p class="form-block__intro">Wanneer het bericht live gaat, reacties en delen.</p>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="newsPubDate">Publicatiedatum *</label>
+                                        <input type="date" id="newsPubDate" name="published_date"
+                                            value="${pubDate}" required>
+                                        <small class="form-hint">Toekomstige datum + publiceren = gepland tot die dag/tijd</small>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="newsPubTime">Publicatietijd</label>
+                                        <input type="time" id="newsPubTime" name="published_time"
+                                            value="${pubTime}">
+                                        <small class="form-hint">Leeg = 00:00 die dag</small>
+                                    </div>
+                                </div>
+                                ${this.checkboxFieldHtml('newsReactionsOpen', 'Reageren open', {
+                                    checked: !!article?.reactions_open,
+                                    hint: 'Inwoners met een account kunnen in de app reageren. De reactie gaat naar de gekozen organisatie, niet naar dit paneel.',
+                                })}
+                                ${this.checkboxFieldHtml('newsPublished', 'Publiceren / inplannen (toon in app)', {
+                                    checked: article?.is_published !== false,
+                                    hint: 'Aan + toekomstige publicatiedatum = automatisch live vanaf dat moment. Uit = concept.',
+                                })}
+                                ${this.checkboxFieldHtml('newsShareFacebook', 'Na opslaan delen op Facebook', {
+                                    hint: 'Linkpreview opent automatisch. Titel en begin van de inhoud staan op je klembord om te plakken.',
+                                })}
+                            </div>
                         </form>
                     </div>
                     <div class="modal-footer">
