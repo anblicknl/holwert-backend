@@ -2259,124 +2259,158 @@
             root.innerHTML = `
                 <p class="section-description">Dezelfde gegevens als in het beheerderspaneel (behalve <strong>goedkeuring</strong> — dat blijft bij de beheerder).</p>
 
-                <h3 class="profile-subheading">Basis</h3>
-                <div class="form-group">
-                    <label for="profile_name">Naam *</label>
-                    <input type="text" id="profile_name" required maxlength="255" value="${escapeHtml(org.name || '')}">
-                </div>
-                <div class="form-group">
-                    <label for="profile_category">Categorie</label>
-                    ${orgCategorySelectHtml('profile_category', org.category || 'vereniging')}
-                </div>
-                <div class="form-group">
-                    <label for="profile_description">Beschrijving</label>
-                    <textarea id="profile_description" rows="3" placeholder="Korte beschrijving">${escapeHtml(org.description || '')}</textarea>
-                </div>
-                <div class="form-group">
-                    <label for="profile_bio">Bio</label>
-                    <textarea id="profile_bio" rows="2" placeholder="Optionele bio">${escapeHtml(org.bio || '')}</textarea>
-                </div>
-
-                <h3 class="profile-subheading">Contact &amp; website</h3>
-                <div class="form-group">
-                    <label for="profile_website">Website</label>
-                    <input type="url" id="profile_website" placeholder="https://…" value="${escapeHtml(org.website || '')}">
-                </div>
-                <div class="form-group">
-                    <label for="profile_email">E-mail (contact)</label>
-                    <input type="email" id="profile_email" value="${escapeHtml(org.email || '')}" placeholder="Optioneel">
-                    ${checkboxFieldHtml('profile_show_email', 'Toon e-mailadres publiek in de app', {
-                        checked: org.show_email !== false,
-                        hint: 'Als je dit uitschakelt, sla je het e-mailadres intern op maar is het niet zichtbaar voor bezoekers.',
-                    })}
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="profile_phone">Telefoon</label>
-                        <input type="text" id="profile_phone" value="${escapeHtml(org.phone || '')}">
+                <div class="form-block">
+                    <div class="form-block__head">
+                        <h4 class="form-block__title"><i class="fas fa-building" aria-hidden="true"></i> Basis</h4>
+                        <p class="form-block__intro">Naam, categorie en korte teksten zoals die in de app verschijnen.</p>
                     </div>
                     <div class="form-group">
-                        <label for="profile_whatsapp">WhatsApp</label>
-                        <input type="text" id="profile_whatsapp" placeholder="Nummer of link" value="${escapeHtml(org.whatsapp || '')}">
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label for="profile_address">Adres</label>
-                    <input type="text" id="profile_address" value="${escapeHtml(org.address || '')}">
-                </div>
-
-                <h3 class="profile-subheading">Social media</h3>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="profile_facebook">Facebook</label>
-                        <input type="url" id="profile_facebook" placeholder="https://…" value="${escapeHtml(org.facebook || '')}">
+                        <label for="profile_name">Naam *</label>
+                        <input type="text" id="profile_name" required maxlength="255" value="${escapeHtml(org.name || '')}">
                     </div>
                     <div class="form-group">
-                        <label for="profile_instagram">Instagram</label>
-                        <input type="url" id="profile_instagram" placeholder="https://…" value="${escapeHtml(org.instagram || '')}">
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="profile_twitter">X / Twitter</label>
-                        <input type="url" id="profile_twitter" placeholder="https://…" value="${escapeHtml(org.twitter || '')}">
+                        <label for="profile_category">Categorie</label>
+                        ${orgCategorySelectHtml('profile_category', org.category || 'vereniging')}
                     </div>
                     <div class="form-group">
-                        <label for="profile_linkedin">LinkedIn</label>
-                        <input type="url" id="profile_linkedin" placeholder="https://…" value="${escapeHtml(org.linkedin || '')}">
+                        <label for="profile_description">Beschrijving</label>
+                        <textarea id="profile_description" rows="3" placeholder="Korte beschrijving">${escapeHtml(org.description || '')}</textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="profile_bio">Bio</label>
+                        <textarea id="profile_bio" rows="2" placeholder="Optionele bio">${escapeHtml(org.bio || '')}</textarea>
                     </div>
                 </div>
 
-                <h3 class="profile-subheading">Huisstijl</h3>
-                <div class="form-group">
-                    <label for="profile_brand_color_hex">Brandkleur (hex)</label>
-                    <div class="color-input-row">
-                        <input type="color" id="profile_brand_color_picker" value="${escapeHtml(brandVal)}" title="Kies kleur">
-                        <input type="text" id="profile_brand_color_hex" placeholder="#RRGGBB" value="${escapeHtml((org.brand_color && String(org.brand_color).trim()) || '')}">
+                <div class="form-block">
+                    <div class="form-block__head">
+                        <h4 class="form-block__title"><i class="fas fa-address-card" aria-hidden="true"></i> Contact &amp; website</h4>
+                        <p class="form-block__intro">Hoe bezoekers jullie kunnen bereiken.</p>
                     </div>
-                    <p class="form-hint">Wordt o.a. in de app gebruikt bij jullie organisatie.</p>
-                </div>
-                <div class="form-group">
-                    <label>Logo</label>
-                    ${logoBlock}
-                    <input type="file" id="profileLogoFile" accept="image/*">
-                    <p class="form-hint">Nieuw bestand uploaden: kies afbeelding (max. 9 MB) en klik bovenaan op Opslaan.</p>
-                    <div class="form-group__sub">
-                        <label for="profile_logo_url">Of logo-URL</label>
-                        <input type="url" id="profile_logo_url" placeholder="https://…" value="${escapeHtml(org.logo_url || '')}">
+                    <div class="form-group">
+                        <label for="profile_website">Website</label>
+                        <input type="url" id="profile_website" placeholder="https://…" value="${escapeHtml(org.website || '')}">
+                    </div>
+                    <div class="form-group">
+                        <label for="profile_email">E-mail (contact)</label>
+                        <input type="email" id="profile_email" value="${escapeHtml(org.email || '')}" placeholder="Optioneel">
+                        ${checkboxFieldHtml('profile_show_email', 'Toon e-mailadres publiek in de app', {
+                            checked: org.show_email !== false,
+                            hint: 'Als je dit uitschakelt, sla je het e-mailadres intern op maar is het niet zichtbaar voor bezoekers.',
+                        })}
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="profile_phone">Telefoon</label>
+                            <input type="text" id="profile_phone" value="${escapeHtml(org.phone || '')}">
+                        </div>
+                        <div class="form-group">
+                            <label for="profile_whatsapp">WhatsApp</label>
+                            <input type="text" id="profile_whatsapp" placeholder="Nummer of link" value="${escapeHtml(org.whatsapp || '')}">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="profile_address">Adres</label>
+                        <input type="text" id="profile_address" value="${escapeHtml(org.address || '')}">
                     </div>
                 </div>
 
-                <h3 class="profile-subheading"><i class="fas fa-shield-alt"></i>Privacy statement</h3>
-                <div class="form-group">
-                    <label for="profile_privacy_statement">Tekst voor in de app</label>
-                    <textarea id="profile_privacy_statement" rows="6" placeholder="Optioneel">${escapeHtml(org.privacy_statement || '')}</textarea>
+                <div class="form-block">
+                    <div class="form-block__head">
+                        <h4 class="form-block__title"><i class="fas fa-share-alt" aria-hidden="true"></i> Social media</h4>
+                        <p class="form-block__intro">Optionele links naar jullie kanalen.</p>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="profile_facebook">Facebook</label>
+                            <input type="url" id="profile_facebook" placeholder="https://…" value="${escapeHtml(org.facebook || '')}">
+                        </div>
+                        <div class="form-group">
+                            <label for="profile_instagram">Instagram</label>
+                            <input type="url" id="profile_instagram" placeholder="https://…" value="${escapeHtml(org.instagram || '')}">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="profile_twitter">X / Twitter</label>
+                            <input type="url" id="profile_twitter" placeholder="https://…" value="${escapeHtml(org.twitter || '')}">
+                        </div>
+                        <div class="form-group">
+                            <label for="profile_linkedin">LinkedIn</label>
+                            <input type="url" id="profile_linkedin" placeholder="https://…" value="${escapeHtml(org.linkedin || '')}">
+                        </div>
+                    </div>
                 </div>
 
-                <h3 class="profile-subheading"><i class="fas fa-rss"></i> RSS-nieuws (automatisch)</h3>
-                <div class="form-group">
-                    <label for="profile_rss_feed_url">RSS-feed-URL</label>
-                    <input type="url" id="profile_rss_feed_url" placeholder="https://…/feed/rss/nieuws" value="${escapeHtml(org.rss_feed_url || '')}">
-                    <p class="form-hint">Optioneel. Berichten uit deze feed worden automatisch geïmporteerd en gepubliceerd (dagelijks). Je kunt daarnaast zelf nieuws blijven plaatsen.</p>
-                    ${org.rss_last_synced_at ? `<p class="form-hint">Laatst gesynchroniseerd: ${escapeHtml(new Date(org.rss_last_synced_at).toLocaleString('nl-NL'))}</p>` : ''}
+                <div class="form-block">
+                    <div class="form-block__head">
+                        <h4 class="form-block__title"><i class="fas fa-palette" aria-hidden="true"></i> Huisstijl</h4>
+                        <p class="form-block__intro">Kleur en logo zoals die bij jullie organisatie in de app horen.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="profile_brand_color_hex">Brandkleur (hex)</label>
+                        <div class="color-input-row">
+                            <input type="color" id="profile_brand_color_picker" value="${escapeHtml(brandVal)}" title="Kies kleur">
+                            <input type="text" id="profile_brand_color_hex" placeholder="#RRGGBB" value="${escapeHtml((org.brand_color && String(org.brand_color).trim()) || '')}">
+                        </div>
+                        <p class="form-hint">Wordt o.a. in de app gebruikt bij jullie organisatie.</p>
+                    </div>
+                    <div class="form-group">
+                        <label>Logo</label>
+                        ${logoBlock}
+                        <input type="file" id="profileLogoFile" accept="image/*">
+                        <p class="form-hint">Nieuw bestand uploaden: kies afbeelding (max. 9 MB) en klik bovenaan op Opslaan.</p>
+                        <div class="form-group__sub">
+                            <label for="profile_logo_url">Of logo-URL</label>
+                            <input type="url" id="profile_logo_url" placeholder="https://…" value="${escapeHtml(org.logo_url || '')}">
+                        </div>
+                    </div>
                 </div>
 
-                <h3 class="profile-subheading">Account (dashboard-inlog)</h3>
-                <p class="section-description">Wachtwoord voor <strong>dit dashboard</strong>, los van het contact-e-mailadres hierboven.</p>
-                <div class="form-group">
-                    <label for="accountCurrentPassword">Huidig wachtwoord</label>
-                    <input type="password" id="accountCurrentPassword" autocomplete="current-password">
+                <div class="form-block">
+                    <div class="form-block__head">
+                        <h4 class="form-block__title"><i class="fas fa-shield-alt" aria-hidden="true"></i> Privacy statement</h4>
+                        <p class="form-block__intro">Optionele tekst voor in de app.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="profile_privacy_statement">Tekst voor in de app</label>
+                        <textarea id="profile_privacy_statement" rows="6" placeholder="Optioneel">${escapeHtml(org.privacy_statement || '')}</textarea>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label for="accountNewPassword">Nieuw wachtwoord</label>
-                    <input type="password" id="accountNewPassword" autocomplete="new-password" minlength="6" placeholder="Minimaal 6 tekens">
+
+                <div class="form-block">
+                    <div class="form-block__head">
+                        <h4 class="form-block__title"><i class="fas fa-rss" aria-hidden="true"></i> RSS-nieuws</h4>
+                        <p class="form-block__intro">Optioneel: automatisch nieuws importeren uit een feed.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="profile_rss_feed_url">RSS-feed-URL</label>
+                        <input type="url" id="profile_rss_feed_url" placeholder="https://…/feed/rss/nieuws" value="${escapeHtml(org.rss_feed_url || '')}">
+                        <p class="form-hint">Berichten uit deze feed worden automatisch geïmporteerd en gepubliceerd (dagelijks). Je kunt daarnaast zelf nieuws blijven plaatsen.</p>
+                        ${org.rss_last_synced_at ? `<p class="form-hint">Laatst gesynchroniseerd: ${escapeHtml(new Date(org.rss_last_synced_at).toLocaleString('nl-NL'))}</p>` : ''}
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label for="accountNewPassword2">Nieuw wachtwoord (herhalen)</label>
-                    <input type="password" id="accountNewPassword2" autocomplete="new-password" minlength="6">
-                </div>
-                <button type="button" class="btn btn-secondary" id="changeAccountPasswordBtn"><i class="fas fa-key"></i> Alleen wachtwoord wijzigen</button>
-                <p id="accountPasswordMsg" class="form-hint" aria-live="polite"></p>`;
+
+                <div class="form-block">
+                    <div class="form-block__head">
+                        <h4 class="form-block__title"><i class="fas fa-key" aria-hidden="true"></i> Account</h4>
+                        <p class="form-block__intro">Wachtwoord voor <strong>dit dashboard</strong>, los van het contact-e-mailadres hierboven.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="accountCurrentPassword">Huidig wachtwoord</label>
+                        <input type="password" id="accountCurrentPassword" autocomplete="current-password">
+                    </div>
+                    <div class="form-group">
+                        <label for="accountNewPassword">Nieuw wachtwoord</label>
+                        <input type="password" id="accountNewPassword" autocomplete="new-password" minlength="6" placeholder="Minimaal 6 tekens">
+                    </div>
+                    <div class="form-group">
+                        <label for="accountNewPassword2">Nieuw wachtwoord (herhalen)</label>
+                        <input type="password" id="accountNewPassword2" autocomplete="new-password" minlength="6">
+                    </div>
+                    <button type="button" class="btn btn-secondary" id="changeAccountPasswordBtn"><i class="fas fa-key"></i> Alleen wachtwoord wijzigen</button>
+                    <p id="accountPasswordMsg" class="form-hint" aria-live="polite"></p>
+                </div>`;
 
             const picker = document.getElementById('profile_brand_color_picker');
             const hexEl = document.getElementById('profile_brand_color_hex');
@@ -2974,12 +3008,22 @@
         }
     }
 
+    function profileBlockContentShell(icon, title, intro, bodyHtml) {
+        return `<div class="form-block">
+            <div class="form-block__head">
+                <h4 class="form-block__title"><i class="fas ${icon}" aria-hidden="true"></i> ${title}</h4>
+                <p class="form-block__intro">${intro}</p>
+            </div>
+            ${bodyHtml}
+        </div>`;
+    }
+
     function profileBlockFormHtml(blockType, data, weekdayLabels, headerIcons) {
         const days = Array.isArray(data?.days) ? data.days : [];
         const items = Array.isArray(data?.items) ? data.items : [];
         switch (blockType) {
             case 'opening_hours':
-                return `
+                return profileBlockContentShell('fa-clock', 'Openingstijden', 'Wanneer jullie open zijn, plus een optionele notitie.', `
                     <div class="form-group">
                         <label>Notitie (optioneel)</label>
                         <input type="text" id="pb_note" value="${escapeHtml(data?.note || '')}" maxlength="500" placeholder="Bijv. alleen op afspraak">
@@ -3005,18 +3049,18 @@
                                 <input type="time" class="pb-day-end" data-day="${day}" value="${escapeHtml(d.close || '17:00')}" ${isOpen ? '' : 'disabled'}>
                             </div>`;
                         }).join('')}
-                    </div>`;
+                    </div>`);
             case 'service_schedule':
-                return `
+                return profileBlockContentShell('fa-calendar-week', 'Diensten', 'Vaste diensten of momenten in de week.', `
                     <div id="pb_items_wrap">${items.map((it, i) => profileBlockServiceItemHtml(it, i, weekdayLabels)).join('')}</div>
-                    <button type="button" class="btn btn-secondary" id="pb_add_item"><i class="fas fa-plus"></i> Dienst toevoegen</button>`;
+                    <button type="button" class="btn btn-secondary" id="pb_add_item"><i class="fas fa-plus"></i> Dienst toevoegen</button>`);
             case 'match_schedule':
-                return `
+                return profileBlockContentShell('fa-futbol', 'Wedstrijden', 'Komende wedstrijden en het icoon in de app.', `
                     ${profileBlockHeaderIconPickerHtml(blockType, data, headerIcons)}
                     <div id="pb_items_wrap">${items.map((it, i) => profileBlockMatchItemHtml(it, i)).join('')}</div>
-                    <button type="button" class="btn btn-secondary" id="pb_add_item"><i class="fas fa-plus"></i> Wedstrijd toevoegen</button>`;
+                    <button type="button" class="btn btn-secondary" id="pb_add_item"><i class="fas fa-plus"></i> Wedstrijd toevoegen</button>`);
             case 'membership':
-                return `
+                return profileBlockContentShell('fa-id-card', 'Lidmaatschap', 'Tarief, aanmelden en eventuele extra regels.', `
                     <div class="form-group"><label>Intro</label><textarea id="pb_intro" rows="3">${escapeHtml(data?.intro || '')}</textarea></div>
                     <div class="form-row">
                         <div class="form-group"><label>Contributie / tarief</label><input type="text" id="pb_fee" value="${escapeHtml(data?.fee || '')}" placeholder="Bijv. 25 per jaar"></div>
@@ -3024,23 +3068,23 @@
                     </div>
                     <div class="form-group"><label>Aanmeld-URL</label><input type="url" id="pb_signup_url" value="${escapeHtml(data?.signup_url || '')}" placeholder="https://…"></div>
                     <div id="pb_items_wrap">${(data?.items || []).map((it, i) => profileBlockKvItemHtml(it, i)).join('')}</div>
-                    <button type="button" class="btn btn-secondary" id="pb_add_item"><i class="fas fa-plus"></i> Regel toevoegen</button>`;
+                    <button type="button" class="btn btn-secondary" id="pb_add_item"><i class="fas fa-plus"></i> Regel toevoegen</button>`);
             case 'facilities':
-                return `
+                return profileBlockContentShell('fa-door-open', 'Voorzieningen', 'Wat jullie te bieden hebben.', `
                     <div id="pb_items_wrap">${items.map((it, i) => profileBlockFacilityItemHtml(it, i)).join('')}</div>
-                    <button type="button" class="btn btn-secondary" id="pb_add_item"><i class="fas fa-plus"></i> Voorziening toevoegen</button>`;
+                    <button type="button" class="btn btn-secondary" id="pb_add_item"><i class="fas fa-plus"></i> Voorziening toevoegen</button>`);
             case 'team':
-                return `
+                return profileBlockContentShell('fa-users', 'Team', 'Personen en rollen die in de app zichtbaar zijn.', `
                     <div id="pb_items_wrap">${items.map((it, i) => profileBlockTeamItemHtml(it, i)).join('')}</div>
-                    <button type="button" class="btn btn-secondary" id="pb_add_item"><i class="fas fa-plus"></i> Persoon toevoegen</button>`;
+                    <button type="button" class="btn btn-secondary" id="pb_add_item"><i class="fas fa-plus"></i> Persoon toevoegen</button>`);
             case 'links':
-                return `
+                return profileBlockContentShell('fa-link', 'Links', 'Handige knoppen naar externe pagina’s.', `
                     <div id="pb_items_wrap">${items.map((it, i) => profileBlockLinkItemHtml(it, i)).join('')}</div>
-                    <button type="button" class="btn btn-secondary" id="pb_add_item"><i class="fas fa-plus"></i> Link toevoegen</button>`;
+                    <button type="button" class="btn btn-secondary" id="pb_add_item"><i class="fas fa-plus"></i> Link toevoegen</button>`);
             case 'notice':
-                return `
+                return profileBlockContentShell('fa-bullhorn', 'Mededeling', 'Korte melding, optioneel met einddatum.', `
                     <div class="form-group"><label>Mededeling</label><textarea id="pb_text" rows="4" maxlength="500">${escapeHtml(data?.text || '')}</textarea></div>
-                    <div class="form-group"><label>Tot en met (optioneel)</label><input type="date" id="pb_until" value="${escapeHtml(data?.until || '')}"><p class="form-hint">Na deze datum verdwijnt de mededeling automatisch uit de app.</p></div>`;
+                    <div class="form-group"><label>Tot en met (optioneel)</label><input type="date" id="pb_until" value="${escapeHtml(data?.until || '')}"><p class="form-hint">Na deze datum verdwijnt de mededeling automatisch uit de app.</p></div>`);
             default:
                 return '<p class="form-hint">Onbekend bloktype.</p>';
         }
@@ -3305,16 +3349,22 @@
                     <button type="button" class="modal-close">&times;</button>
                 </div>
                 <div class="modal-body">
-                    <div class="form-group">
-                        <label for="pb_title">Titel</label>
-                        <input type="text" id="pb_title" maxlength="255" value="${escapeHtml(existing?.title || '')}">
+                    <div class="form-block">
+                        <div class="form-block__head">
+                            <h4 class="form-block__title"><i class="fas fa-puzzle-piece" aria-hidden="true"></i> Basis</h4>
+                            <p class="form-block__intro">Titel, type en zichtbaarheid van dit blok in de app.</p>
+                        </div>
+                        <div class="form-group">
+                            <label for="pb_title">Titel</label>
+                            <input type="text" id="pb_title" maxlength="255" value="${escapeHtml(existing?.title || '')}">
+                        </div>
+                        <div class="form-group">
+                            <label for="pb_block_type">Type</label>
+                            <select id="pb_block_type" ${existing ? 'disabled' : ''}>${typeOptions}</select>
+                            ${existing ? '<p class="form-hint">Het type kan na aanmaken niet meer worden gewijzigd.</p>' : ''}
+                        </div>
+                        ${checkboxFieldHtml('pb_visible', 'Zichtbaar in de app', { checked: existing?.is_visible !== false })}
                     </div>
-                    <div class="form-group">
-                        <label for="pb_block_type">Type</label>
-                        <select id="pb_block_type" ${existing ? 'disabled' : ''}>${typeOptions}</select>
-                        ${existing ? '<p class="form-hint">Het type kan na aanmaken niet meer worden gewijzigd.</p>' : ''}
-                    </div>
-                    ${checkboxFieldHtml('pb_visible', 'Zichtbaar in de app', { checked: existing?.is_visible !== false })}
                     <div id="pb_form_body" class="pb-form-body"></div>
                 </div>
                 <div class="modal-footer">

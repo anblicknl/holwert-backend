@@ -3462,83 +3462,103 @@ class HolwertAdmin {
                 </div>
                 <div class="modal-body">
                     <form id="createOrganizationForm">
-                        <p class="form-section-title">Algemeen</p>
-                        <div class="form-group">
-                            <label for="createOrgName">Naam *</label>
-                            <input type="text" id="createOrgName" required placeholder="Naam van de organisatie">
-                        </div>
-                        <div class="form-group">
-                            <label for="createOrgCategory">Categorie</label>
-                            ${orgCategorySelectHtml('createOrgCategory', 'vereniging')}
-                        </div>
-                        ${this.checkboxFieldHtml('createOrgOndernemer', 'Dit is een ondernemer (zichtbaar bij Ondernemers in de app)')}
-                        <div class="form-group">
-                            <label for="createOrgDescription">Beschrijving</label>
-                            <textarea id="createOrgDescription" rows="3" placeholder="Korte beschrijving"></textarea>
-                        </div>
-                        <div class="form-group">
-                            <label for="createOrgBio">Bio</label>
-                            <textarea id="createOrgBio" rows="2" placeholder="Optionele bio"></textarea>
-                        </div>
-                        <p class="form-section-title">Contact</p>
-                        <div class="form-group">
-                            <label for="createOrgEmail">E-mail</label>
-                            <input type="email" id="createOrgEmail" placeholder="contact@voorbeeld.nl">
-                        </div>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="createOrgPhone">Telefoon</label>
-                                <input type="text" id="createOrgPhone" placeholder="Telefoonnummer">
+                        <div class="form-block">
+                            <div class="form-block__head">
+                                <h4 class="form-block__title"><i class="fas fa-building" aria-hidden="true"></i> Basis</h4>
+                                <p class="form-block__intro">Naam, categorie en korte teksten zoals die in de app verschijnen.</p>
                             </div>
                             <div class="form-group">
-                                <label for="createOrgWhatsapp">WhatsApp</label>
-                                <input type="text" id="createOrgWhatsapp" placeholder="Nummer of link">
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <label for="createOrgWebsite">Website</label>
-                            <input type="url" id="createOrgWebsite" placeholder="https://">
-                        </div>
-                        <div class="form-group">
-                            <label for="createOrgAddress">Adres</label>
-                            <input type="text" id="createOrgAddress" placeholder="Straat, postcode, plaats">
-                        </div>
-                        <p class="form-section-title">Social media</p>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="createOrgFacebook">Facebook</label>
-                                <input type="url" id="createOrgFacebook" placeholder="https://facebook.com/...">
+                                <label for="createOrgName">Naam *</label>
+                                <input type="text" id="createOrgName" required placeholder="Naam van de organisatie">
                             </div>
                             <div class="form-group">
-                                <label for="createOrgInstagram">Instagram</label>
-                                <input type="url" id="createOrgInstagram" placeholder="https://instagram.com/...">
+                                <label for="createOrgCategory">Categorie</label>
+                                ${orgCategorySelectHtml('createOrgCategory', 'vereniging')}
                             </div>
-                        </div>
-                        <div class="form-row">
+                            ${this.checkboxFieldHtml('createOrgOndernemer', 'Dit is een ondernemer (zichtbaar bij Ondernemers in de app)')}
                             <div class="form-group">
-                                <label for="createOrgTwitter">Twitter / X</label>
-                                <input type="url" id="createOrgTwitter" placeholder="https://">
+                                <label for="createOrgDescription">Beschrijving</label>
+                                <textarea id="createOrgDescription" rows="3" placeholder="Korte beschrijving"></textarea>
                             </div>
                             <div class="form-group">
-                                <label for="createOrgLinkedin">LinkedIn</label>
-                                <input type="url" id="createOrgLinkedin" placeholder="https://">
+                                <label for="createOrgBio">Bio</label>
+                                <textarea id="createOrgBio" rows="2" placeholder="Optionele bio"></textarea>
                             </div>
                         </div>
-                        <p class="form-section-title">Huisstijl &amp; logo</p>
-                        <div class="form-group">
-                            <label for="createOrgBrandColorHex">Brandkleur (hex, bijv. #0066CC)</label>
-                            <div class="color-input-row">
-                                <input type="color" id="createOrgBrandColorPicker" value="#0066CC">
-                                <input type="text" id="createOrgBrandColorHex" placeholder="#RRGGBB">
+                        <div class="form-block">
+                            <div class="form-block__head">
+                                <h4 class="form-block__title"><i class="fas fa-address-card" aria-hidden="true"></i> Contact</h4>
+                                <p class="form-block__intro">Hoe bezoekers de organisatie kunnen bereiken.</p>
+                            </div>
+                            <div class="form-group">
+                                <label for="createOrgEmail">E-mail</label>
+                                <input type="email" id="createOrgEmail" placeholder="contact@voorbeeld.nl">
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="createOrgPhone">Telefoon</label>
+                                    <input type="text" id="createOrgPhone" placeholder="Telefoonnummer">
+                                </div>
+                                <div class="form-group">
+                                    <label for="createOrgWhatsapp">WhatsApp</label>
+                                    <input type="text" id="createOrgWhatsapp" placeholder="Nummer of link">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="createOrgWebsite">Website</label>
+                                <input type="url" id="createOrgWebsite" placeholder="https://">
+                            </div>
+                            <div class="form-group">
+                                <label for="createOrgAddress">Adres</label>
+                                <input type="text" id="createOrgAddress" placeholder="Straat, postcode, plaats">
                             </div>
                         </div>
-                        <div class="form-group">
-                            <label for="createOrgLogoUrl">Logo-URL</label>
-                            <input type="url" id="createOrgLogoUrl" placeholder="https://... (of upload hieronder)">
-                            <span class="form-hint">Na opslaan kun je ook een bestand uploaden; dat krijgt voorrang boven de URL.</span>
-                            <input type="file" id="createOrgLogoFile" accept="image/*">
+                        <div class="form-block">
+                            <div class="form-block__head">
+                                <h4 class="form-block__title"><i class="fas fa-share-alt" aria-hidden="true"></i> Social media</h4>
+                                <p class="form-block__intro">Optionele links naar kanalen.</p>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="createOrgFacebook">Facebook</label>
+                                    <input type="url" id="createOrgFacebook" placeholder="https://facebook.com/...">
+                                </div>
+                                <div class="form-group">
+                                    <label for="createOrgInstagram">Instagram</label>
+                                    <input type="url" id="createOrgInstagram" placeholder="https://instagram.com/...">
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="createOrgTwitter">Twitter / X</label>
+                                    <input type="url" id="createOrgTwitter" placeholder="https://">
+                                </div>
+                                <div class="form-group">
+                                    <label for="createOrgLinkedin">LinkedIn</label>
+                                    <input type="url" id="createOrgLinkedin" placeholder="https://">
+                                </div>
+                            </div>
                         </div>
-                        ${this.checkboxFieldHtml('createOrgApproved', 'Direct goedgekeurd (zichtbaar in app)', { checked: true })}
+                        <div class="form-block">
+                            <div class="form-block__head">
+                                <h4 class="form-block__title"><i class="fas fa-palette" aria-hidden="true"></i> Huisstijl &amp; logo</h4>
+                                <p class="form-block__intro">Kleur, logo en of de organisatie meteen zichtbaar is.</p>
+                            </div>
+                            <div class="form-group">
+                                <label for="createOrgBrandColorHex">Brandkleur (hex, bijv. #0066CC)</label>
+                                <div class="color-input-row">
+                                    <input type="color" id="createOrgBrandColorPicker" value="#0066CC">
+                                    <input type="text" id="createOrgBrandColorHex" placeholder="#RRGGBB">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="createOrgLogoUrl">Logo-URL</label>
+                                <input type="url" id="createOrgLogoUrl" placeholder="https://... (of upload hieronder)">
+                                <span class="form-hint">Na opslaan kun je ook een bestand uploaden; dat krijgt voorrang boven de URL.</span>
+                                <input type="file" id="createOrgLogoFile" accept="image/*">
+                            </div>
+                            ${this.checkboxFieldHtml('createOrgApproved', 'Direct goedgekeurd (zichtbaar in app)', { checked: true })}
+                        </div>
                     </form>
                 </div>
                 <div class="modal-footer">
@@ -3681,107 +3701,137 @@ class HolwertAdmin {
                     </div>
                     <div class="modal-body">
                         <form id="editOrganizationForm">
-                            <p class="form-section-title">Algemeen</p>
-                            <div class="form-group">
-                                <label for="editOrgName">Naam *</label>
-                                <input type="text" id="editOrgName" value="${escQ(org.name)}" required>
-                            </div>
-                            <div class="form-group">
-                                <label for="editOrgCategory">Categorie</label>
-                                ${orgCategorySelectHtml('editOrgCategory', org.category)}
-                            </div>
-                            ${this.checkboxFieldHtml('editOrgOndernemer', 'Dit is een ondernemer (zichtbaar bij Ondernemers in de app)', { checked: !!org.is_ondernemer })}
-                            <div class="form-group">
-                                <label for="editOrgDescription">Beschrijving</label>
-                                <textarea id="editOrgDescription" rows="3">${escTA(org.description)}</textarea>
-                            </div>
-                            <div class="form-group">
-                                <label for="editOrgBio">Bio</label>
-                                <textarea id="editOrgBio" rows="2">${escTA(org.bio)}</textarea>
-                            </div>
-                            <p class="form-section-title">Contact</p>
-                            <div class="form-group">
-                                <label for="editOrgEmail">E-mail</label>
-                                <input type="email" id="editOrgEmail" value="${escQ(org.email)}" placeholder="Optioneel">
-                                <div class="form-group__sub checkbox-field">
-                                    <label class="checkbox-label" for="editOrgShowEmail">
-                                        <input type="checkbox" id="editOrgShowEmail" ${org.show_email !== false ? 'checked' : ''}>
-                                        <span>Toon e-mailadres publiek in de app</span>
-                                    </label>
-                                    <span class="form-hint">Uitgeschakeld = e-mailadres alleen intern zichtbaar.</span>
-                                </div>
-                            </div>
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label for="editOrgPhone">Telefoon</label>
-                                    <input type="text" id="editOrgPhone" value="${escQ(org.phone)}">
+                            <div class="form-block">
+                                <div class="form-block__head">
+                                    <h4 class="form-block__title"><i class="fas fa-building" aria-hidden="true"></i> Basis</h4>
+                                    <p class="form-block__intro">Naam, categorie en korte teksten zoals die in de app verschijnen.</p>
                                 </div>
                                 <div class="form-group">
-                                    <label for="editOrgWhatsapp">WhatsApp</label>
-                                    <input type="text" id="editOrgWhatsapp" value="${escQ(org.whatsapp)}">
-                                </div>
-                            </div>
-                            <div class="form-group">
-                                <label for="editOrgWebsite">Website</label>
-                                <input type="url" id="editOrgWebsite" value="${escQ(org.website)}" placeholder="https://">
-                            </div>
-                            <div class="form-group">
-                                <label for="editOrgAddress">Adres</label>
-                                <input type="text" id="editOrgAddress" value="${escQ(org.address)}">
-                            </div>
-                            <p class="form-section-title">Social media</p>
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label for="editOrgFacebook">Facebook</label>
-                                    <input type="url" id="editOrgFacebook" value="${escQ(org.facebook)}" placeholder="https://">
+                                    <label for="editOrgName">Naam *</label>
+                                    <input type="text" id="editOrgName" value="${escQ(org.name)}" required>
                                 </div>
                                 <div class="form-group">
-                                    <label for="editOrgInstagram">Instagram</label>
-                                    <input type="url" id="editOrgInstagram" value="${escQ(org.instagram)}" placeholder="https://">
+                                    <label for="editOrgCategory">Categorie</label>
+                                    ${orgCategorySelectHtml('editOrgCategory', org.category)}
                                 </div>
-                            </div>
-                            <div class="form-row">
+                                ${this.checkboxFieldHtml('editOrgOndernemer', 'Dit is een ondernemer (zichtbaar bij Ondernemers in de app)', { checked: !!org.is_ondernemer })}
                                 <div class="form-group">
-                                    <label for="editOrgTwitter">Twitter / X</label>
-                                    <input type="url" id="editOrgTwitter" value="${escQ(org.twitter)}" placeholder="https://">
+                                    <label for="editOrgDescription">Beschrijving</label>
+                                    <textarea id="editOrgDescription" rows="3">${escTA(org.description)}</textarea>
                                 </div>
                                 <div class="form-group">
-                                    <label for="editOrgLinkedin">LinkedIn</label>
-                                    <input type="url" id="editOrgLinkedin" value="${escQ(org.linkedin)}" placeholder="https://">
+                                    <label for="editOrgBio">Bio</label>
+                                    <textarea id="editOrgBio" rows="2">${escTA(org.bio)}</textarea>
                                 </div>
                             </div>
-                            <p class="form-section-title">Huisstijl &amp; logo</p>
-                            <div class="form-group">
-                                <label for="editOrgBrandColorHex">Brandkleur (hex)</label>
-                                <div class="color-input-row">
-                                    <input type="color" id="editOrgBrandColorPicker" value="${brandPickerVal}">
-                                    <input type="text" id="editOrgBrandColorHex" placeholder="#RRGGBB" value="${escQ(org.brand_color || '')}">
+                            <div class="form-block">
+                                <div class="form-block__head">
+                                    <h4 class="form-block__title"><i class="fas fa-address-card" aria-hidden="true"></i> Contact</h4>
+                                    <p class="form-block__intro">Hoe bezoekers de organisatie kunnen bereiken.</p>
+                                </div>
+                                <div class="form-group">
+                                    <label for="editOrgEmail">E-mail</label>
+                                    <input type="email" id="editOrgEmail" value="${escQ(org.email)}" placeholder="Optioneel">
+                                    <div class="form-group__sub checkbox-field">
+                                        <label class="checkbox-label" for="editOrgShowEmail">
+                                            <input type="checkbox" id="editOrgShowEmail" ${org.show_email !== false ? 'checked' : ''}>
+                                            <span>Toon e-mailadres publiek in de app</span>
+                                        </label>
+                                        <span class="form-hint">Uitgeschakeld = e-mailadres alleen intern zichtbaar.</span>
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="editOrgPhone">Telefoon</label>
+                                        <input type="text" id="editOrgPhone" value="${escQ(org.phone)}">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="editOrgWhatsapp">WhatsApp</label>
+                                        <input type="text" id="editOrgWhatsapp" value="${escQ(org.whatsapp)}">
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="editOrgWebsite">Website</label>
+                                    <input type="url" id="editOrgWebsite" value="${escQ(org.website)}" placeholder="https://">
+                                </div>
+                                <div class="form-group">
+                                    <label for="editOrgAddress">Adres</label>
+                                    <input type="text" id="editOrgAddress" value="${escQ(org.address)}">
                                 </div>
                             </div>
-                            ${logoPreview}
-                            <div class="form-group">
-                                <label for="editOrgLogoUrl">Logo-URL</label>
-                                <input type="url" id="editOrgLogoUrl" value="${escQ(org.logo_url)}" placeholder="https://...">
-                                <span class="form-hint">Nieuw bestand uploaden overschrijft de URL hierboven.</span>
-                                <input type="file" id="editOrgLogoFile" accept="image/*">
+                            <div class="form-block">
+                                <div class="form-block__head">
+                                    <h4 class="form-block__title"><i class="fas fa-share-alt" aria-hidden="true"></i> Social media</h4>
+                                    <p class="form-block__intro">Optionele links naar kanalen.</p>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="editOrgFacebook">Facebook</label>
+                                        <input type="url" id="editOrgFacebook" value="${escQ(org.facebook)}" placeholder="https://">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="editOrgInstagram">Instagram</label>
+                                        <input type="url" id="editOrgInstagram" value="${escQ(org.instagram)}" placeholder="https://">
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="editOrgTwitter">Twitter / X</label>
+                                        <input type="url" id="editOrgTwitter" value="${escQ(org.twitter)}" placeholder="https://">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="editOrgLinkedin">LinkedIn</label>
+                                        <input type="url" id="editOrgLinkedin" value="${escQ(org.linkedin)}" placeholder="https://">
+                                    </div>
+                                </div>
                             </div>
-                            <p class="form-section-title">Privacy &amp; zichtbaarheid</p>
-                            <div class="form-group">
-                                <label for="editOrgPrivacy">Privacyverklaring (tekst voor in de app)</label>
-                                <textarea id="editOrgPrivacy" rows="4" placeholder="Optioneel">${escTA(org.privacy_statement)}</textarea>
+                            <div class="form-block">
+                                <div class="form-block__head">
+                                    <h4 class="form-block__title"><i class="fas fa-palette" aria-hidden="true"></i> Huisstijl &amp; logo</h4>
+                                    <p class="form-block__intro">Kleur en logo zoals die bij de organisatie in de app horen.</p>
+                                </div>
+                                <div class="form-group">
+                                    <label for="editOrgBrandColorHex">Brandkleur (hex)</label>
+                                    <div class="color-input-row">
+                                        <input type="color" id="editOrgBrandColorPicker" value="${brandPickerVal}">
+                                        <input type="text" id="editOrgBrandColorHex" placeholder="#RRGGBB" value="${escQ(org.brand_color || '')}">
+                                    </div>
+                                </div>
+                                ${logoPreview}
+                                <div class="form-group">
+                                    <label for="editOrgLogoUrl">Logo-URL</label>
+                                    <input type="url" id="editOrgLogoUrl" value="${escQ(org.logo_url)}" placeholder="https://...">
+                                    <span class="form-hint">Nieuw bestand uploaden overschrijft de URL hierboven.</span>
+                                    <input type="file" id="editOrgLogoFile" accept="image/*">
+                                </div>
                             </div>
-                            ${this.checkboxFieldHtml('editOrgApproved', 'Goedgekeurd (zichtbaar in app)', { checked: !!org.is_approved })}
-                            <p class="form-section-title">RSS-nieuws (automatisch)</p>
-                            <div class="form-group">
-                                <label for="editOrgRssFeedUrl">RSS-feed-URL</label>
-                                <input type="url" id="editOrgRssFeedUrl" value="${escQ(org.rss_feed_url || '')}" placeholder="https://…/feed/rss/nieuws">
-                                <p class="form-hint">Optioneel. Nieuws uit deze feed wordt dagelijks geïmporteerd en direct gepubliceerd. Handmatige berichten blijven mogelijk. Gebruik «Nu synchroniseren» voor een directe import.</p>
-                                ${org.rss_last_synced_at ? `<p class="form-hint">Laatst gesynchroniseerd: ${escTA(new Date(org.rss_last_synced_at).toLocaleString('nl-NL'))}</p>` : ''}
+                            <div class="form-block">
+                                <div class="form-block__head">
+                                    <h4 class="form-block__title"><i class="fas fa-shield-alt" aria-hidden="true"></i> Privacy &amp; zichtbaarheid</h4>
+                                    <p class="form-block__intro">Privacytekst en of de organisatie in de app zichtbaar is.</p>
+                                </div>
+                                <div class="form-group">
+                                    <label for="editOrgPrivacy">Privacyverklaring (tekst voor in de app)</label>
+                                    <textarea id="editOrgPrivacy" rows="4" placeholder="Optioneel">${escTA(org.privacy_statement)}</textarea>
+                                </div>
+                                ${this.checkboxFieldHtml('editOrgApproved', 'Goedgekeurd (zichtbaar in app)', { checked: !!org.is_approved })}
                             </div>
-                            <div class="form-group">
-                                <button type="button" class="btn btn-secondary" id="editOrgRssSyncBtn" ${org.rss_feed_url ? '' : 'disabled'}>
-                                    <i class="fas fa-rss"></i> Nu synchroniseren
-                                </button>
+                            <div class="form-block">
+                                <div class="form-block__head">
+                                    <h4 class="form-block__title"><i class="fas fa-rss" aria-hidden="true"></i> RSS-nieuws</h4>
+                                    <p class="form-block__intro">Optioneel: automatisch nieuws importeren uit een feed.</p>
+                                </div>
+                                <div class="form-group">
+                                    <label for="editOrgRssFeedUrl">RSS-feed-URL</label>
+                                    <input type="url" id="editOrgRssFeedUrl" value="${escQ(org.rss_feed_url || '')}" placeholder="https://…/feed/rss/nieuws">
+                                    <p class="form-hint">Nieuws uit deze feed wordt dagelijks geïmporteerd en direct gepubliceerd. Handmatige berichten blijven mogelijk. Gebruik «Nu synchroniseren» voor een directe import.</p>
+                                    ${org.rss_last_synced_at ? `<p class="form-hint">Laatst gesynchroniseerd: ${escTA(new Date(org.rss_last_synced_at).toLocaleString('nl-NL'))}</p>` : ''}
+                                </div>
+                                <div class="form-group">
+                                    <button type="button" class="btn btn-secondary" id="editOrgRssSyncBtn" ${org.rss_feed_url ? '' : 'disabled'}>
+                                        <i class="fas fa-rss"></i> Nu synchroniseren
+                                    </button>
+                                </div>
                             </div>
                         </form>
                     </div>

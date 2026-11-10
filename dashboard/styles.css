@@ -682,7 +682,9 @@ body {
 #accountPasswordMsg.is-error { color: #b00020; }
 #accountPasswordMsg.is-success { color: #1a6b1a; }
 
-.pb-form-body { margin-top: 1rem; }
+.pb-form-body { margin-top: 0; }
+.pb-form-body .form-block:last-child { margin-bottom: 0; }
+.profile-form .form-block:last-child { margin-bottom: 0; }
 
 .profile-subheading {
     font-size: 1.05rem;

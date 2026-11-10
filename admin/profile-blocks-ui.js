@@ -149,12 +149,22 @@
             </div>`;
     }
 
+    function profileBlockContentShell(icon, title, intro, bodyHtml) {
+        return `<div class="form-block">
+            <div class="form-block__head">
+                <h4 class="form-block__title"><i class="fas ${icon}" aria-hidden="true"></i> ${title}</h4>
+                <p class="form-block__intro">${intro}</p>
+            </div>
+            ${bodyHtml}
+        </div>`;
+    }
+
     function profileBlockFormHtml(blockType, data, weekdayLabels, headerIcons) {
         const days = Array.isArray(data?.days) ? data.days : [];
         const items = Array.isArray(data?.items) ? data.items : [];
         switch (blockType) {
             case 'opening_hours':
-                return `
+                return profileBlockContentShell('fa-clock', 'Openingstijden', 'Wanneer de organisatie open is, plus een optionele notitie.', `
                     <div class="form-group">
                         <label>Notitie (optioneel)</label>
                         <input type="text" id="pb_note" value="${esc(data?.note || '')}" maxlength="500" placeholder="Bijv. alleen op afspraak">
@@ -182,18 +192,18 @@
                                 <input type="time" class="pb-day-end" data-day="${day}" value="${esc(d.close || '17:00')}" ${isOpen ? '' : 'disabled'} style="flex:1;">
                             </div>`;
                         }).join('')}
-                    </div>`;
+                    </div>`);
             case 'service_schedule':
-                return `
+                return profileBlockContentShell('fa-calendar-week', 'Diensten', 'Vaste diensten of momenten in de week.', `
                     <div id="pb_items_wrap">${items.map((it, i) => profileBlockServiceItemHtml(it, i, weekdayLabels)).join('')}</div>
-                    <button type="button" class="btn btn-secondary" id="pb_add_item"><i class="fas fa-plus"></i> Dienst toevoegen</button>`;
+                    <button type="button" class="btn btn-secondary" id="pb_add_item"><i class="fas fa-plus"></i> Dienst toevoegen</button>`);
             case 'match_schedule':
-                return `
+                return profileBlockContentShell('fa-futbol', 'Wedstrijden', 'Komende wedstrijden en het icoon in de app.', `
                     ${profileBlockHeaderIconPickerHtml(blockType, data, headerIcons)}
                     <div id="pb_items_wrap">${items.map((it, i) => profileBlockMatchItemHtml(it, i)).join('')}</div>
-                    <button type="button" class="btn btn-secondary" id="pb_add_item"><i class="fas fa-plus"></i> Wedstrijd toevoegen</button>`;
+                    <button type="button" class="btn btn-secondary" id="pb_add_item"><i class="fas fa-plus"></i> Wedstrijd toevoegen</button>`);
             case 'membership':
-                return `
+                return profileBlockContentShell('fa-id-card', 'Lidmaatschap', 'Tarief, aanmelden en eventuele extra regels.', `
                     <div class="form-group"><label>Intro</label><textarea id="pb_intro" rows="3">${esc(data?.intro || '')}</textarea></div>
                     <div class="form-row">
                         <div class="form-group"><label>Contributie / tarief</label><input type="text" id="pb_fee" value="${esc(data?.fee || '')}" placeholder="Bijv. 25 per jaar"></div>
@@ -201,23 +211,23 @@
                     </div>
                     <div class="form-group"><label>Aanmeld-URL</label><input type="url" id="pb_signup_url" value="${esc(data?.signup_url || '')}" placeholder="https://…"></div>
                     <div id="pb_items_wrap">${(data?.items || []).map((it, i) => profileBlockKvItemHtml(it, i)).join('')}</div>
-                    <button type="button" class="btn btn-secondary" id="pb_add_item"><i class="fas fa-plus"></i> Regel toevoegen</button>`;
+                    <button type="button" class="btn btn-secondary" id="pb_add_item"><i class="fas fa-plus"></i> Regel toevoegen</button>`);
             case 'facilities':
-                return `
+                return profileBlockContentShell('fa-door-open', 'Voorzieningen', 'Wat de organisatie te bieden heeft.', `
                     <div id="pb_items_wrap">${items.map((it, i) => profileBlockFacilityItemHtml(it, i)).join('')}</div>
-                    <button type="button" class="btn btn-secondary" id="pb_add_item"><i class="fas fa-plus"></i> Voorziening toevoegen</button>`;
+                    <button type="button" class="btn btn-secondary" id="pb_add_item"><i class="fas fa-plus"></i> Voorziening toevoegen</button>`);
             case 'team':
-                return `
+                return profileBlockContentShell('fa-users', 'Team', 'Personen en rollen die in de app zichtbaar zijn.', `
                     <div id="pb_items_wrap">${items.map((it, i) => profileBlockTeamItemHtml(it, i)).join('')}</div>
-                    <button type="button" class="btn btn-secondary" id="pb_add_item"><i class="fas fa-plus"></i> Persoon toevoegen</button>`;
+                    <button type="button" class="btn btn-secondary" id="pb_add_item"><i class="fas fa-plus"></i> Persoon toevoegen</button>`);
             case 'links':
-                return `
+                return profileBlockContentShell('fa-link', 'Links', 'Handige knoppen naar externe pagina’s.', `
                     <div id="pb_items_wrap">${items.map((it, i) => profileBlockLinkItemHtml(it, i)).join('')}</div>
-                    <button type="button" class="btn btn-secondary" id="pb_add_item"><i class="fas fa-plus"></i> Link toevoegen</button>`;
+                    <button type="button" class="btn btn-secondary" id="pb_add_item"><i class="fas fa-plus"></i> Link toevoegen</button>`);
             case 'notice':
-                return `
+                return profileBlockContentShell('fa-bullhorn', 'Mededeling', 'Korte melding, optioneel met einddatum.', `
                     <div class="form-group"><label>Mededeling</label><textarea id="pb_text" rows="4" maxlength="500">${esc(data?.text || '')}</textarea></div>
-                    <div class="form-group"><label>Tot en met (optioneel)</label><input type="date" id="pb_until" value="${esc(data?.until || '')}"><p class="form-hint">Na deze datum verdwijnt de mededeling automatisch uit de app.</p></div>`;
+                    <div class="form-group"><label>Tot en met (optioneel)</label><input type="date" id="pb_until" value="${esc(data?.until || '')}"><p class="form-hint">Na deze datum verdwijnt de mededeling automatisch uit de app.</p></div>`);
             default:
                 return '<p class="form-hint">Onbekend bloktype.</p>';
         }
@@ -388,22 +398,28 @@
                     <button type="button" class="modal-close">&times;</button>
                 </div>
                 <div class="modal-body">
-                    <div class="form-group">
-                        <label for="pb_title">Titel</label>
-                        <input type="text" id="pb_title" maxlength="255" value="${esc(existing?.title || '')}">
+                    <div class="form-block">
+                        <div class="form-block__head">
+                            <h4 class="form-block__title"><i class="fas fa-puzzle-piece" aria-hidden="true"></i> Basis</h4>
+                            <p class="form-block__intro">Titel, type en zichtbaarheid van dit blok in de app.</p>
+                        </div>
+                        <div class="form-group">
+                            <label for="pb_title">Titel</label>
+                            <input type="text" id="pb_title" maxlength="255" value="${esc(existing?.title || '')}">
+                        </div>
+                        <div class="form-group">
+                            <label for="pb_block_type">Type</label>
+                            <select id="pb_block_type" ${existing ? 'disabled' : ''}>${typeOptions}</select>
+                            ${existing ? '<p class="form-hint">Het type kan na aanmaken niet meer worden gewijzigd.</p>' : ''}
+                        </div>
+                        <div class="form-group checkbox-field">
+                            <label class="checkbox-label" for="pb_visible">
+                                <input type="checkbox" id="pb_visible" ${existing?.is_visible === false ? '' : 'checked'}>
+                                <span>Zichtbaar in de app</span>
+                            </label>
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label for="pb_block_type">Type</label>
-                        <select id="pb_block_type" ${existing ? 'disabled' : ''}>${typeOptions}</select>
-                        ${existing ? '<p class="form-hint">Het type kan na aanmaken niet meer worden gewijzigd.</p>' : ''}
-                    </div>
-                    <div class="form-group checkbox-field">
-                        <label class="checkbox-label" for="pb_visible">
-                            <input type="checkbox" id="pb_visible" ${existing?.is_visible === false ? '' : 'checked'}>
-                            <span>Zichtbaar in de app</span>
-                        </label>
-                    </div>
-                    <div id="pb_form_body" style="margin-top:1rem;"></div>
+                    <div id="pb_form_body" class="pb-form-body"></div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary modal-close-btn">Annuleren</button>
