@@ -59,8 +59,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['check'])) {
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode([
         'proxy' => 'db-proxy',
-        'version' => '2026-10-12-admin-reset',
-        'tables' => ['bookmarks', 'push_notification_mutes', 'follows', 'push_tokens', 'users', 'organizations', 'news', 'news_reactions', 'events', 'content_pages', 'practical_info', 'afvalkalender_config', 'org_password_resets', 'app_password_resets', 'admin_password_resets', 'organization_profile_blocks'],
+        'version' => '2026-11-22-org-email-change',
+        'tables' => ['bookmarks', 'push_notification_mutes', 'follows', 'push_tokens', 'users', 'organizations', 'news', 'news_reactions', 'events', 'content_pages', 'practical_info', 'afvalkalender_config', 'org_password_resets', 'org_email_changes', 'app_password_resets', 'admin_password_resets', 'organization_profile_blocks'],
     ]);
     exit;
 }
@@ -103,6 +103,7 @@ $allowedTables = [
     'practical_info',
     'afvalkalender_config',
     'org_password_resets',
+    'org_email_changes',
     'app_password_resets',
     'admin_password_resets',
     'organization_profile_blocks',

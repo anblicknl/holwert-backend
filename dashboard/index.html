@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard - Holwert Dorpsapp</title>
-    <link rel="stylesheet" href="styles.css?v=20261012-news-preview">
+    <link rel="stylesheet" href="styles.css?v=20261122-email-change">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
 <body>
@@ -70,6 +70,23 @@
                 <button type="button" id="backFromForgotBtn" class="login-back-btn">
                     <i class="fas fa-arrow-left" aria-hidden="true"></i>
                     <span>Terug naar inloggen</span>
+                </button>
+            </div>
+        </div>
+        <div id="confirmEmailPanel" class="login-container login-card" style="display:none;">
+            <div class="login-header">
+                <div class="logo-icon login-logo-ring">
+                    <img src="logo.svg" alt="Holwert Logo" onerror="this.style.display='none'; this.nextElementSibling?.classList?.remove('hide');">
+                    <i class="fas fa-envelope hide" style="font-size:48px; color:#333;"></i>
+                </div>
+                <h1 class="login-title">Inlog-e-mail bevestigen</h1>
+                <p class="login-lead" id="confirmEmailLead">Even geduld: we bevestigen je nieuwe inlogadres…</p>
+            </div>
+            <div id="confirmEmailMsg" class="error-message login-feedback login-feedback-below-form"></div>
+            <div class="login-back-wrap">
+                <button type="button" id="backFromConfirmEmailBtn" class="login-back-btn">
+                    <i class="fas fa-arrow-left" aria-hidden="true"></i>
+                    <span>Naar inloggen</span>
                 </button>
             </div>
         </div>
@@ -432,6 +449,6 @@
         if (window.location.hash === '#voorwaarden') openOrgTerms();
     })();
     </script>
-    <script src="app.js?v=20261106-reset-org"></script>
+    <script src="app.js?v=20261122-email-change"></script>
 </body>
 </html>

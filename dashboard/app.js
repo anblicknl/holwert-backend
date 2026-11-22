@@ -1,6 +1,6 @@
 /**
  * Dashboard (organisaties) – zelfde inlog als admin, alleen eigen Nieuws / Agenda / Profiel.
- * API: /api/auth/login, /api/org/me, /api/org/me/password, /api/org/news, /api/org/events, /api/org/profile, /api/upload
+ * API: /api/auth/login, /api/org/me, /api/org/me/password, /api/org/me/email-change, /api/org/news, /api/org/events, /api/org/profile, /api/upload
  */
 (function () {
     const _host = window.location.hostname;
@@ -286,6 +286,14 @@
         return '';
     }
 
+    function getEmailConfirmTokenFromUrl() {
+        try {
+            const t = (new URLSearchParams(window.location.search).get('confirm-email') || '').trim();
+            if (t && /^[a-f0-9]{64}$/i.test(t)) return t;
+        } catch (_) { /* ignore */ }
+        return '';
+    }
+
     function getOrgHintFromUrl() {
         try {
             return (new URLSearchParams(window.location.search).get('org') || '').trim();
@@ -294,14 +302,16 @@
         }
     }
 
-    /** Bij ?reset= nooit auto-login: oude JWT (andere vereniging) wissen/negeren. */
+    /** Bij ?reset= of ?confirm-email= nooit auto-login: oude JWT wissen/negeren. */
     const passwordResetTokenFromUrl = getPasswordResetTokenFromUrl();
+    const emailConfirmTokenFromUrl = getEmailConfirmTokenFromUrl();
     const passwordResetMode = Boolean(passwordResetTokenFromUrl);
-    if (passwordResetMode) {
+    const emailConfirmMode = Boolean(emailConfirmTokenFromUrl);
+    if (passwordResetMode || emailConfirmMode) {
         clearStoredToken();
     }
 
-    let token = passwordResetMode ? null : getStoredToken();
+    let token = (passwordResetMode || emailConfirmMode) ? null : getStoredToken();
     let currentUser = null;
     let organization = null;
 
@@ -317,12 +327,13 @@
     const logoutBtn = document.getElementById('logoutBtn');
     const forgotPasswordPanel = document.getElementById('forgotPasswordPanel');
     const resetPasswordPanel = document.getElementById('resetPasswordPanel');
+    const confirmEmailPanel = document.getElementById('confirmEmailPanel');
     const forgotPasswordForm = document.getElementById('forgotPasswordForm');
     const forgotPasswordMsg = document.getElementById('forgotPasswordMsg');
     const resetPasswordForm = document.getElementById('resetPasswordForm');
     const resetPasswordMsg = document.getElementById('resetPasswordMsg');
 
-    if (passwordResetMode) {
+    if (passwordResetMode || emailConfirmMode) {
         if (mainScreen) mainScreen.classList.remove('active');
         if (loginScreen) loginScreen.classList.add('active');
     }
@@ -334,24 +345,35 @@
                 if (registerOrgPanel) registerOrgPanel.style.display = 'none';
                 if (forgotPasswordPanel) forgotPasswordPanel.style.display = 'none';
                 if (resetPasswordPanel) resetPasswordPanel.style.display = 'none';
+                if (confirmEmailPanel) confirmEmailPanel.style.display = 'none';
             },
             register: () => {
                 if (loginPanel) loginPanel.style.display = 'none';
                 if (registerOrgPanel) registerOrgPanel.style.display = 'block';
                 if (forgotPasswordPanel) forgotPasswordPanel.style.display = 'none';
                 if (resetPasswordPanel) resetPasswordPanel.style.display = 'none';
+                if (confirmEmailPanel) confirmEmailPanel.style.display = 'none';
             },
             forgot: () => {
                 if (loginPanel) loginPanel.style.display = 'none';
                 if (registerOrgPanel) registerOrgPanel.style.display = 'none';
                 if (forgotPasswordPanel) forgotPasswordPanel.style.display = 'block';
                 if (resetPasswordPanel) resetPasswordPanel.style.display = 'none';
+                if (confirmEmailPanel) confirmEmailPanel.style.display = 'none';
             },
             reset: () => {
                 if (loginPanel) loginPanel.style.display = 'none';
                 if (registerOrgPanel) registerOrgPanel.style.display = 'none';
                 if (forgotPasswordPanel) forgotPasswordPanel.style.display = 'none';
                 if (resetPasswordPanel) resetPasswordPanel.style.display = 'block';
+                if (confirmEmailPanel) confirmEmailPanel.style.display = 'none';
+            },
+            confirmEmail: () => {
+                if (loginPanel) loginPanel.style.display = 'none';
+                if (registerOrgPanel) registerOrgPanel.style.display = 'none';
+                if (forgotPasswordPanel) forgotPasswordPanel.style.display = 'none';
+                if (resetPasswordPanel) resetPasswordPanel.style.display = 'none';
+                if (confirmEmailPanel) confirmEmailPanel.style.display = 'block';
             },
         };
         const fn = map[which];
@@ -374,12 +396,70 @@
             const u = new URL(window.location.href);
             u.searchParams.delete('reset');
             u.searchParams.delete('org');
+            u.searchParams.delete('confirm-email');
             const q = u.searchParams.toString();
             window.history.replaceState({}, '', u.pathname + (q ? `?${q}` : '') + u.hash);
         } catch (_) {
             /* ignore */
         }
     }
+
+    function clearConfirmEmailQueryFromUrl() {
+        clearResetQueryFromUrl();
+    }
+
+    (async function initEmailConfirmFromUrl() {
+        const ct = emailConfirmTokenFromUrl || getEmailConfirmTokenFromUrl();
+        if (!ct) return;
+        clearStoredToken();
+        token = null;
+        currentUser = null;
+        organization = null;
+        if (mainScreen) mainScreen.classList.remove('active');
+        if (loginScreen) loginScreen.classList.add('active');
+        showAuthPanel('confirmEmail');
+        const lead = document.getElementById('confirmEmailLead');
+        const msg = document.getElementById('confirmEmailMsg');
+        if (lead) lead.textContent = 'Even geduld: we bevestigen je nieuwe inlogadres…';
+        if (msg) {
+            msg.textContent = '';
+            msg.classList.remove('show', 'login-feedback--success', 'login-feedback--error');
+        }
+        try {
+            const res = await fetch(`${apiBase}/auth/org-confirm-email-change`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: ct }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                throw new Error(data.error || data.message || 'Bevestigen mislukt');
+            }
+            clearConfirmEmailQueryFromUrl();
+            const newEmail = (data.email || '').trim();
+            if (lead) lead.textContent = 'Gelukt — log opnieuw in met je nieuwe e-mailadres.';
+            if (msg) {
+                msg.textContent = data.message || 'Je inlog-e-mailadres is bijgewerkt.';
+                msg.classList.add('show', 'login-feedback--success');
+                msg.classList.remove('login-feedback--error');
+            }
+            const emailInput = document.getElementById('email');
+            if (emailInput && newEmail) emailInput.value = newEmail;
+        } catch (err) {
+            clearConfirmEmailQueryFromUrl();
+            if (lead) lead.textContent = 'Bevestigen mislukt';
+            if (msg) {
+                msg.textContent = err.message || 'Ongeldige of verlopen link.';
+                msg.classList.add('show', 'login-feedback--error');
+                msg.classList.remove('login-feedback--success');
+            }
+        }
+    })();
+
+    document.getElementById('backFromConfirmEmailBtn')?.addEventListener('click', () => {
+        showAuthPanel('login');
+        clearForgotResetMessages();
+    });
 
     function setResetPasswordOrgLabel(orgName, orgId) {
         const lead = document.getElementById('resetPasswordLead');
@@ -2394,8 +2474,28 @@
                 <div class="form-block">
                     <div class="form-block__head">
                         <h4 class="form-block__title"><i class="fas fa-key" aria-hidden="true"></i> Account</h4>
-                        <p class="form-block__intro">Wachtwoord voor <strong>dit dashboard</strong>, los van het contact-e-mailadres hierboven.</p>
+                        <p class="form-block__intro">Inlog voor <strong>dit dashboard</strong>, los van het contact-e-mailadres hierboven.</p>
                     </div>
+                    <div class="form-group">
+                        <label>Huidig inlog-e-mailadres</label>
+                        <p class="readonly-value" id="accountLoginEmail">${escapeHtml(currentUser?.email || '')}</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="accountNewLoginEmail">Nieuw inlog-e-mailadres</label>
+                        <input type="email" id="accountNewLoginEmail" autocomplete="email" placeholder="bijv. organisatie@outlook.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="accountNewLoginEmail2">Nieuw inlog-e-mailadres (herhalen)</label>
+                        <input type="email" id="accountNewLoginEmail2" autocomplete="email" placeholder="Nogmaals het nieuwe adres">
+                    </div>
+                    <div class="form-group">
+                        <label for="accountEmailPassword">Huidig wachtwoord (voor e-mailwijziging)</label>
+                        <input type="password" id="accountEmailPassword" autocomplete="current-password">
+                        <p class="form-hint">Er gaat een bevestigingslink naar het nieuwe adres en een waarschuwing naar het oude. Pas na bevestigen kun je inloggen met het nieuwe adres.</p>
+                    </div>
+                    <button type="button" class="btn btn-secondary" id="changeAccountEmailBtn"><i class="fas fa-envelope"></i> Inlog-e-mail wijzigen</button>
+                    <p id="accountEmailMsg" class="form-hint" aria-live="polite"></p>
+                    <hr class="form-block-divider">
                     <div class="form-group">
                         <label for="accountCurrentPassword">Huidig wachtwoord</label>
                         <input type="password" id="accountCurrentPassword" autocomplete="current-password">
@@ -2427,31 +2527,77 @@
             root.innerHTML = `<p class="empty-message">Fout: ${escapeHtml(e.message)}</p>`;
         }
         document.getElementById('changeAccountPasswordBtn')?.addEventListener('click', onChangeAccountPasswordClick);
+        document.getElementById('changeAccountEmailBtn')?.addEventListener('click', onChangeAccountEmailClick);
+    }
+
+    function setAccountFieldMsg(msgEl, text, isError) {
+        if (!msgEl) return;
+        msgEl.textContent = text;
+        msgEl.classList.toggle('is-visible', !!text);
+        msgEl.classList.toggle('is-error', !!text && isError);
+        msgEl.classList.toggle('is-success', !!text && !isError);
+    }
+
+    async function onChangeAccountEmailClick() {
+        const msgEl = document.getElementById('accountEmailMsg');
+        setAccountFieldMsg(msgEl, '', false);
+        const n1 = (document.getElementById('accountNewLoginEmail')?.value || '').trim().toLowerCase();
+        const n2 = (document.getElementById('accountNewLoginEmail2')?.value || '').trim().toLowerCase();
+        const pw = document.getElementById('accountEmailPassword')?.value || '';
+        if (!n1 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(n1)) {
+            setAccountFieldMsg(msgEl, 'Vul een geldig nieuw e-mailadres in.', true);
+            return;
+        }
+        if (n1 !== n2) {
+            setAccountFieldMsg(msgEl, 'De twee nieuwe e-mailadressen komen niet overeen.', true);
+            return;
+        }
+        if (!pw) {
+            setAccountFieldMsg(msgEl, 'Vul je huidige wachtwoord in om de wijziging te bevestigen.', true);
+            return;
+        }
+        const btn = document.getElementById('changeAccountEmailBtn');
+        if (btn) btn.disabled = true;
+        try {
+            const res = await fetch(`${apiBase}/org/me/email-change`, {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify({ new_email: n1, current_password: pw }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                throw new Error(data.error || data.message || 'Wijzigen mislukt');
+            }
+            setAccountFieldMsg(msgEl, data.message || 'Bevestigingsmail verstuurd.', false);
+            const a = document.getElementById('accountNewLoginEmail');
+            const b = document.getElementById('accountNewLoginEmail2');
+            const c = document.getElementById('accountEmailPassword');
+            if (a) a.value = '';
+            if (b) b.value = '';
+            if (c) c.value = '';
+        } catch (err) {
+            setAccountFieldMsg(msgEl, err.message || 'Netwerkfout', true);
+        } finally {
+            if (btn) btn.disabled = false;
+        }
     }
 
     async function onChangeAccountPasswordClick() {
         const msgEl = document.getElementById('accountPasswordMsg');
-        const setMsg = (text, isError) => {
-            if (!msgEl) return;
-            msgEl.textContent = text;
-            msgEl.classList.toggle('is-visible', !!text);
-            msgEl.classList.toggle('is-error', !!text && isError);
-            msgEl.classList.toggle('is-success', !!text && !isError);
-        };
-        setMsg('', false);
+        setAccountFieldMsg(msgEl, '', false);
         const cur = document.getElementById('accountCurrentPassword')?.value || '';
         const n1 = document.getElementById('accountNewPassword')?.value || '';
         const n2 = document.getElementById('accountNewPassword2')?.value || '';
         if (!cur) {
-            setMsg('Vul je huidige wachtwoord in.', true);
+            setAccountFieldMsg(msgEl, 'Vul je huidige wachtwoord in.', true);
             return;
         }
         if (n1.length < 6) {
-            setMsg('Nieuw wachtwoord: minimaal 6 tekens.', true);
+            setAccountFieldMsg(msgEl, 'Nieuw wachtwoord: minimaal 6 tekens.', true);
             return;
         }
         if (n1 !== n2) {
-            setMsg('De twee nieuwe wachtwoorden komen niet overeen.', true);
+            setAccountFieldMsg(msgEl, 'De twee nieuwe wachtwoorden komen niet overeen.', true);
             return;
         }
         const btn = document.getElementById('changeAccountPasswordBtn');
@@ -2466,7 +2612,7 @@
             if (!res.ok) {
                 throw new Error(data.error || data.message || 'Wijzigen mislukt');
             }
-            setMsg(data.message || 'Wachtwoord bijgewerkt.', false);
+            setAccountFieldMsg(msgEl, data.message || 'Wachtwoord bijgewerkt.', false);
             const c = document.getElementById('accountCurrentPassword');
             const a = document.getElementById('accountNewPassword');
             const b = document.getElementById('accountNewPassword2');
@@ -2474,7 +2620,7 @@
             if (a) a.value = '';
             if (b) b.value = '';
         } catch (err) {
-            setMsg(err.message || 'Netwerkfout', true);
+            setAccountFieldMsg(msgEl, err.message || 'Netwerkfout', true);
         } finally {
             if (btn) btn.disabled = false;
         }
@@ -2598,8 +2744,8 @@
         hideDashboardBanner();
     });
 
-    // Nooit session-restore tijdens wachtwoord-reset (?reset=) — anders wint last-org JWT.
-    if (token && !passwordResetMode) {
+    // Nooit session-restore tijdens wachtwoord-reset / e-mailbevestiging.
+    if (token && !passwordResetMode && !emailConfirmMode) {
         fetch(`${apiBase}/org/me`, { headers: authHeaders() })
             .then(r => {
                 if (!r.ok) throw new Error();
@@ -2610,6 +2756,11 @@
                     clearStoredToken();
                     token = null;
                     forcePasswordResetUi();
+                    return;
+                }
+                if (emailConfirmMode || getEmailConfirmTokenFromUrl()) {
+                    clearStoredToken();
+                    token = null;
                     return;
                 }
                 currentUser = data.user;

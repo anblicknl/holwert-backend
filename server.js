@@ -592,6 +592,7 @@ function getMigrationsReady() {
         await ensureOrganizationProfileBlocksTable();
         await initializePushNotificationsTables();
         await ensureOrgPasswordResetsTable();
+        await ensureOrgEmailChangesTable();
         console.log('✅ Migraties voltooid');
       } catch (e) {
         console.error('Migraties fout:', e?.message || e);
@@ -8203,8 +8204,22 @@ app.get('/api/org/me', authenticateToken, requireOrgPortal, async (req, res) => 
           'Je account verwijst naar een organisatie die niet (meer) bestaat. Controleer organization_id in de database of neem contact op met de beheerder.',
       });
     }
+    let loginEmail = req.user.email || null;
+    let role = req.user.role || null;
+    try {
+      const userRes = await executeQuery(
+        'SELECT email, role FROM users WHERE id = ? LIMIT 1',
+        [req.user.userId],
+      );
+      if (userRes.rows?.length) {
+        loginEmail = userRes.rows[0].email || loginEmail;
+        role = userRes.rows[0].role || role;
+      }
+    } catch (_) {
+      /* JWT-velden als fallback */
+    }
     res.json({
-      user: { id: req.user.userId, email: req.user.email, role: req.user.role, organization_id: orgId },
+      user: { id: req.user.userId, email: loginEmail, role, organization_id: orgId },
       organization: orgResult.rows[0]
     });
   } catch (error) {
@@ -8488,6 +8503,260 @@ app.put('/api/org/me/password', authenticateToken, requireOrgPortal, async (req,
     res.status(500).json({ error: 'Wachtwoord wijzigen mislukt', message: error.message });
   }
 });
+
+async function sendOrgEmailChangeConfirmEmailViaHosting({ toEmail, confirmUrl, orgName, oldEmail }) {
+  const esc = (s) =>
+    String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  const orgLabel = orgName ? String(orgName).trim() : 'jullie organisatie';
+  const subject = `Holwert: bevestig nieuw inlog-e-mailadres (${orgLabel})`;
+  const html = `<p>Er is een wijziging van het <strong>dashboard-inlogadres</strong> aangevraagd voor <strong>${esc(orgLabel)}</strong>.</p>
+<p>Nieuw adres: <strong>${esc(toEmail)}</strong><br>Huidig adres: <strong>${esc(oldEmail)}</strong></p>
+<p><a href="${esc(confirmUrl)}">Klik hier om het nieuwe e-mailadres te bevestigen</a></p>
+<p>Of kopieer deze link:<br><span style="word-break:break-all">${esc(confirmUrl)}</span></p>
+<p>Deze link is <strong>1 uur</strong> geldig. Heb je dit niet zelf aangevraagd, negeer deze e-mail.</p>`;
+  const text = `Er is een wijziging van het dashboard-inlogadres aangevraagd voor ${orgLabel}.
+
+Nieuw adres: ${toEmail}
+Huidig adres: ${oldEmail}
+
+Bevestig via deze link (1 uur geldig):
+${confirmUrl}
+
+Heb je dit niet zelf aangevraagd, negeer deze e-mail.`;
+  return sendMailViaHosting({ toEmail, subject, html, text });
+}
+
+async function sendOrgEmailChangeNoticeOldEmailViaHosting({ toEmail, newEmail, orgName }) {
+  const esc = (s) =>
+    String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  const orgLabel = orgName ? String(orgName).trim() : 'jullie organisatie';
+  const subject = `Holwert: inlog-e-mail wijzigen aangevraagd (${orgLabel})`;
+  const html = `<p>Er is een wijziging van het <strong>dashboard-inlogadres</strong> aangevraagd voor <strong>${esc(orgLabel)}</strong>.</p>
+<p>Als dit klopt, moet het nieuwe adres (<strong>${esc(newEmail)}</strong>) de bevestigingsmail openen.</p>
+<p>Heb je dit <strong>niet</strong> zelf gedaan? Wijzig dan meteen je wachtwoord in het dashboard, of neem contact op met de beheerder van Holwert.</p>`;
+  const text = `Er is een wijziging van het dashboard-inlogadres aangevraagd voor ${orgLabel}.
+
+Nieuw adres (nog te bevestigen): ${newEmail}
+
+Heb je dit niet zelf gedaan? Wijzig je wachtwoord of neem contact op met de beheerder.`;
+  return sendMailViaHosting({ toEmail, subject, html, text });
+}
+
+async function sendOrgEmailChangeCompletedEmailViaHosting({ toEmail, loginEmail, orgName, variant }) {
+  const esc = (s) =>
+    String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  const orgLabel = orgName ? String(orgName).trim() : 'jullie organisatie';
+  const dashUrl = getOrgDashboardPublicBaseUrl();
+  const isNew = variant === 'new';
+  const subject = isNew
+    ? `Holwert: inloggen voortaan met dit adres (${orgLabel})`
+    : `Holwert: inlog-e-mail is gewijzigd (${orgLabel})`;
+  const bodyHtml = isNew
+    ? `<p>Het inlogadres voor het organisatie-dashboard van <strong>${esc(orgLabel)}</strong> is bevestigd.</p>
+<p>Voortaan log je in met: <strong>${esc(loginEmail)}</strong></p>
+<p><a href="${esc(dashUrl)}">Open het dashboard</a></p>`
+    : `<p>Het inlogadres voor het organisatie-dashboard van <strong>${esc(orgLabel)}</strong> is gewijzigd.</p>
+<p>Nieuw inlogadres: <strong>${esc(loginEmail)}</strong></p>
+<p>Dit adres (<strong>${esc(toEmail)}</strong>) werkt niet meer als inlognaam.</p>`;
+  const bodyText = isNew
+    ? `Het inlogadres voor ${orgLabel} is bevestigd. Voortaan: ${loginEmail}\n${dashUrl}`
+    : `Het inlogadres voor ${orgLabel} is gewijzigd naar ${loginEmail}. Dit oude adres werkt niet meer als inlognaam.`;
+  return sendMailViaHosting({ toEmail, subject, html: bodyHtml, text: bodyText });
+}
+
+app.post('/api/org/me/email-change', authenticateToken, requireOrgPortal, orgForgotPasswordRateLimiter, async (req, res) => {
+  try {
+    const userId = req.user && req.user.userId;
+    const orgId = req.organizationId;
+    if (userId == null) {
+      return res.status(400).json({ error: 'Ongeldige sessie. Log opnieuw in.' });
+    }
+    const curPw = req.body?.current_password != null ? String(req.body.current_password) : '';
+    const newEmailRaw = req.body?.new_email != null ? String(req.body.new_email).trim().toLowerCase() : '';
+    if (!curPw) {
+      return res.status(400).json({ error: 'Vul je huidige wachtwoord in.' });
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmailRaw) || newEmailRaw.length > 255) {
+      return res.status(400).json({ error: 'Vul een geldig nieuw e-mailadres in.' });
+    }
+    const userRes = await executeQuery(
+      'SELECT id, email, password_hash FROM users WHERE id = ? LIMIT 1',
+      [userId],
+    );
+    if (!userRes.rows?.length) {
+      return res.status(404).json({ error: 'Gebruiker niet gevonden' });
+    }
+    const user = userRes.rows[0];
+    const oldEmail = String(user.email || '').trim().toLowerCase();
+    if (!oldEmail) {
+      return res.status(400).json({ error: 'Dit account heeft geen inlog-e-mailadres.' });
+    }
+    if (newEmailRaw === oldEmail) {
+      return res.status(400).json({ error: 'Dit is al je huidige inlog-e-mailadres.' });
+    }
+    const ok = user.password_hash ? await bcrypt.compare(curPw, user.password_hash) : false;
+    if (!ok) {
+      return res.status(401).json({ error: 'Huidig wachtwoord is onjuist.' });
+    }
+    const dup = await executeQuery(
+      'SELECT id FROM users WHERE LOWER(TRIM(email)) = ? AND id <> ? LIMIT 1',
+      [newEmailRaw, userId],
+    );
+    if (dup.rows?.length) {
+      return res.status(409).json({ error: 'Dit e-mailadres is al in gebruik bij een ander account.' });
+    }
+    await ensureOrgEmailChangesTable();
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = hashOrgPasswordResetToken(rawToken);
+    try {
+      await executeQuery('DELETE FROM org_email_changes WHERE user_id = ?', [userId]);
+    } catch (delErr) {
+      if (!isMysqlMissingTableError(delErr)) throw delErr;
+      await ensureOrgEmailChangesTable();
+    }
+    await executeInsert(
+      `INSERT INTO org_email_changes (user_id, organization_id, old_email, new_email, token_hash, expires_at)
+       VALUES (?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR))`,
+      [userId, orgId || null, oldEmail, newEmailRaw, tokenHash],
+    );
+    const orgInfo = orgId ? await lookupOrganizationNameForReset(orgId) : null;
+    const confirmUrl = `${getOrgDashboardPublicBaseUrl()}?confirm-email=${encodeURIComponent(rawToken)}`;
+    const sentNew = await sendOrgEmailChangeConfirmEmailViaHosting({
+      toEmail: newEmailRaw,
+      confirmUrl,
+      orgName: orgInfo?.name || null,
+      oldEmail,
+    });
+    if (!sentNew.ok) {
+      await executeQuery('DELETE FROM org_email_changes WHERE user_id = ?', [userId]).catch(() => {});
+      return res.status(503).json({
+        error: 'Bevestigingsmail naar het nieuwe adres lukte niet. Probeer het later opnieuw.',
+        message: sentNew.reason,
+      });
+    }
+    const sentOld = await sendOrgEmailChangeNoticeOldEmailViaHosting({
+      toEmail: oldEmail,
+      newEmail: newEmailRaw,
+      orgName: orgInfo?.name || null,
+    });
+    if (!sentOld.ok) {
+      console.warn('[org-email-change] waarschuwing naar oud adres mislukt:', sentOld.reason, oldEmail);
+    }
+    return res.json({
+      message:
+        'Er is een bevestigingsmail gestuurd naar het nieuwe adres. Open die link binnen 1 uur. Het oude adres heeft een waarschuwing ontvangen.',
+      pending_email: newEmailRaw,
+    });
+  } catch (error) {
+    const msg = String(error?.message || '');
+    if (/disallowed table/i.test(msg) && /org_email_changes/i.test(msg)) {
+      console.error('org-email-change: org_email_changes niet op proxy-whitelist');
+      return res.status(503).json({
+        error: 'E-mail wijzigen is tijdelijk niet beschikbaar. De beheerder moet db-proxy.php bijwerken (tabel org_email_changes).',
+        message: msg,
+      });
+    }
+    console.error('POST /api/org/me/email-change error:', error);
+    return res.status(500).json({ error: 'E-mail wijzigen mislukt', message: error.message });
+  }
+});
+
+async function handleOrgConfirmEmailChangeRequest(req, res) {
+  try {
+    const token = req.body?.token != null ? String(req.body.token).trim() : '';
+    if (!token || !/^[a-f0-9]{64}$/i.test(token)) {
+      return res.status(400).json({ error: 'Ongeldige of verlopen bevestigingslink.' });
+    }
+    await ensureOrgEmailChangesTable();
+    const tokenHash = hashOrgPasswordResetToken(token);
+    const rowRes = await executeQuery(
+      `SELECT id, user_id, organization_id, old_email, new_email FROM org_email_changes
+       WHERE token_hash = ?
+         AND expires_at > NOW()
+         AND created_at > DATE_SUB(NOW(), INTERVAL 1 HOUR)
+       LIMIT 1`,
+      [tokenHash],
+    );
+    if (!rowRes.rows?.length) {
+      return res.status(400).json({ error: 'Ongeldige of verlopen bevestigingslink.' });
+    }
+    const row = rowRes.rows[0];
+    const userId = row.user_id;
+    const newEmail = String(row.new_email || '').trim().toLowerCase();
+    const oldEmail = String(row.old_email || '').trim().toLowerCase();
+    const dup = await executeQuery(
+      'SELECT id FROM users WHERE LOWER(TRIM(email)) = ? AND id <> ? LIMIT 1',
+      [newEmail, userId],
+    );
+    if (dup.rows?.length) {
+      await executeQuery('DELETE FROM org_email_changes WHERE id = ?', [row.id]).catch(() => {});
+      return res.status(409).json({ error: 'Dit e-mailadres is inmiddels in gebruik bij een ander account.' });
+    }
+    const userCheck = await executeQuery(
+      'SELECT id, email FROM users WHERE id = ? LIMIT 1',
+      [userId],
+    );
+    if (!userCheck.rows?.length) {
+      await executeQuery('DELETE FROM org_email_changes WHERE id = ?', [row.id]).catch(() => {});
+      return res.status(404).json({ error: 'Account niet gevonden.' });
+    }
+    try {
+      await executeQuery('UPDATE users SET email = ?, updated_at = NOW() WHERE id = ?', [newEmail, userId]);
+    } catch (updErr) {
+      if (updErr.code === '23505' || updErr.code === 'ER_DUP_ENTRY' || updErr.errno === 1062) {
+        return res.status(409).json({ error: 'Dit e-mailadres is al in gebruik bij een ander account.' });
+      }
+      throw updErr;
+    }
+    await executeQuery('DELETE FROM org_email_changes WHERE user_id = ?', [userId]).catch(() => {});
+    const orgInfo = row.organization_id
+      ? await lookupOrganizationNameForReset(row.organization_id)
+      : null;
+    await sendOrgEmailChangeCompletedEmailViaHosting({
+      toEmail: newEmail,
+      loginEmail: newEmail,
+      orgName: orgInfo?.name || null,
+      variant: 'new',
+    }).catch(() => {});
+    if (oldEmail && oldEmail !== newEmail) {
+      await sendOrgEmailChangeCompletedEmailViaHosting({
+        toEmail: oldEmail,
+        loginEmail: newEmail,
+        orgName: orgInfo?.name || null,
+        variant: 'old',
+      }).catch(() => {});
+    }
+    return res.json({
+      message: 'Je inlog-e-mailadres is bijgewerkt. Log opnieuw in met het nieuwe adres.',
+      email: newEmail,
+    });
+  } catch (error) {
+    const msg = String(error?.message || '');
+    if (/disallowed table/i.test(msg) && /org_email_changes/i.test(msg)) {
+      return res.status(503).json({
+        error: 'Bevestigen is tijdelijk niet beschikbaar. De beheerder moet db-proxy.php bijwerken (tabel org_email_changes).',
+        message: msg,
+      });
+    }
+    console.error('org-confirm-email-change error:', error);
+    return res.status(500).json({ error: 'Bevestigen mislukt', message: error.message });
+  }
+}
+
+app.post('/api/auth/org-confirm-email-change', orgForgotPasswordRateLimiter, handleOrgConfirmEmailChangeRequest);
+app.post('/auth/org-confirm-email-change', orgForgotPasswordRateLimiter, handleOrgConfirmEmailChangeRequest);
 
 // Nieuws voor eigen organisatie
 app.get('/api/org/news', authenticateToken, requireOrgPortal, async (req, res) => {
@@ -11490,6 +11759,39 @@ async function ensureOrgPasswordResetsTable() {
     throw e;
   }
   await ensureOrgPasswordResetsOrganizationIdColumn();
+}
+
+async function ensureOrgEmailChangesTable() {
+  try {
+    await executeQuery('SELECT 1 FROM org_email_changes LIMIT 1');
+    return;
+  } catch (probeErr) {
+    if (!isMysqlMissingTableError(probeErr)) {
+      console.warn('ensureOrgEmailChangesTable probe:', probeErr.message);
+      return;
+    }
+  }
+  try {
+    await executeQuery(`
+      CREATE TABLE IF NOT EXISTS org_email_changes (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        organization_id INT NULL,
+        old_email VARCHAR(255) NOT NULL,
+        new_email VARCHAR(255) NOT NULL,
+        token_hash CHAR(64) NOT NULL,
+        expires_at DATETIME NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_org_email_changes_user (user_id),
+        UNIQUE KEY uq_org_email_changes_token (token_hash),
+        KEY idx_org_email_changes_new (new_email)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    console.log('✅ org_email_changes tabel aangemaakt');
+  } catch (e) {
+    console.error('ensureOrgEmailChangesTable create:', e.message);
+    throw e;
+  }
 }
 
 async function ensureAppPasswordResetsTable() {

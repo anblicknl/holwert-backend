@@ -673,14 +673,24 @@ body {
 
 .form-subfield--wide { flex: 2; min-width: 14rem; }
 
-#accountPasswordMsg {
+#accountPasswordMsg,
+#accountEmailMsg {
     display: none;
     margin-top: 0.75rem;
 }
 
-#accountPasswordMsg.is-visible { display: block; }
-#accountPasswordMsg.is-error { color: #b00020; }
-#accountPasswordMsg.is-success { color: #1a6b1a; }
+#accountPasswordMsg.is-visible,
+#accountEmailMsg.is-visible { display: block; }
+#accountPasswordMsg.is-error,
+#accountEmailMsg.is-error { color: #b00020; }
+#accountPasswordMsg.is-success,
+#accountEmailMsg.is-success { color: #1a6b1a; }
+
+.form-block-divider {
+    border: 0;
+    border-top: 1px solid #e2e8f0;
+    margin: 1.25rem 0;
+}
 
 .pb-form-body { margin-top: 0; }
 .pb-form-body .form-block:last-child { margin-bottom: 0; }
