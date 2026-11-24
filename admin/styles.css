@@ -2929,104 +2929,87 @@ input, select, textarea {
     padding: 1.5rem;
 }
 
-/* Organisatie-overzicht (admin modal) */
-.org-overview-visual {
-    display: grid;
-    gap: 1rem;
+/* Dashboard: Top 10 organisaties */
+.dash-top10-panel {
+    margin-top: 1.25rem;
+    max-width: none;
 }
-.org-overview-cards {
+.dash-top10-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+}
+.dash-top10-row {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    grid-template-columns: 2rem 1fr auto;
     gap: 0.75rem;
-}
-.org-overview-card {
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
-    border-radius: 12px;
-    padding: 0.9rem 1rem;
-}
-.org-overview-card__label {
-    font-size: 0.78rem;
-    color: #64748b;
-    font-weight: 500;
-}
-.org-overview-card__value {
-    font-size: 1.65rem;
-    font-weight: 700;
-    line-height: 1.15;
-    margin: 0.2rem 0 0.15rem;
-    color: #0f172a;
-}
-.org-overview-card--followers .org-overview-card__value { color: #e0335b; }
-.org-overview-card--news .org-overview-card__value { color: #3b5bdb; }
-.org-overview-card--events .org-overview-card__value { color: #2f9e44; }
-.org-overview-card__meta {
-    font-size: 0.75rem;
-    color: #94a3b8;
-}
-.org-overview-chart {
-    background: #fff;
-    border: 1px solid #e2e8f0;
-    border-radius: 12px;
-    padding: 0.95rem 1rem 1rem;
-}
-.org-overview-chart__title {
-    margin: 0 0 0.75rem;
-    font-size: 0.95rem;
-    color: #0f172a;
-}
-.org-overview-chart__title span {
-    color: #94a3b8;
-    font-weight: 400;
-    font-size: 0.82rem;
-}
-.org-overview-bar-row {
-    display: grid;
-    grid-template-columns: minmax(7rem, 11rem) 1fr auto;
-    gap: 0.65rem;
     align-items: center;
-    margin-bottom: 0.45rem;
+    padding: 0.65rem 0.85rem;
+    background: #f8fafc;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
 }
-.org-overview-bar-label {
-    font-size: 0.82rem;
-    color: #334155;
+.dash-top10-rank {
+    width: 2rem;
+    height: 2rem;
+    border-radius: 8px;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.85rem;
+    color: #64748b;
+}
+.dash-top10-row:nth-child(-n+3) .dash-top10-rank {
+    color: #e0335b;
+    border-color: #f9c2d0;
+    background: #fff5f7;
+}
+.dash-top10-main {
+    min-width: 0;
+}
+.dash-top10-name {
+    font-weight: 600;
+    color: #111827;
+    font-size: 0.925rem;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
-.org-overview-bar-track {
-    height: 8px;
+.dash-top10-meta {
+    font-size: 0.78rem;
+    color: #64748b;
+    margin: 0.1rem 0 0.35rem;
+}
+.dash-top10-track {
+    height: 7px;
     border-radius: 999px;
     background: #e2e8f0;
     overflow: hidden;
 }
-.org-overview-bar-track span {
+.dash-top10-track span {
     display: block;
     height: 100%;
     border-radius: inherit;
     background: linear-gradient(90deg, #e0335b, #f472b6);
 }
-.org-overview-bar-value {
-    font-size: 0.82rem;
-    font-weight: 600;
-    color: #0f172a;
-    min-width: 3.5rem;
+.dash-top10-stats {
     text-align: right;
+    line-height: 1.2;
 }
-.org-overview-bar-value small {
-    margin-left: 0.3rem;
+.dash-top10-stats strong {
+    display: block;
+    font-size: 1.05rem;
+    color: #0f172a;
+}
+.dash-top10-delta {
+    font-size: 0.78rem;
+    color: #94a3b8;
+}
+.dash-top10-delta.is-up {
     color: #e0335b;
-    font-weight: 500;
-}
-@media (max-width: 700px) {
-    .org-overview-bar-row {
-        grid-template-columns: 1fr auto;
-        grid-template-areas:
-            "label value"
-            "track track";
-    }
-    .org-overview-bar-label { grid-area: label; }
-    .org-overview-bar-value { grid-area: value; }
-    .org-overview-bar-track { grid-area: track; }
+    font-weight: 600;
 }
 

@@ -1224,6 +1224,7 @@ class HolwertAdmin {
             this.loadPendingContent();
             this.loadRecentActivity();
             this.loadFallbackStatus();
+            this.loadDashboardTopOrganizations();
             
             // Load notification counts
             this.loadNotificationCounts();
@@ -1231,6 +1232,55 @@ class HolwertAdmin {
         } catch (error) {
             console.error('Error loading dashboard:', error);
         }
+    }
+
+    async loadDashboardTopOrganizations() {
+        const el = document.getElementById('dashTop10Orgs');
+        if (!el) return;
+        el.innerHTML = '<p class="muted">Laden…</p>';
+        try {
+            const res = await fetch(`${this.apiBaseUrl}/admin/organizations/overview?days=30`, {
+                headers: { Authorization: `Bearer ${this.token}` },
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || data.message || 'Laden mislukt');
+            const rows = (Array.isArray(data.organizations) ? data.organizations : [])
+                .slice()
+                .sort((a, b) => (Number(b.followers_total) || 0) - (Number(a.followers_total) || 0))
+                .slice(0, 10);
+            this.renderDashboardTopOrganizations(rows);
+        } catch (err) {
+            el.innerHTML = `<p class="muted">Top 10 laden mislukt: ${this.escHtml(err.message || 'onbekend')}</p>`;
+        }
+    }
+
+    renderDashboardTopOrganizations(rows) {
+        const el = document.getElementById('dashTop10Orgs');
+        if (!el) return;
+        if (!rows.length) {
+            el.innerHTML = '<p class="muted">Nog geen volgersdata.</p>';
+            return;
+        }
+        const maxFollowers = Math.max(1, ...rows.map((o) => Number(o.followers_total) || 0));
+        el.innerHTML = rows.map((o, i) => {
+            const total = Number(o.followers_total) || 0;
+            const neu = Number(o.followers_period) || 0;
+            const width = Math.max(4, Math.round((total / maxFollowers) * 100));
+            const name = this.escHtml(o.name || '—');
+            const cat = this.escHtml(typeof orgCategoryLabel === 'function' ? orgCategoryLabel(o.category) : (o.category || ''));
+            return `<div class="dash-top10-row">
+                <div class="dash-top10-rank">${i + 1}</div>
+                <div class="dash-top10-main">
+                    <div class="dash-top10-name" title="${name}">${name}</div>
+                    <div class="dash-top10-meta">${cat || '—'}</div>
+                    <div class="dash-top10-track"><span style="width:${width}%"></span></div>
+                </div>
+                <div class="dash-top10-stats">
+                    <strong>${total}</strong>
+                    <span class="dash-top10-delta${neu > 0 ? ' is-up' : ''}">${neu > 0 ? `+${neu}` : neu}</span>
+                </div>
+            </div>`;
+        }).join('');
     }
 
     formatFallbackTime(iso) {
@@ -2713,8 +2763,7 @@ class HolwertAdmin {
                         <button type="button" class="btn btn-primary btn-sm" id="orgOverviewCsvBtn" disabled><i class="fas fa-download"></i> Download CSV</button>
                         <span id="orgOverviewStatus" class="form-hint" style="margin:0;">Laden…</span>
                     </div>
-                    <div id="orgOverviewVisual" class="org-overview-visual"></div>
-                    <div class="table-container" style="max-height:42vh;overflow:auto;margin-top:1rem;">
+                    <div class="table-container" style="max-height:55vh;overflow:auto;">
                         <table class="data-table" id="orgOverviewTable">
                             <thead>
                                 <tr>
@@ -2813,7 +2862,6 @@ class HolwertAdmin {
     _renderOrganizationsOverview(overlay) {
         const state = this._orgOverviewState || { rows: [], sortKey: 'followers_total', sortDir: 'desc', days: 30 };
         const body = overlay.querySelector('#orgOverviewTableBody');
-        const visualEl = overlay.querySelector('#orgOverviewVisual');
         if (!body) return;
 
         const key = state.sortKey || 'followers_total';
@@ -2826,55 +2874,6 @@ class HolwertAdmin {
             }
             return ((Number(av) || 0) - (Number(bv) || 0)) * dir;
         });
-
-        if (visualEl) {
-            const t = state.totals || {};
-            const days = state.days || 30;
-            const byFollowers = [...(state.rows || [])]
-                .sort((a, b) => (Number(b.followers_total) || 0) - (Number(a.followers_total) || 0))
-                .slice(0, 8);
-            const maxFollowers = Math.max(1, ...byFollowers.map((o) => Number(o.followers_total) || 0));
-            const barRows = byFollowers.length
-                ? byFollowers.map((o) => {
-                    const total = Number(o.followers_total) || 0;
-                    const neu = Number(o.followers_period) || 0;
-                    const width = Math.max(4, Math.round((total / maxFollowers) * 100));
-                    return `<div class="org-overview-bar-row">
-                        <div class="org-overview-bar-label" title="${this.escHtml(o.name || '')}">${this.escHtml(o.name || '—')}</div>
-                        <div class="org-overview-bar-track"><span style="width:${width}%"></span></div>
-                        <div class="org-overview-bar-value">${total}<small>+${neu}</small></div>
-                    </div>`;
-                }).join('')
-                : '<p class="form-hint">Nog geen volgersdata.</p>';
-
-            visualEl.innerHTML = `
-                <div class="org-overview-cards">
-                    <div class="org-overview-card org-overview-card--followers">
-                        <div class="org-overview-card__label">Volgers totaal</div>
-                        <div class="org-overview-card__value">${t.followers_total ?? 0}</div>
-                        <div class="org-overview-card__meta">+${t.followers_period ?? 0} in ${days}d</div>
-                    </div>
-                    <div class="org-overview-card org-overview-card--news">
-                        <div class="org-overview-card__label">Nieuws gepubliceerd</div>
-                        <div class="org-overview-card__value">${t.news_total ?? 0}</div>
-                        <div class="org-overview-card__meta">${t.news_period ?? 0} in ${days}d</div>
-                    </div>
-                    <div class="org-overview-card org-overview-card--events">
-                        <div class="org-overview-card__label">Agenda-items</div>
-                        <div class="org-overview-card__value">${t.events_total ?? 0}</div>
-                        <div class="org-overview-card__meta">${t.events_period ?? 0} in ${days}d</div>
-                    </div>
-                    <div class="org-overview-card">
-                        <div class="org-overview-card__label">Organisaties</div>
-                        <div class="org-overview-card__value">${(state.rows || []).length}</div>
-                        <div class="org-overview-card__meta">${(state.rows || []).filter((o) => o.is_approved).length} goedgekeurd</div>
-                    </div>
-                </div>
-                <div class="org-overview-chart">
-                    <h4 class="org-overview-chart__title">Meeste volgers <span>(+ nieuw in ${days}d)</span></h4>
-                    ${barRows}
-                </div>`;
-        }
 
         if (!rows.length) {
             body.innerHTML = '<tr><td colspan="10" class="empty-message">Geen organisaties</td></tr>';

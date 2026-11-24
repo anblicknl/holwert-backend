@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Holwert Dorpsapp - Admin Panel</title>
-    <link rel="stylesheet" href="styles.css?v=20261124-org-overview-visual">
+    <link rel="stylesheet" href="styles.css?v=20261124-dash-top10">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
 <body class="admin-login-open">
@@ -196,6 +196,13 @@
                         <div id="fallbackStatusBody" class="fallback-status-body">
                             <p class="muted">Status laden…</p>
                         </div>
+                    </div>
+                </div>
+                <div class="settings-panel dash-top10-panel">
+                    <h3 class="settings-panel__title"><i class="fas fa-trophy"></i> Top 10 organisaties</h3>
+                    <p class="settings-panel__intro">Meeste volgers · nieuw erbij in de laatste 30 dagen. Uitgebreid overzicht en CSV via Organisaties.</p>
+                    <div id="dashTop10Orgs" class="dash-top10-list">
+                        <p class="muted">Laden…</p>
                     </div>
                 </div>
             </section>
@@ -712,6 +719,6 @@
     </script>
     <!-- Cache-busting query parameter zodat nieuwe app.js altijd wordt opgehaald -->
     <script src="profile-blocks-ui.js?v=20260918-header-icon"></script>
-    <script src="app.js?v=20261124-org-overview-visual"></script>
+    <script src="app.js?v=20261124-dash-top10"></script>
 </body>
 </html>
