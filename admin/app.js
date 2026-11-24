@@ -2713,8 +2713,8 @@ class HolwertAdmin {
                         <button type="button" class="btn btn-primary btn-sm" id="orgOverviewCsvBtn" disabled><i class="fas fa-download"></i> Download CSV</button>
                         <span id="orgOverviewStatus" class="form-hint" style="margin:0;">Laden…</span>
                     </div>
-                    <div id="orgOverviewTotals" class="form-hint" style="margin-bottom:0.75rem;"></div>
-                    <div class="table-container" style="max-height:60vh;overflow:auto;">
+                    <div id="orgOverviewVisual" class="org-overview-visual"></div>
+                    <div class="table-container" style="max-height:42vh;overflow:auto;margin-top:1rem;">
                         <table class="data-table" id="orgOverviewTable">
                             <thead>
                                 <tr>
@@ -2813,7 +2813,7 @@ class HolwertAdmin {
     _renderOrganizationsOverview(overlay) {
         const state = this._orgOverviewState || { rows: [], sortKey: 'followers_total', sortDir: 'desc', days: 30 };
         const body = overlay.querySelector('#orgOverviewTableBody');
-        const totalsEl = overlay.querySelector('#orgOverviewTotals');
+        const visualEl = overlay.querySelector('#orgOverviewVisual');
         if (!body) return;
 
         const key = state.sortKey || 'followers_total';
@@ -2827,12 +2827,53 @@ class HolwertAdmin {
             return ((Number(av) || 0) - (Number(bv) || 0)) * dir;
         });
 
-        if (totalsEl) {
+        if (visualEl) {
             const t = state.totals || {};
-            totalsEl.textContent =
-                `Totaal volgers: ${t.followers_total ?? 0} · nieuw in ${state.days}d: ${t.followers_period ?? 0} · ` +
-                `nieuws: ${t.news_total ?? 0} (${t.news_period ?? 0} in periode) · ` +
-                `agenda: ${t.events_total ?? 0} (${t.events_period ?? 0} in periode)`;
+            const days = state.days || 30;
+            const byFollowers = [...(state.rows || [])]
+                .sort((a, b) => (Number(b.followers_total) || 0) - (Number(a.followers_total) || 0))
+                .slice(0, 8);
+            const maxFollowers = Math.max(1, ...byFollowers.map((o) => Number(o.followers_total) || 0));
+            const barRows = byFollowers.length
+                ? byFollowers.map((o) => {
+                    const total = Number(o.followers_total) || 0;
+                    const neu = Number(o.followers_period) || 0;
+                    const width = Math.max(4, Math.round((total / maxFollowers) * 100));
+                    return `<div class="org-overview-bar-row">
+                        <div class="org-overview-bar-label" title="${this.escHtml(o.name || '')}">${this.escHtml(o.name || '—')}</div>
+                        <div class="org-overview-bar-track"><span style="width:${width}%"></span></div>
+                        <div class="org-overview-bar-value">${total}<small>+${neu}</small></div>
+                    </div>`;
+                }).join('')
+                : '<p class="form-hint">Nog geen volgersdata.</p>';
+
+            visualEl.innerHTML = `
+                <div class="org-overview-cards">
+                    <div class="org-overview-card org-overview-card--followers">
+                        <div class="org-overview-card__label">Volgers totaal</div>
+                        <div class="org-overview-card__value">${t.followers_total ?? 0}</div>
+                        <div class="org-overview-card__meta">+${t.followers_period ?? 0} in ${days}d</div>
+                    </div>
+                    <div class="org-overview-card org-overview-card--news">
+                        <div class="org-overview-card__label">Nieuws gepubliceerd</div>
+                        <div class="org-overview-card__value">${t.news_total ?? 0}</div>
+                        <div class="org-overview-card__meta">${t.news_period ?? 0} in ${days}d</div>
+                    </div>
+                    <div class="org-overview-card org-overview-card--events">
+                        <div class="org-overview-card__label">Agenda-items</div>
+                        <div class="org-overview-card__value">${t.events_total ?? 0}</div>
+                        <div class="org-overview-card__meta">${t.events_period ?? 0} in ${days}d</div>
+                    </div>
+                    <div class="org-overview-card">
+                        <div class="org-overview-card__label">Organisaties</div>
+                        <div class="org-overview-card__value">${(state.rows || []).length}</div>
+                        <div class="org-overview-card__meta">${(state.rows || []).filter((o) => o.is_approved).length} goedgekeurd</div>
+                    </div>
+                </div>
+                <div class="org-overview-chart">
+                    <h4 class="org-overview-chart__title">Meeste volgers <span>(+ nieuw in ${days}d)</span></h4>
+                    ${barRows}
+                </div>`;
         }
 
         if (!rows.length) {

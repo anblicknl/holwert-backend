@@ -2781,33 +2781,30 @@
             });
     }
 
-    async function loadOverview(periodDays = 30) {
+    async function loadOverview() {
         const container = document.getElementById('overviewContent');
         const sidebar   = document.getElementById('sidebarStats');
         if (!container) return;
 
-        const days = Math.min(Math.max(parseInt(periodDays, 10) || 30, 1), 365);
         container.innerHTML = '<p class="form-hint state-message">Statistieken laden…</p>';
 
         try {
             const orgId = organization?.id;
             const headers = authHeaders();
 
-            const [newsRes, eventsRes, followersRes, statsRes] = await Promise.all([
+            const [newsRes, eventsRes, followersRes] = await Promise.all([
                 fetch(`${apiBase}/org/news?limit=200`, { headers }),
                 fetch(`${apiBase}/org/events?limit=200`, { headers }),
                 orgId ? fetch(`${apiBase}/organizations/${orgId}/followers/count`) : Promise.resolve(null),
-                fetch(`${apiBase}/org/stats?days=${days}`, { headers }),
             ]);
 
             const newsData     = newsRes.ok     ? await newsRes.json()     : {};
             const eventsData   = eventsRes.ok   ? await eventsRes.json()   : {};
             const followersData = (followersRes && followersRes.ok) ? await followersRes.json() : { count: 0 };
-            const periodStats = statsRes.ok ? await statsRes.json().catch(() => ({})) : {};
 
             const allNews    = newsData.news   || [];
             const allEvents  = eventsData.events || [];
-            const followers  = followersData.count ?? periodStats.followers_total ?? 0;
+            const followers  = followersData.count ?? 0;
 
             const published  = allNews.filter(n => n.is_published !== false).length;
             const drafts     = allNews.length - published;
@@ -2861,19 +2858,6 @@
             };
 
             const orgName = escapeHtml(organization?.name || 'Jouw organisatie');
-            const followersPeriod = periodStats.followers_period ?? 0;
-            const newsPeriod = periodStats.news_period ?? 0;
-            const eventsPeriod = periodStats.events_period ?? 0;
-            const newsTotal = periodStats.news_total ?? published;
-            const eventsTotal = periodStats.events_total ?? allEvents.length;
-            const pct = (part, total) => {
-                const t = Number(total) || 0;
-                if (t <= 0) return 0;
-                return Math.min(100, Math.round((Number(part) || 0) * 100 / t));
-            };
-            const periodOptions = [7, 30, 90, 365]
-                .map((d) => `<option value="${d}" ${d === days ? 'selected' : ''}>${d} dagen</option>`)
-                .join('');
 
             container.innerHTML = `
                 <div class="overview-welcome">
@@ -2907,35 +2891,6 @@
                         <div class="stat-body">
                             <div class="stat-value">${past}</div>
                             <div class="stat-label">Evenement${past === 1 ? '' : 'en'} geweest</div>
-                        </div>
-                    </div>
-                </div>
-                <div class="overview-period">
-                    <div class="overview-period__head">
-                        <h4><i class="fas fa-chart-line"></i> Activiteit in periode</h4>
-                        <label class="overview-period__select">
-                            <span class="visually-hidden">Periode</span>
-                            <select id="overviewPeriodDays">${periodOptions}</select>
-                        </label>
-                    </div>
-                    <div class="overview-period__grid">
-                        <div class="period-card period-card--followers" data-goto-followers="1" role="button" tabindex="0" title="Bekijk volgers">
-                            <div class="period-card__label">Nieuwe volgers</div>
-                            <div class="period-card__value">+${followersPeriod}</div>
-                            <div class="period-card__meta">van ${followers} totaal</div>
-                            <div class="period-bar" aria-hidden="true"><span style="width:${pct(followersPeriod, followers)}%"></span></div>
-                        </div>
-                        <div class="period-card period-card--news">
-                            <div class="period-card__label">Nieuws geplaatst</div>
-                            <div class="period-card__value">${newsPeriod}</div>
-                            <div class="period-card__meta">van ${newsTotal} gepubliceerd</div>
-                            <div class="period-bar" aria-hidden="true"><span style="width:${pct(newsPeriod, newsTotal)}%"></span></div>
-                        </div>
-                        <div class="period-card period-card--events">
-                            <div class="period-card__label">Agenda toegevoegd</div>
-                            <div class="period-card__value">${eventsPeriod}</div>
-                            <div class="period-card__meta">van ${eventsTotal} evenementen</div>
-                            <div class="period-bar" aria-hidden="true"><span style="width:${pct(eventsPeriod, eventsTotal)}%"></span></div>
                         </div>
                     </div>
                 </div>
@@ -2998,10 +2953,6 @@
             document.getElementById('sidebarStats')?.querySelectorAll('[data-goto-followers]').forEach((el) => {
                 const go = () => navigateToSection('followers');
                 el.addEventListener('click', go);
-            });
-            container.querySelector('#overviewPeriodDays')?.addEventListener('change', (e) => {
-                const next = parseInt(e.target.value, 10) || 30;
-                void loadOverview(next);
             });
         } catch (err) {
             container.innerHTML = '<p class="form-hint state-message state-message--error">Kon statistieken niet laden.</p>';

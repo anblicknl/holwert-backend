@@ -9692,66 +9692,6 @@ app.get('/api/org/followers', authenticateToken, requireOrgPortal, async (req, r
   }
 });
 
-/** Eigen organisatie: totalen + activiteit in periode (default 30 dagen). */
-app.get('/api/org/stats', authenticateToken, requireOrgPortal, async (req, res) => {
-  try {
-    await pruneOrphanFollows();
-    const orgId = req.organizationId;
-    const daysRaw = parseInt(req.query.days, 10);
-    const days = Number.isFinite(daysRaw) ? Math.min(Math.max(daysRaw, 1), 365) : 30;
-
-    const result = await executeQuery(
-      `SELECT
-         (
-           SELECT COUNT(DISTINCT f.user_id)
-           FROM follows f
-           INNER JOIN users u ON u.id = f.user_id
-           WHERE f.organization_id = ?
-         ) AS followers_total,
-         (
-           SELECT COUNT(DISTINCT f.user_id)
-           FROM follows f
-           INNER JOIN users u ON u.id = f.user_id
-           WHERE f.organization_id = ?
-             AND f.created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
-         ) AS followers_period,
-         (
-           SELECT COUNT(*) FROM news n
-           WHERE n.organization_id = ? AND n.is_published = true
-         ) AS news_total,
-         (
-           SELECT COUNT(*) FROM news n
-           WHERE n.organization_id = ?
-             AND n.is_published = true
-             AND COALESCE(n.published_at, n.created_at) >= DATE_SUB(NOW(), INTERVAL ? DAY)
-         ) AS news_period,
-         (
-           SELECT COUNT(*) FROM events e WHERE e.organization_id = ?
-         ) AS events_total,
-         (
-           SELECT COUNT(*) FROM events e
-           WHERE e.organization_id = ?
-             AND COALESCE(e.created_at, e.event_date) >= DATE_SUB(NOW(), INTERVAL ? DAY)
-         ) AS events_period`,
-      [orgId, orgId, days, orgId, orgId, days, orgId, orgId, days],
-    );
-    const row = result.rows?.[0] || {};
-    res.json({
-      days,
-      generated_at: new Date().toISOString(),
-      followers_total: parseInt(row.followers_total, 10) || 0,
-      followers_period: parseInt(row.followers_period, 10) || 0,
-      news_total: parseInt(row.news_total, 10) || 0,
-      news_period: parseInt(row.news_period, 10) || 0,
-      events_total: parseInt(row.events_total, 10) || 0,
-      events_period: parseInt(row.events_period, 10) || 0,
-    });
-  } catch (error) {
-    console.error('GET /api/org/stats error:', error);
-    res.status(500).json({ error: 'Kon statistieken niet ophalen', message: error.message });
-  }
-});
-
 // Privacy statement per organisatie
 app.get('/api/organizations/:id/privacy', async (req, res) => {
   try {

@@ -2928,3 +2928,105 @@ input, select, textarea {
 .admin-event-preview-body {
     padding: 1.5rem;
 }
+
+/* Organisatie-overzicht (admin modal) */
+.org-overview-visual {
+    display: grid;
+    gap: 1rem;
+}
+.org-overview-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 0.75rem;
+}
+.org-overview-card {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 0.9rem 1rem;
+}
+.org-overview-card__label {
+    font-size: 0.78rem;
+    color: #64748b;
+    font-weight: 500;
+}
+.org-overview-card__value {
+    font-size: 1.65rem;
+    font-weight: 700;
+    line-height: 1.15;
+    margin: 0.2rem 0 0.15rem;
+    color: #0f172a;
+}
+.org-overview-card--followers .org-overview-card__value { color: #e0335b; }
+.org-overview-card--news .org-overview-card__value { color: #3b5bdb; }
+.org-overview-card--events .org-overview-card__value { color: #2f9e44; }
+.org-overview-card__meta {
+    font-size: 0.75rem;
+    color: #94a3b8;
+}
+.org-overview-chart {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 0.95rem 1rem 1rem;
+}
+.org-overview-chart__title {
+    margin: 0 0 0.75rem;
+    font-size: 0.95rem;
+    color: #0f172a;
+}
+.org-overview-chart__title span {
+    color: #94a3b8;
+    font-weight: 400;
+    font-size: 0.82rem;
+}
+.org-overview-bar-row {
+    display: grid;
+    grid-template-columns: minmax(7rem, 11rem) 1fr auto;
+    gap: 0.65rem;
+    align-items: center;
+    margin-bottom: 0.45rem;
+}
+.org-overview-bar-label {
+    font-size: 0.82rem;
+    color: #334155;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.org-overview-bar-track {
+    height: 8px;
+    border-radius: 999px;
+    background: #e2e8f0;
+    overflow: hidden;
+}
+.org-overview-bar-track span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #e0335b, #f472b6);
+}
+.org-overview-bar-value {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #0f172a;
+    min-width: 3.5rem;
+    text-align: right;
+}
+.org-overview-bar-value small {
+    margin-left: 0.3rem;
+    color: #e0335b;
+    font-weight: 500;
+}
+@media (max-width: 700px) {
+    .org-overview-bar-row {
+        grid-template-columns: 1fr auto;
+        grid-template-areas:
+            "label value"
+            "track track";
+    }
+    .org-overview-bar-label { grid-area: label; }
+    .org-overview-bar-value { grid-area: value; }
+    .org-overview-bar-track { grid-area: track; }
+}
+
