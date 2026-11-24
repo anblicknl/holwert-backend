@@ -409,6 +409,13 @@ class HolwertAdmin {
             });
         }
 
+        const orgOverviewBtn = document.getElementById('orgOverviewBtn');
+        if (orgOverviewBtn) {
+            orgOverviewBtn.addEventListener('click', () => {
+                void this.openOrganizationsOverviewModal();
+            });
+        }
+
         const migrateOrgLogosBtn = document.getElementById('migrateOrgLogosBtn');
         if (migrateOrgLogosBtn) {
             migrateOrgLogosBtn.addEventListener('click', () => this.migrateEmbeddedLogos({ manual: true }));
@@ -2676,6 +2683,236 @@ class HolwertAdmin {
         if (search) search.addEventListener('input', run);
         if (cat) cat.addEventListener('change', run);
         if (account) account.addEventListener('change', run);
+    }
+
+    async openOrganizationsOverviewModal(days = 30) {
+        const periodDays = Math.min(Math.max(parseInt(days, 10) || 30, 1), 365);
+        document.querySelectorAll('.modal-overlay').forEach((el) => {
+            if (el.querySelector('#orgOverviewTable')) el.remove();
+        });
+
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.style.display = 'flex';
+        overlay.innerHTML = `
+            <div class="modal-content modal-large" style="max-width:1100px;width:96vw;">
+                <div class="modal-header">
+                    <h3><i class="fas fa-chart-bar"></i> Organisatie-overzicht</h3>
+                    <button type="button" class="modal-close" data-modal-close aria-label="Sluiten"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="modal-body">
+                    <div class="org-overview-toolbar" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:1rem;">
+                        <label for="orgOverviewDays" style="margin:0;font-weight:500;">Periode</label>
+                        <select id="orgOverviewDays" style="min-width:8rem;">
+                            <option value="7" ${periodDays === 7 ? 'selected' : ''}>7 dagen</option>
+                            <option value="30" ${periodDays === 30 ? 'selected' : ''}>30 dagen</option>
+                            <option value="90" ${periodDays === 90 ? 'selected' : ''}>90 dagen</option>
+                            <option value="365" ${periodDays === 365 ? 'selected' : ''}>365 dagen</option>
+                        </select>
+                        <button type="button" class="btn btn-secondary btn-sm" id="orgOverviewReloadBtn"><i class="fas fa-sync"></i> Vernieuwen</button>
+                        <button type="button" class="btn btn-primary btn-sm" id="orgOverviewCsvBtn" disabled><i class="fas fa-download"></i> Download CSV</button>
+                        <span id="orgOverviewStatus" class="form-hint" style="margin:0;">Laden…</span>
+                    </div>
+                    <div id="orgOverviewTotals" class="form-hint" style="margin-bottom:0.75rem;"></div>
+                    <div class="table-container" style="max-height:60vh;overflow:auto;">
+                        <table class="data-table" id="orgOverviewTable">
+                            <thead>
+                                <tr>
+                                    <th data-sort="name">Naam</th>
+                                    <th data-sort="category">Categorie</th>
+                                    <th data-sort="followers_total">Volgers</th>
+                                    <th data-sort="followers_period">Nieuw (periode)</th>
+                                    <th data-sort="news_total">Nieuws</th>
+                                    <th data-sort="news_period">Nieuws (periode)</th>
+                                    <th data-sort="events_total">Agenda</th>
+                                    <th data-sort="events_period">Agenda (periode)</th>
+                                    <th data-sort="dashboard_accounts">Accounts</th>
+                                    <th data-sort="is_approved">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="orgOverviewTableBody">
+                                <tr><td colspan="10" class="empty-message">Laden…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-modal-close>Sluiten</button>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+
+        const close = () => overlay.remove();
+        overlay.querySelectorAll('[data-modal-close], .modal-close').forEach((el) => {
+            el.addEventListener('click', close);
+        });
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+        overlay.querySelector('.modal-content')?.addEventListener('click', (e) => e.stopPropagation());
+
+        this._orgOverviewState = { days: periodDays, rows: [], sortKey: 'followers_total', sortDir: 'desc' };
+
+        const load = async () => {
+            const daysSel = overlay.querySelector('#orgOverviewDays');
+            const d = parseInt(daysSel?.value || '30', 10) || 30;
+            this._orgOverviewState.days = d;
+            const status = overlay.querySelector('#orgOverviewStatus');
+            const body = overlay.querySelector('#orgOverviewTableBody');
+            const csvBtn = overlay.querySelector('#orgOverviewCsvBtn');
+            if (status) status.textContent = 'Laden…';
+            if (csvBtn) csvBtn.disabled = true;
+            if (body) body.innerHTML = '<tr><td colspan="10" class="empty-message">Laden…</td></tr>';
+            try {
+                const res = await fetch(`${this.apiBaseUrl}/admin/organizations/overview?days=${d}`, {
+                    headers: { Authorization: `Bearer ${this.token}` },
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || data.message || 'Laden mislukt');
+                this._orgOverviewState.rows = Array.isArray(data.organizations) ? data.organizations : [];
+                this._orgOverviewState.totals = data.totals || {};
+                this._orgOverviewState.days = data.days || d;
+                this._renderOrganizationsOverview(overlay);
+                if (csvBtn) csvBtn.disabled = false;
+                if (status) {
+                    const when = data.generated_at
+                        ? new Date(data.generated_at).toLocaleString('nl-NL')
+                        : '';
+                    status.textContent = `${this._orgOverviewState.rows.length} organisaties${when ? ` · ${when}` : ''}`;
+                }
+            } catch (err) {
+                if (body) {
+                    body.innerHTML = `<tr><td colspan="10" class="empty-message">Fout: ${this.escHtml(err.message || 'onbekend')}</td></tr>`;
+                }
+                if (status) status.textContent = 'Mislukt';
+                this.showNotification(err.message || 'Overzicht laden mislukt', 'error');
+            }
+        };
+
+        overlay.querySelector('#orgOverviewReloadBtn')?.addEventListener('click', () => void load());
+        overlay.querySelector('#orgOverviewDays')?.addEventListener('change', () => void load());
+        overlay.querySelector('#orgOverviewCsvBtn')?.addEventListener('click', () => {
+            this.downloadOrganizationsOverviewCsv();
+        });
+        overlay.querySelectorAll('#orgOverviewTable thead th[data-sort]').forEach((th) => {
+            th.style.cursor = 'pointer';
+            th.addEventListener('click', () => {
+                const key = th.getAttribute('data-sort');
+                if (!key) return;
+                if (this._orgOverviewState.sortKey === key) {
+                    this._orgOverviewState.sortDir = this._orgOverviewState.sortDir === 'asc' ? 'desc' : 'asc';
+                } else {
+                    this._orgOverviewState.sortKey = key;
+                    this._orgOverviewState.sortDir = key === 'name' || key === 'category' ? 'asc' : 'desc';
+                }
+                this._renderOrganizationsOverview(overlay);
+            });
+        });
+
+        await load();
+    }
+
+    _renderOrganizationsOverview(overlay) {
+        const state = this._orgOverviewState || { rows: [], sortKey: 'followers_total', sortDir: 'desc', days: 30 };
+        const body = overlay.querySelector('#orgOverviewTableBody');
+        const totalsEl = overlay.querySelector('#orgOverviewTotals');
+        if (!body) return;
+
+        const key = state.sortKey || 'followers_total';
+        const dir = state.sortDir === 'asc' ? 1 : -1;
+        const rows = [...(state.rows || [])].sort((a, b) => {
+            const av = a?.[key];
+            const bv = b?.[key];
+            if (typeof av === 'string' || typeof bv === 'string') {
+                return String(av || '').localeCompare(String(bv || ''), 'nl', { sensitivity: 'base' }) * dir;
+            }
+            return ((Number(av) || 0) - (Number(bv) || 0)) * dir;
+        });
+
+        if (totalsEl) {
+            const t = state.totals || {};
+            totalsEl.textContent =
+                `Totaal volgers: ${t.followers_total ?? 0} · nieuw in ${state.days}d: ${t.followers_period ?? 0} · ` +
+                `nieuws: ${t.news_total ?? 0} (${t.news_period ?? 0} in periode) · ` +
+                `agenda: ${t.events_total ?? 0} (${t.events_period ?? 0} in periode)`;
+        }
+
+        if (!rows.length) {
+            body.innerHTML = '<tr><td colspan="10" class="empty-message">Geen organisaties</td></tr>';
+            return;
+        }
+
+        body.innerHTML = rows.map((o) => `
+            <tr>
+                <td>${this.escHtml(o.name || '—')}${o.is_ondernemer ? ' <span class="status-badge status-published">Ondernemer</span>' : ''}</td>
+                <td>${this.escHtml(orgCategoryLabel(o.category))}</td>
+                <td>${o.followers_total ?? 0}</td>
+                <td>${o.followers_period ?? 0}</td>
+                <td>${o.news_total ?? 0}</td>
+                <td>${o.news_period ?? 0}</td>
+                <td>${o.events_total ?? 0}</td>
+                <td>${o.events_period ?? 0}</td>
+                <td>${o.dashboard_accounts ?? 0}</td>
+                <td><span class="status-badge ${o.is_approved ? 'status-published' : 'status-draft'}">${o.is_approved ? 'Goedgekeurd' : 'In afwachting'}</span></td>
+            </tr>
+        `).join('');
+    }
+
+    downloadOrganizationsOverviewCsv() {
+        const state = this._orgOverviewState;
+        const rows = Array.isArray(state?.rows) ? state.rows : [];
+        if (!rows.length) {
+            this.showNotification('Geen data om te downloaden', 'error');
+            return;
+        }
+        const days = state.days || 30;
+        const esc = (v) => {
+            const s = String(v ?? '');
+            if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+            return s;
+        };
+        const header = [
+            'id',
+            'naam',
+            'categorie',
+            'ondernemer',
+            'goedgekeurd',
+            'volgers_totaal',
+            `volgers_nieuw_${days}d`,
+            'nieuws_totaal',
+            `nieuws_${days}d`,
+            'agenda_totaal',
+            `agenda_${days}d`,
+            'dashboard_accounts',
+            'aangemaakt',
+        ];
+        const lines = [header.join(',')];
+        for (const o of rows) {
+            lines.push([
+                o.id,
+                esc(o.name || ''),
+                esc(orgCategoryLabel(o.category)),
+                o.is_ondernemer ? 'ja' : 'nee',
+                o.is_approved ? 'ja' : 'nee',
+                o.followers_total ?? 0,
+                o.followers_period ?? 0,
+                o.news_total ?? 0,
+                o.news_period ?? 0,
+                o.events_total ?? 0,
+                o.events_period ?? 0,
+                o.dashboard_accounts ?? 0,
+                esc(o.created_at || ''),
+            ].join(','));
+        }
+        const blob = new Blob([`\uFEFF${lines.join('\n')}`], { type: 'text/csv;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const stamp = new Date().toISOString().slice(0, 10);
+        a.href = url;
+        a.download = `holwert-organisaties-overzicht-${days}d-${stamp}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        this.showNotification('CSV gedownload', 'success');
     }
 
     async loadOrganizations() {

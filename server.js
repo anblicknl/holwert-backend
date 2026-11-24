@@ -5671,6 +5671,114 @@ app.delete('/api/admin/organizations/:id/profile-blocks/:blockId', authenticateT
   }
 });
 
+/**
+ * Overzicht alle organisaties: volgers + nieuws/events (totaal en recente periode).
+ * Voor admin-tabel + CSV. Dagen via ?days=30 (1–365, default 30).
+ */
+app.get('/api/admin/organizations/overview', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    await ensureOrgColumns();
+    await pruneOrphanFollows();
+    const daysRaw = parseInt(req.query.days, 10);
+    const days = Number.isFinite(daysRaw) ? Math.min(Math.max(daysRaw, 1), 365) : 30;
+
+    const result = await executeQuery(
+      `SELECT
+         o.id,
+         o.name,
+         o.category,
+         o.is_ondernemer,
+         o.is_approved,
+         o.created_at,
+         (
+           SELECT COUNT(DISTINCT f.user_id)
+           FROM follows f
+           INNER JOIN users u ON u.id = f.user_id
+           WHERE f.organization_id = o.id
+         ) AS followers_total,
+         (
+           SELECT COUNT(DISTINCT f.user_id)
+           FROM follows f
+           INNER JOIN users u ON u.id = f.user_id
+           WHERE f.organization_id = o.id
+             AND f.created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+         ) AS followers_period,
+         (
+           SELECT COUNT(*) FROM news n
+           WHERE n.organization_id = o.id AND n.is_published = true
+         ) AS news_total,
+         (
+           SELECT COUNT(*) FROM news n
+           WHERE n.organization_id = o.id
+             AND n.is_published = true
+             AND COALESCE(n.published_at, n.created_at) >= DATE_SUB(NOW(), INTERVAL ? DAY)
+         ) AS news_period,
+         (
+           SELECT COUNT(*) FROM events e WHERE e.organization_id = o.id
+         ) AS events_total,
+         (
+           SELECT COUNT(*) FROM events e
+           WHERE e.organization_id = o.id
+             AND COALESCE(e.created_at, e.event_date) >= DATE_SUB(NOW(), INTERVAL ? DAY)
+         ) AS events_period,
+         (
+           SELECT COUNT(*) FROM users u
+           WHERE u.organization_id = o.id
+             AND LOWER(TRIM(COALESCE(u.role, ''))) NOT IN ('admin', 'superadmin', 'editor')
+         ) AS dashboard_accounts
+       FROM organizations o
+       ORDER BY followers_total DESC, o.name ASC`,
+      [days, days, days],
+    );
+
+    const organizations = (result.rows || []).map((row) => ({
+      id: row.id,
+      name: row.name || '',
+      category: row.category || '',
+      is_ondernemer: !!(row.is_ondernemer === true || row.is_ondernemer === 1 || row.is_ondernemer === '1'),
+      is_approved: !!(row.is_approved === true || row.is_approved === 1 || row.is_approved === '1'),
+      created_at: row.created_at || null,
+      followers_total: parseInt(row.followers_total, 10) || 0,
+      followers_period: parseInt(row.followers_period, 10) || 0,
+      news_total: parseInt(row.news_total, 10) || 0,
+      news_period: parseInt(row.news_period, 10) || 0,
+      events_total: parseInt(row.events_total, 10) || 0,
+      events_period: parseInt(row.events_period, 10) || 0,
+      dashboard_accounts: parseInt(row.dashboard_accounts, 10) || 0,
+    }));
+
+    const totals = organizations.reduce(
+      (acc, o) => {
+        acc.followers_total += o.followers_total;
+        acc.followers_period += o.followers_period;
+        acc.news_total += o.news_total;
+        acc.news_period += o.news_period;
+        acc.events_total += o.events_total;
+        acc.events_period += o.events_period;
+        return acc;
+      },
+      {
+        followers_total: 0,
+        followers_period: 0,
+        news_total: 0,
+        news_period: 0,
+        events_total: 0,
+        events_period: 0,
+      },
+    );
+
+    res.json({
+      days,
+      generated_at: new Date().toISOString(),
+      totals,
+      organizations,
+    });
+  } catch (error) {
+    console.error('[GET /api/admin/organizations/overview] Error:', error);
+    res.status(500).json({ error: 'Failed to load organization overview', message: error.message });
+  }
+});
+
 // Get single organization (admin) - MUST BE BEFORE /api/admin/organizations (without :id)
 app.get('/api/admin/organizations/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
