@@ -1700,10 +1700,10 @@
                                 ${imageEditable}
                             </div>
                             <div class="form-group">
-                                <label>YouTube-video (optioneel)</label>
+                                <label>Video (optioneel)</label>
                                 ${!isPreview
-                                    ? `<input type="url" id="newsYoutubeUrl" placeholder="https://www.youtube.com/watch?v=... of https://youtu.be/..." value="${escapeHtml(article?.youtube_url || '')}">
-                                       <p class="form-hint">Als je een YouTube-link invult, wordt de video als Hero getoond in de app (vervangt de afbeelding).</p>`
+                                    ? `<input type="url" id="newsYoutubeUrl" placeholder="YouTube, Shorts of Instagram-reel/post" value="${escapeHtml(article?.youtube_url || '')}">
+                                       <p class="form-hint">Plak een YouTube-, Shorts- of Instagram-link. Die video wordt als Hero getoond in de app (vervangt de afbeelding).</p>`
                                     : (article?.youtube_url
                                         ? `<a href="${escapeHtml(article.youtube_url)}" target="_blank" rel="noopener">${escapeHtml(article.youtube_url)}</a>`
                                         : '<p class="form-hint">Geen video</p>')

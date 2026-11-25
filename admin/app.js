@@ -5158,11 +5158,11 @@ class HolwertAdmin {
                                     ` : ''}
                                 </div>
                                 <div class="form-group">
-                                    <label for="newsYoutubeUrl">YouTube-video (optioneel)</label>
+                                    <label for="newsYoutubeUrl">Video (optioneel)</label>
                                     <input type="url" id="newsYoutubeUrl" name="youtube_url"
                                         value="${article?.youtube_url || ''}"
-                                        placeholder="https://www.youtube.com/watch?v=... of https://youtu.be/...">
-                                    <small class="form-hint">Als je een YouTube-link invult, wordt de video getoond als Hero-afbeelding in de app. De afbeelding hierboven wordt dan niet gebruikt.</small>
+                                        placeholder="YouTube, Shorts of Instagram-reel/post">
+                                    <small class="form-hint">Plak een YouTube-, Shorts- of Instagram-link. Die video wordt als Hero getoond in de app (vervangt de afbeelding hierboven).</small>
                                 </div>
                                 <div class="form-group">
                                     <label for="newsPdfFile">PDF-bijlage (optioneel)</label>
