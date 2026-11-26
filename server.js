@@ -1934,7 +1934,7 @@ app.get('/api/app/bootstrap', async (req, res) => {
       LEFT JOIN organizations o ON n.organization_id = o.id
       ${userId ? 'LEFT JOIN bookmarks b ON b.news_id = n.id AND b.user_id = ?' : ''}
       WHERE ${sqlNewsPubliclyVisible('n')}
-      ORDER BY COALESCE(n.published_at, n.created_at) DESC LIMIT 10 OFFSET 0`;
+      ORDER BY COALESCE(n.published_at, n.created_at) DESC, n.id DESC LIMIT 10 OFFSET 0`;
       if (userId) newsParams.push(userId);
 
       const orgFields = `id, name, description, logo_url, brand_color, category, is_ondernemer,
@@ -2171,7 +2171,7 @@ app.get('/api/news', async (req, res) => {
       query += ` AND (n.title LIKE ? OR n.excerpt LIKE ? OR n.content LIKE ? OR o.name LIKE ?)`;
       params.push(s, s, s, s);
     }
-    query += ` ORDER BY COALESCE(n.published_at, n.created_at) DESC LIMIT ? OFFSET ?`;
+    query += ` ORDER BY COALESCE(n.published_at, n.created_at) DESC, n.id DESC LIMIT ? OFFSET ?`;
     params.push(limitValue, offset);
 
     const countParams = [];
@@ -2291,8 +2291,8 @@ app.get('/api/news/related', async (req, res) => {
       query += ` AND n.id <> ?`;
     }
     params.push(parseInt(limit));
-    // Sorteer op published_at (publicatiedatum), fallback naar created_at
-    query += ` ORDER BY COALESCE(n.published_at, n.created_at) DESC LIMIT ?`;
+    // Sorteer op published_at (publicatiedatum), fallback naar created_at; id voor stabiele paginering
+    query += ` ORDER BY COALESCE(n.published_at, n.created_at) DESC, n.id DESC LIMIT ?`;
 
     const result = await executeQuery(query, params);
 
@@ -3219,7 +3219,7 @@ app.get('/api/news/head', async (req, res) => {
       LEFT JOIN organizations o ON n.organization_id = o.id
       ${userId ? 'LEFT JOIN bookmarks b ON b.news_id = n.id AND b.user_id = ?' : ''}
       WHERE ${sqlNewsPubliclyVisible('n')}
-      ORDER BY COALESCE(n.published_at, n.created_at) DESC LIMIT ?`;
+      ORDER BY COALESCE(n.published_at, n.created_at) DESC, n.id DESC LIMIT ?`;
       if (userId) newsParams.push(userId);
       newsParams.push(limit);
 
@@ -5135,8 +5135,8 @@ app.get('/api/admin/news', authenticateToken, async (req, res) => {
       query += ` AND n.category = ?`;
     }
 
-    // Sorteer op published_at (publicatiedatum), fallback naar created_at
-    query += ` ORDER BY COALESCE(n.published_at, n.created_at) DESC LIMIT ? OFFSET ?`;
+    // Sorteer op published_at (publicatiedatum), fallback naar created_at; id voor stabiele paginering
+    query += ` ORDER BY COALESCE(n.published_at, n.created_at) DESC, n.id DESC LIMIT ? OFFSET ?`;
     params.push(parseInt(limit));
     params.push(parseInt(offset));
 
@@ -8940,7 +8940,7 @@ app.get('/api/org/news', authenticateToken, requireOrgPortal, async (req, res) =
     const params = [orgId];
     if (status === 'published') { query += ` AND n.is_published = true`; }
     else if (status === 'pending') { query += ` AND n.is_published = false`; }
-    query += ` ORDER BY COALESCE(n.published_at, n.created_at) DESC LIMIT ? OFFSET ?`;
+    query += ` ORDER BY COALESCE(n.published_at, n.created_at) DESC, n.id DESC LIMIT ? OFFSET ?`;
     params.push(parseInt(limit), parseInt(offset));
     const result = await executeQuery(query, params);
     const countResult = await executeQuery(
