@@ -5032,6 +5032,30 @@ class HolwertAdmin {
             ];
             const selectedCategory = article?.category || 'dorpsnieuws';
 
+            let eventsForLink = [];
+            try {
+                const evRes = await fetch(`${this.apiBaseUrl}/admin/events?limit=500`, {
+                    headers: { Authorization: `Bearer ${this.token}` },
+                });
+                if (evRes.ok) {
+                    const evData = await evRes.json();
+                    eventsForLink = (evData.events || []).map((ev) => {
+                        let when = '';
+                        try {
+                            when = ev.event_date
+                                ? new Date(ev.event_date).toLocaleDateString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' })
+                                : '';
+                        } catch (_) {}
+                        return {
+                            ...ev,
+                            _label: `${when ? when + ' · ' : ''}${ev.title || ('#' + ev.id)}`,
+                        };
+                    });
+                }
+            } catch (e) {
+                console.warn('Events laden voor nieuws-koppeling mislukt:', e);
+            }
+
             console.log('🔍 Article object:', article);
             console.log('🔍 Article structure:', JSON.stringify(article, null, 2).substring(0, 500));
             
@@ -5169,6 +5193,25 @@ class HolwertAdmin {
                                     <input type="file" id="newsPdfFile" accept="application/pdf,.pdf" class="file-input">
                                     <small class="form-hint">Wordt in de app als downloadlink onder het artikel getoond (max 15 MB).</small>
                                     ${this.pdfAttachmentControlsHtml(article?.pdf_url, 'newsPdfRemove')}
+                                </div>
+                            </div>
+
+                            <div class="form-block">
+                                <div class="form-block__head">
+                                    <h4 class="form-block__title"><i class="fas fa-calendar-alt" aria-hidden="true"></i> Agenda</h4>
+                                    <p class="form-block__intro">Optioneel. Toont onder het artikel in de app een aanklikbaar agenda-blok (datum, foto, titel).</p>
+                                </div>
+                                <div class="form-group">
+                                    <label for="newsLinkedEvent">Gekoppeld agendapunt</label>
+                                    <select id="newsLinkedEvent" name="linked_event_id">
+                                        <option value="">Geen</option>
+                                        ${eventsForLink.map((ev) => `
+                                            <option value="${ev.id}" ${String(article?.linked_event_id || '') === String(ev.id) ? 'selected' : ''}>
+                                                ${escAttr(ev._label || ev.title || ('#' + ev.id))}
+                                            </option>
+                                        `).join('')}
+                                    </select>
+                                    <small class="form-hint">Kies een agendapunt. Onder het nieuwsbericht verschijnt een agenda-kaart (datum, foto, titel).</small>
                                 </div>
                             </div>
 
@@ -5536,6 +5579,9 @@ class HolwertAdmin {
 
             // YouTube-link meesturen (altijd, ook als leeg om te wissen)
             body.youtube_url = (field('newsYoutubeUrl')?.value || '').trim() || null;
+            // Gekoppeld agendapunt (leeg = ontkoppelen)
+            const linkedEv = (field('newsLinkedEvent')?.value || '').trim();
+            body.linked_event_id = linkedEv ? parseInt(linkedEv, 10) : null;
             // Bronvermelding
             body.source_name = (field('newsSourceName')?.value || '').trim() || null;
             body.source_url  = (field('newsSourceUrl')?.value  || '').trim() || null;

@@ -857,6 +857,50 @@ function isNewsPublishAtInFuture(publishedAt) {
   return t > Date.now() + 45 * 1000;
 }
 
+/** linked_event_id uit request: undefined = niet meegestuurd, null = wissen, number = zetten */
+function normalizeLinkedEventId(v) {
+  if (v === undefined) return undefined;
+  if (v === null || v === '' || v === 'null' || v === false) return null;
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+async function fetchPublicLinkedEvent(linkedEventId) {
+  const id = normalizeLinkedEventId(linkedEventId);
+  if (!id) return null;
+  try {
+    const r = await executeQuery(
+      `SELECT e.id, e.title, e.event_date, e.event_end_date, e.location, e.organization_id, e.image_url,
+              o.name AS organization_name, o.brand_color AS organization_brand_color, o.logo_url AS organization_logo
+       FROM events e
+       LEFT JOIN organizations o ON o.id = e.organization_id
+       WHERE e.id = ? AND (e.is_published = true OR e.is_published = 1)
+       LIMIT 1`,
+      [id]
+    );
+    return r.rows?.[0] || null;
+  } catch (e) {
+    console.warn('[fetchPublicLinkedEvent]', e.message);
+    return null;
+  }
+}
+
+async function assertOrgOwnsLinkedEvent(orgId, linkedEventId) {
+  if (linkedEventId === undefined) return undefined;
+  const id = normalizeLinkedEventId(linkedEventId);
+  if (id === null) return null;
+  const r = await executeQuery(
+    'SELECT id FROM events WHERE id = ? AND organization_id = ? LIMIT 1',
+    [id, orgId]
+  );
+  if (!r.rows?.length) {
+    const err = new Error('Gekoppeld agendapunt hoort niet bij deze organisatie');
+    err.statusCode = 400;
+    throw err;
+  }
+  return id;
+}
+
 let _lastScheduledNewsFlushAt = 0;
 /**
  * Stuur uitgestelde follower-pushes zodra geplande artikelen live mogen.
@@ -1943,6 +1987,7 @@ async function ensureNewsColumns() {
     ['pdf_url',     'VARCHAR(500)'],
     ['reactions_open', 'TINYINT(1) NOT NULL DEFAULT 0'],
     ['followers_notified_at', 'DATETIME NULL'],
+    ['linked_event_id', 'INT NULL'],
   ];
   let addedFollowersNotified = false;
   for (const [col, def] of cols) {
@@ -3223,6 +3268,7 @@ app.get('/api/news/:id', async (req, res) => {
       const result = await executeQuery(`
       SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt,
              n.image_url, n.youtube_url, n.source_name, n.source_url, n.pdf_url, n.reactions_open,
+             n.linked_event_id,
              n.created_at, n.updated_at, 
              COALESCE(n.published_at, n.created_at) as published_at,
              n.category, n.custom_category, n.is_published,
@@ -3272,12 +3318,16 @@ app.get('/api/news/:id', async (req, res) => {
         thumbnail: article.image_url
       };
 
+      const linked_event = await fetchPublicLinkedEvent(article.linked_event_id);
+
       return {
         article: {
           ...article,
           content,
           reactions_open: reactionsOpenFlag(article.reactions_open),
-          image_variants: imageVariants
+          image_variants: imageVariants,
+          linked_event_id: linked_event ? linked_event.id : null,
+          linked_event,
         }
       };
     },
@@ -3492,6 +3542,10 @@ app.post('/api/news', authenticateToken, async (req, res) => {
     pushExtra('source_name', req.body.source_name);
     pushExtra('source_url', req.body.source_url);
     pushExtra('pdf_url', req.body.pdf_url);
+    {
+      const linkedId = normalizeLinkedEventId(req.body.linked_event_id);
+      if (linkedId !== undefined) pushExtra('linked_event_id', linkedId);
+    }
     if (req.body.reactions_open !== undefined) {
       extraSets.push('reactions_open = ?');
       extraVals.push(reactionsOpenFlag(req.body.reactions_open) ? 1 : 0);
@@ -5135,7 +5189,7 @@ app.get('/api/admin/news/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
 
     const result = await executeQuery(`
-      SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt, n.image_url, n.youtube_url, n.source_name, n.source_url, n.pdf_url, n.reactions_open, n.organization_id,
+      SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt, n.image_url, n.youtube_url, n.source_name, n.source_url, n.pdf_url, n.reactions_open, n.linked_event_id, n.organization_id,
              n.created_at, n.updated_at, 
              COALESCE(n.published_at, n.created_at) as published_at,
              n.category, n.custom_category, n.is_published,
@@ -5184,7 +5238,7 @@ app.put('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res)
   try {
     await ensureNewsColumns();
     const { id } = req.params;
-    const { title, content, category, custom_category, organization_id, image_url, youtube_url, source_name, source_url, pdf_url, image_data, is_published, published_at, reactions_open } = req.body;
+    const { title, content, category, custom_category, organization_id, image_url, youtube_url, source_name, source_url, pdf_url, image_data, is_published, published_at, reactions_open, linked_event_id } = req.body;
 
     const prevNews = await executeQuery(
       'SELECT pdf_url, is_published, organization_id FROM news WHERE id = ? LIMIT 1',
@@ -5253,6 +5307,14 @@ app.put('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res)
     if (pdf_url !== undefined) {
       updateFields.push(`pdf_url = ?`);
       values.push(pdf_url || null);
+    }
+
+    {
+      const linkedId = normalizeLinkedEventId(linked_event_id);
+      if (linkedId !== undefined) {
+        updateFields.push(`linked_event_id = ?`);
+        values.push(linkedId);
+      }
     }
 
     if (reactions_open !== undefined) {
@@ -8903,7 +8965,7 @@ app.get('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req, re
     await ensureNewsColumns();
     const orgId = req.organizationId;
     const result = await executeQuery(
-      'SELECT id, title, content, excerpt, category, custom_category, image_url, youtube_url, source_name, source_url, pdf_url, is_published, reactions_open, COALESCE(published_at, created_at) as published_at, organization_id, author_id, created_at, updated_at FROM news WHERE id = ? AND organization_id = ?',
+      'SELECT id, title, content, excerpt, category, custom_category, image_url, youtube_url, source_name, source_url, pdf_url, linked_event_id, is_published, reactions_open, COALESCE(published_at, created_at) as published_at, organization_id, author_id, created_at, updated_at FROM news WHERE id = ? AND organization_id = ?',
       [req.params.id, orgId]
     );
     if (!result.rows?.length) return res.status(404).json({ error: 'Artikel niet gevonden' });
@@ -8919,21 +8981,28 @@ app.post('/api/org/news', authenticateToken, requireOrgPortal, async (req, res) 
     await ensureNewsColumns();
     const orgId = req.organizationId;
     const userId = req.user.userId;
-    const { title, content, category, custom_category, image_url, youtube_url, source_name, source_url, pdf_url, is_published, published_at, reactions_open } = req.body || {};
+    const { title, content, category, custom_category, image_url, youtube_url, source_name, source_url, pdf_url, is_published, published_at, reactions_open, linked_event_id } = req.body || {};
     if (!title) return res.status(400).json({ error: 'title is required' });
     const finalCategory = category || 'dorpsnieuws';
     const finalCustomCategory = finalCategory === 'overig' && custom_category ? String(custom_category).trim() : null;
     const isPublished = is_published === true;
     const reactionsOpen = reactionsOpenFlag(reactions_open) ? 1 : 0;
+    let linkedEventId = null;
+    try {
+      const checked = await assertOrgOwnsLinkedEvent(orgId, linked_event_id);
+      linkedEventId = checked === undefined ? null : checked;
+    } catch (linkErr) {
+      return res.status(linkErr.statusCode || 400).json({ error: linkErr.message });
+    }
     const pubAt = (published_at != null && String(published_at).trim() !== '')
       ? toMysqlDateTime(published_at)
       : null;
 
     let insertSql;
     let insertParams;
-    const baseCols = 'title, content, excerpt, author_id, organization_id, image_url, youtube_url, source_name, source_url, pdf_url, category, custom_category, is_published, reactions_open';
-    const baseVals = '?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?';
-    const baseParams = [title || '', content || '', null, userId, orgId, image_url || null, youtube_url || null, source_name || null, source_url || null, pdf_url || null, finalCategory, finalCustomCategory, isPublished, reactionsOpen];
+    const baseCols = 'title, content, excerpt, author_id, organization_id, image_url, youtube_url, source_name, source_url, pdf_url, linked_event_id, category, custom_category, is_published, reactions_open';
+    const baseVals = '?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?';
+    const baseParams = [title || '', content || '', null, userId, orgId, image_url || null, youtube_url || null, source_name || null, source_url || null, pdf_url || null, linkedEventId, finalCategory, finalCustomCategory, isPublished, reactionsOpen];
 
     if (pubAt) {
       insertSql = `INSERT INTO news (${baseCols}, published_at, created_at, updated_at) VALUES (${baseVals}, ?, NOW(), NOW())`;
@@ -8982,11 +9051,17 @@ app.put('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req, re
     await ensureNewsColumns();
     const orgId = req.organizationId;
     const id = parseInt(req.params.id);
-    const { title, content, category, custom_category, image_url, youtube_url, source_name, source_url, pdf_url, is_published, published_at, reactions_open } = req.body || {};
+    const { title, content, category, custom_category, image_url, youtube_url, source_name, source_url, pdf_url, is_published, published_at, reactions_open, linked_event_id } = req.body || {};
     const existing = await executeQuery('SELECT id, pdf_url, is_published FROM news WHERE id = ? AND organization_id = ?', [id, orgId]);
     if (!existing.rows?.length) return res.status(404).json({ error: 'Artikel niet gevonden' });
     const wasPublished = !!existing.rows[0].is_published;
     const oldPdfUrl = existing.rows[0].pdf_url || null;
+    let linkedEventId;
+    try {
+      linkedEventId = await assertOrgOwnsLinkedEvent(orgId, linked_event_id);
+    } catch (linkErr) {
+      return res.status(linkErr.statusCode || 400).json({ error: linkErr.message });
+    }
     const pubAt = (published_at != null && String(published_at).trim() !== '')
       ? toMysqlDateTime(published_at)
       : null;
@@ -9007,13 +9082,15 @@ app.put('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req, re
       image_url ?? null, youtube_url ?? null, source_name ?? null, source_url ?? null, pdf_url ?? null,
       nowPublished, reactionsOpen,
     ];
+    const linkedClause = linkedEventId !== undefined ? ', linked_event_id = ?' : '';
+    if (linkedEventId !== undefined) updateParams.push(linkedEventId);
     if (pubAt) updateParams.push(pubAt);
     updateParams.push(id);
 
     const unpublishReset =
       wasPublished && !nowPublished ? ', followers_notified_at = NULL' : '';
     await executeQuery(
-      `UPDATE news SET title = ?, content = ?, excerpt = ?, category = ?, custom_category = ?, image_url = ?, youtube_url = ?, source_name = ?, source_url = ?, pdf_url = ?, is_published = ?, reactions_open = ?, ${publishedAtClause}, updated_at = NOW()${unpublishReset} WHERE id = ?`,
+      `UPDATE news SET title = ?, content = ?, excerpt = ?, category = ?, custom_category = ?, image_url = ?, youtube_url = ?, source_name = ?, source_url = ?, pdf_url = ?, is_published = ?, reactions_open = ?${linkedClause}, ${publishedAtClause}, updated_at = NOW()${unpublishReset} WHERE id = ?`,
       updateParams
     );
     const newPdfUrl = pdf_url ?? null;
@@ -10876,6 +10953,7 @@ app.get('/api/migrate-columns', async (req, res) => {
     { table: 'news',          column: 'source_url',   sql: `ALTER TABLE news ADD COLUMN source_url VARCHAR(500)` },
     { table: 'organizations', column: 'show_email',   sql: `ALTER TABLE organizations ADD COLUMN show_email BOOLEAN DEFAULT true` },
     { table: 'news',          column: 'pdf_url',      sql: `ALTER TABLE news ADD COLUMN pdf_url VARCHAR(500)` },
+    { table: 'news',          column: 'linked_event_id', sql: `ALTER TABLE news ADD COLUMN linked_event_id INT NULL` },
     { table: 'events',        column: 'pdf_url',      sql: `ALTER TABLE events ADD COLUMN pdf_url VARCHAR(500)` },
     { table: 'events',        column: 'ticket_url',   sql: `ALTER TABLE events ADD COLUMN ticket_url VARCHAR(500)` },
     { table: 'events',        column: 'ticket_label', sql: `ALTER TABLE events ADD COLUMN ticket_label VARCHAR(255)` },

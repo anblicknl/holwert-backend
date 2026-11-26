@@ -1590,6 +1590,25 @@
                 const d = await r.json();
                 if (r.ok) article = d.article;
             }
+            let eventsForLink = [];
+            try {
+                const er = await fetch(`${apiBase}/org/events?limit=200`, { headers: authHeaders() });
+                const ed = await er.json().catch(() => ({}));
+                if (er.ok) {
+                    eventsForLink = (ed.events || []).map((ev) => {
+                        let when = '';
+                        try {
+                            when = ev.event_date
+                                ? new Date(ev.event_date).toLocaleDateString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' })
+                                : '';
+                        } catch (_) {}
+                        return {
+                            ...ev,
+                            _label: `${when ? when + ' · ' : ''}${ev.title || ('#' + ev.id)}`,
+                        };
+                    });
+                }
+            } catch (_) {}
             if (isPreview) {
                 const when = article?.published_at
                     ? new Date(article.published_at).toLocaleString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -1605,6 +1624,10 @@
                 const pdf = article?.pdf_url
                     ? `<p class="news-preview-meta"><a href="${escapeHtml(article.pdf_url)}" target="_blank" rel="noopener">PDF openen</a></p>`
                     : '';
+                const linkedEv = eventsForLink.find((e) => String(e.id) === String(article?.linked_event_id));
+                const agenda = article?.linked_event_id
+                    ? `<p class="news-preview-meta">Agenda: ${escapeHtml(linkedEv?._label || ('#' + article.linked_event_id))}</p>`
+                    : '';
                 overlay.innerHTML = `
                     <div class="modal-content">
                         <div class="modal-header">
@@ -1616,7 +1639,7 @@
                             <h4 class="news-preview-title">${escapeHtml(article?.title || 'Artikel')}</h4>
                             ${previewThumbHtml(article?.image_url, article?.title || '')}
                             <div class="news-preview-body"></div>
-                            ${source}${video}${pdf}
+                            ${source}${video}${pdf}${agenda}
                         </div>
                         <div class="modal-footer">
                             <button type="button" class="btn btn-secondary modal-close-btn">Sluiten</button>
@@ -1723,6 +1746,29 @@
                         </div>
                         <div class="form-block">
                             <div class="form-block__head">
+                                <h4 class="form-block__title"><i class="fas fa-calendar-alt" aria-hidden="true"></i> Agenda</h4>
+                                <p class="form-block__intro">Optioneel. Toont onder het artikel in de app een aanklikbaar agenda-blok (datum, foto, titel).</p>
+                            </div>
+                            <div class="form-group">
+                                <label for="newsLinkedEvent">Gekoppeld agendapunt</label>
+                                ${!isPreview
+                                    ? `<select id="newsLinkedEvent">
+                                           <option value="">Geen</option>
+                                           ${eventsForLink.map((ev) => `
+                                               <option value="${ev.id}" ${String(article?.linked_event_id || '') === String(ev.id) ? 'selected' : ''}>
+                                                   ${escapeHtml(ev._label || ev.title || ('#' + ev.id))}
+                                               </option>
+                                           `).join('')}
+                                       </select>
+                                       <p class="form-hint">Kies een agendapunt uit jullie agenda. Onder het nieuwsbericht verschijnt een agenda-kaart zoals in het overzicht.</p>`
+                                    : (article?.linked_event_id
+                                        ? `<p class="readonly-value">Gekoppeld agendapunt #${escapeHtml(String(article.linked_event_id))}</p>`
+                                        : '<p class="form-hint">Geen agendapunt gekoppeld</p>')
+                                }
+                            </div>
+                        </div>
+                        <div class="form-block">
+                            <div class="form-block__head">
                                 <h4 class="form-block__title"><i class="fas fa-link" aria-hidden="true"></i> Bronvermelding</h4>
                                 <p class="form-block__intro">Optioneel. Wordt onder het artikel in de app getoond als &quot;Bron: …&quot;.</p>
                             </div>
@@ -1816,6 +1862,7 @@
                     const custom_category = category === 'overig'
                         ? ((document.getElementById('newsCustomCategory')?.value || '').trim() || null)
                         : null;
+                    const linkedEvRaw = (document.getElementById('newsLinkedEvent')?.value || '').trim();
                     const payload = {
                         title: document.getElementById('newsTitle').value.trim(),
                         content: document.getElementById('newsContent').value.trim(),
@@ -1825,6 +1872,7 @@
                         reactions_open: document.getElementById('newsReactionsOpen')?.checked === true,
                         image_url: imageUrl || null,
                         youtube_url:  (document.getElementById('newsYoutubeUrl')?.value  || '').trim() || null,
+                        linked_event_id: linkedEvRaw ? parseInt(linkedEvRaw, 10) : null,
                         source_name: (document.getElementById('newsSourceName')?.value || '').trim() || null,
                         source_url:  (document.getElementById('newsSourceUrl')?.value  || '').trim() || null,
                         pdf_url: pdfUrl,
