@@ -136,6 +136,7 @@ function sanitizeListNewsItem(article) {
     ...article,
     image_url: listSafeMediaUrl(article.image_url),
     organization_logo: listSafeMediaUrl(article.organization_logo),
+    pdf_url: article.pdf_url ? publicHostedPdfUrl(article.pdf_url) : article.pdf_url,
     reactions_open: reactionsOpenFlag(article.reactions_open),
   };
 }
@@ -417,8 +418,27 @@ async function getUserById(id) {
 // Verwijder bestand op shared hosting (afbeelding of PDF onder uploads/…)
 function parseHostedUploadPath(fileUrl) {
   if (!fileUrl || typeof fileUrl !== 'string') return null;
+  // PDF’s via /upload/serve.php?f=uploads/… (nginx blokkeert directe .pdf)
+  try {
+    const u = new URL(fileUrl);
+    if (/\/upload\/serve\.php$/i.test(u.pathname)) {
+      const f = (u.searchParams.get('f') || '').replace(/\\/g, '/').replace(/^\/+/, '');
+      if (/^uploads\/\d{4}\/\d{2}\/\d{2}\/[a-zA-Z0-9._-]+\.pdf$/i.test(f)) return f;
+    }
+  } catch (_) { /* geen absolute URL */ }
   const match = fileUrl.match(/holwert\.appenvloed\.com\/(uploads\/\d{4}\/\d{2}\/\d{2}\/[^?#]+)/i);
   return match ? match[1] : null;
+}
+
+/** Publieke PDF-URL: directe /uploads/…/*.pdf → serve.php (voorkomt nginx 403). */
+function publicHostedPdfUrl(fileUrl) {
+  if (!fileUrl || typeof fileUrl !== 'string') return fileUrl;
+  if (/\/upload\/serve\.php\?/i.test(fileUrl)) return fileUrl;
+  const path = parseHostedUploadPath(fileUrl);
+  if (path && /\.pdf$/i.test(path)) {
+    return `https://holwert.appenvloed.com/upload/serve.php?f=${encodeURIComponent(path)}`;
+  }
+  return fileUrl;
 }
 
 async function deleteHostedUploadFile(fileUrl) {
@@ -3364,6 +3384,7 @@ app.get('/api/news/:id', async (req, res) => {
         article: {
           ...article,
           content,
+          pdf_url: article.pdf_url ? publicHostedPdfUrl(article.pdf_url) : article.pdf_url,
           reactions_open: reactionsOpenFlag(article.reactions_open),
           image_variants: imageVariants,
           linked_event_id: linked_event ? linked_event.id : null,
@@ -5266,6 +5287,7 @@ app.get('/api/admin/news/:id', authenticateToken, async (req, res) => {
     res.json({
       article: {
         ...article,
+        pdf_url: article.pdf_url ? publicHostedPdfUrl(article.pdf_url) : article.pdf_url,
         gallery: parseNewsGalleryFromRow(article.gallery_json),
         image_variants: imageVariants
       }
