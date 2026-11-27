@@ -20,10 +20,6 @@ function folderSegmentForOrgUpload(orgIdNum) {
 /** Upload bestand naar holwert.appenvloed.com/upload (org-submap: twee cijfers, bv. 07 of 00). */
 async function uploadFileBufferToSharedHosting(buffer, originalname, mimetype, orgFolderTwoDigits) {
   const form = new FormData();
-  form.append('file', buffer, {
-    filename: originalname || 'image.jpg',
-    contentType: mimetype || 'image/jpeg',
-  });
   const now = new Date();
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -32,6 +28,22 @@ async function uploadFileBufferToSharedHosting(buffer, originalname, mimetype, o
       ? orgFolderTwoDigits
       : '00';
   form.append('folder', `uploads/${year}/${month}/${seg}/`);
+
+  const mime = (mimetype || 'application/octet-stream').toLowerCase();
+  const name = originalname || (mime === 'application/pdf' ? 'document.pdf' : 'image.jpg');
+  // PDF’s als base64: PHP upload_max_filesize is op shared hosting vaak 2M
+  // (UPLOAD_ERR_INI_SIZE → "Bestand te groot (serverlimiet)").
+  const useBase64 = mime === 'application/pdf' || buffer.length > 1.5 * 1024 * 1024;
+  if (useBase64) {
+    form.append('file_base64', buffer.toString('base64'));
+    form.append('filename', name);
+    form.append('mime', mime);
+  } else {
+    form.append('file', buffer, {
+      filename: name,
+      contentType: mime,
+    });
+  }
 
   let uploadResponse;
   try {
@@ -42,7 +54,7 @@ async function uploadFileBufferToSharedHosting(buffer, originalname, mimetype, o
         Origin: 'https://holwert.appenvloed.com',
         Referer: 'https://holwert.appenvloed.com/',
       },
-      timeout: 30000,
+      timeout: 60000,
       maxBodyLength: Infinity,
       maxContentLength: Infinity,
       httpsAgent: new https.Agent({ rejectUnauthorized: false }),
