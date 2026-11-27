@@ -418,9 +418,13 @@ async function getUserById(id) {
 // Verwijder bestand op shared hosting (afbeelding of PDF onder uploads/…)
 function parseHostedUploadPath(fileUrl) {
   if (!fileUrl || typeof fileUrl !== 'string') return null;
-  // PDF’s via /upload/serve.php?f=uploads/… (nginx blokkeert directe .pdf)
+  // PDF’s via /upload/serve.php/uploads/… of ?f=… (nginx blokkeert directe .pdf)
   try {
     const u = new URL(fileUrl);
+    const pathInfo = u.pathname.match(
+      /\/upload\/serve\.php\/(uploads\/\d{4}\/\d{2}\/\d{2}\/[a-zA-Z0-9._-]+\.pdf)$/i
+    );
+    if (pathInfo) return pathInfo[1];
     if (/\/upload\/serve\.php$/i.test(u.pathname)) {
       const f = (u.searchParams.get('f') || '').replace(/\\/g, '/').replace(/^\/+/, '');
       if (/^uploads\/\d{4}\/\d{2}\/\d{2}\/[a-zA-Z0-9._-]+\.pdf$/i.test(f)) return f;
@@ -430,13 +434,12 @@ function parseHostedUploadPath(fileUrl) {
   return match ? match[1] : null;
 }
 
-/** Publieke PDF-URL: directe /uploads/…/*.pdf → serve.php (voorkomt nginx 403). */
+/** Publieke PDF-URL: directe /uploads/…/*.pdf → serve.php/… (voorkomt nginx 403). */
 function publicHostedPdfUrl(fileUrl) {
   if (!fileUrl || typeof fileUrl !== 'string') return fileUrl;
-  if (/\/upload\/serve\.php\?/i.test(fileUrl)) return fileUrl;
   const path = parseHostedUploadPath(fileUrl);
   if (path && /\.pdf$/i.test(path)) {
-    return `https://holwert.appenvloed.com/upload/serve.php?f=${encodeURIComponent(path)}`;
+    return `https://holwert.appenvloed.com/upload/serve.php/${path}`;
   }
   return fileUrl;
 }
