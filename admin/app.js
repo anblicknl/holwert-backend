@@ -3,6 +3,11 @@ console.log('=== SCRIPT LOADED - VERSION 20260723-admin-orgs ===');
 const NEWS_SHARE_BASE_URL = 'https://holwert.appenvloed.com/app-link/';
 /** Publieke pagina met Open Graph op eigen domein — voor Facebook-deelvenster */
 const NEWS_PUBLIC_SHARE_BASE_URL = 'https://holwert.appenvloed.com/nieuws/';
+/**
+ * Fotogalerij-UI (onder nieuws-tekst). Uit tot de app-build met galerie-strip live is.
+ * Zet op true + FTP admin/dashboard bij volgende store/TestFlight-release.
+ */
+const NEWS_GALLERY_UI_ENABLED = false;
 
 function getNewsShareUrl(newsId) {
     return `${NEWS_SHARE_BASE_URL}?t=news&id=${Number(newsId)}`;
@@ -5156,12 +5161,13 @@ class HolwertAdmin {
                                     <textarea id="newsArticleContent" name="content" rows="10"
                                         placeholder="De volledige inhoud van het artikel..." required>${escTextarea(article?.content || '')}</textarea>
                                     <small class="form-hint">Selecteer tekst en klik een knop om op te maken. Foto-icoon plaatst een afbeelding in de tekst (zichtbaar in de app).</small>
+                                    ${NEWS_GALLERY_UI_ENABLED ? `
                                     <div class="form-group" style="margin-top:1rem;">
                                         <label>Fotogalerij (onder de tekst)</label>
                                         <input type="file" id="newsGalleryFiles" accept="image/*" multiple class="file-input">
                                         <small class="form-hint">Max. 8 foto’s. Worden onder het artikel in de app getoond als galerie (los van de hero-afbeelding).</small>
                                         <div id="newsGalleryPreview" class="news-gallery-preview" data-gallery='${escAttr(JSON.stringify(Array.isArray(article?.gallery) ? article.gallery : []))}'></div>
-                                    </div>
+                                    </div>` : ''}
                                 </div>
                             </div>
 
@@ -5301,7 +5307,7 @@ class HolwertAdmin {
             console.log('🔧 Forced modal display to flex');
             this.wirePdfRemoveControl(overlay);
             this.syncNewsCustomCategoryField();
-            this.initNewsGalleryEditor(overlay);
+            if (NEWS_GALLERY_UI_ENABLED) this.initNewsGalleryEditor(overlay);
             this.wireNewsInlineImage(overlay);
             const pubCheckbox = overlay.querySelector('#newsPublished');
             if (pubCheckbox) {
@@ -5725,7 +5731,9 @@ class HolwertAdmin {
             // Gekoppeld agendapunt (leeg = ontkoppelen)
             const linkedEv = (field('newsLinkedEvent')?.value || '').trim();
             body.linked_event_id = linkedEv ? parseInt(linkedEv, 10) : null;
-            body.gallery = this.getNewsGalleryFromDom(document.getElementById('newsGalleryPreview'));
+            if (NEWS_GALLERY_UI_ENABLED) {
+                body.gallery = this.getNewsGalleryFromDom(document.getElementById('newsGalleryPreview'));
+            }
             // Bronvermelding
             body.source_name = (field('newsSourceName')?.value || '').trim() || null;
             body.source_url  = (field('newsSourceUrl')?.value  || '').trim() || null;

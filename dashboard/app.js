@@ -20,6 +20,12 @@
         { id: 'overig', label: 'Overig' },
     ];
 
+    /**
+     * Fotogalerij-UI (onder nieuws-tekst). Uit tot de app-build met galerie-strip live is.
+     * Zet op true + FTP admin/dashboard bij volgende store/TestFlight-release.
+     */
+    const NEWS_GALLERY_UI_ENABLED = false;
+
     const ORG_CATEGORIES = [
         { id: 'vereniging', label: 'Vereniging' },
         { id: 'stichting', label: 'Stichting' },
@@ -1768,16 +1774,18 @@
                 <input type="file" id="newsInlineImageFile" accept="image/*" style="display:none">
             </div>
             <small class="form-hint">Selecteer tekst en klik een knop om op te maken. Foto-icoon plaatst een afbeelding in de tekst.</small>`;
-            const galleryEditorHtml = !isPreview
-                ? `<div class="form-group">
+            const galleryEditorHtml = !NEWS_GALLERY_UI_ENABLED
+                ? ''
+                : (!isPreview
+                    ? `<div class="form-group">
                         <label>Fotogalerij (onder de tekst)</label>
                         <input type="file" id="newsGalleryFiles" accept="image/*" multiple>
                         <p class="form-hint">Max. 8 foto’s. Worden onder het artikel in de app getoond (los van de hero-afbeelding).</p>
                         <div id="newsGalleryPreview" class="news-gallery-preview" data-gallery="${escapeHtml(JSON.stringify(galleryInitial))}"></div>
                    </div>`
-                : (galleryInitial.length
-                    ? `<p class="form-hint">Galerie: ${galleryInitial.length} foto’s</p>`
-                    : '<p class="form-hint">Geen galerie</p>');
+                    : (galleryInitial.length
+                        ? `<p class="form-hint">Galerie: ${galleryInitial.length} foto’s</p>`
+                        : '<p class="form-hint">Geen galerie</p>'));
             const publishedAtValue = article?.published_at
                 ? toDatetimeInputValue(article.published_at)
                 : '';
@@ -1947,7 +1955,7 @@
             overlay.querySelector('.modal-close').addEventListener('click', () => overlay.remove());
             overlay.querySelector('.modal-close-btn').addEventListener('click', () => overlay.remove());
             wirePdfRemoveControl(overlay);
-            initNewsGalleryEditor(overlay);
+            if (NEWS_GALLERY_UI_ENABLED) initNewsGalleryEditor(overlay);
             wireNewsInlineImage(overlay);
             const catSelect = overlay.querySelector('#newsCategory');
             if (catSelect) catSelect.addEventListener('change', syncNewsCustomCategoryField);
@@ -1999,7 +2007,9 @@
                         image_url: imageUrl || null,
                         youtube_url:  (document.getElementById('newsYoutubeUrl')?.value  || '').trim() || null,
                         linked_event_id: linkedEvRaw ? parseInt(linkedEvRaw, 10) : null,
-                        gallery: getNewsGalleryFromDom(document.getElementById('newsGalleryPreview')),
+                        ...(NEWS_GALLERY_UI_ENABLED
+                            ? { gallery: getNewsGalleryFromDom(document.getElementById('newsGalleryPreview')) }
+                            : {}),
                         source_name: (document.getElementById('newsSourceName')?.value || '').trim() || null,
                         source_url:  (document.getElementById('newsSourceUrl')?.value  || '').trim() || null,
                         pdf_url: pdfUrl,
