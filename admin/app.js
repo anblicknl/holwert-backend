@@ -5150,10 +5150,18 @@ class HolwertAdmin {
                                         <button type="button" class="editor-btn" onclick="adminFormatText('newsArticleContent','bold')" title="Vet (Ctrl+B)"><b>B</b></button>
                                         <button type="button" class="editor-btn" onclick="adminFormatText('newsArticleContent','italic')" title="Cursief (Ctrl+I)"><i>I</i></button>
                                         <button type="button" class="editor-btn" onclick="adminFormatText('newsArticleContent','link')" title="Link invoegen">&#128279;</button>
+                                        <button type="button" class="editor-btn" id="newsInlineImageBtn" title="Foto in tekst"><i class="fas fa-image"></i></button>
+                                        <input type="file" id="newsInlineImageFile" accept="image/*" style="display:none">
                                     </div>
                                     <textarea id="newsArticleContent" name="content" rows="10"
                                         placeholder="De volledige inhoud van het artikel..." required>${escTextarea(article?.content || '')}</textarea>
-                                    <small class="form-hint">Selecteer tekst en klik een knop om op te maken. HTML-tags worden opgeslagen en getoond in de app. De eerste regels verschijnen automatisch in het nieuwsoverzicht.</small>
+                                    <small class="form-hint">Selecteer tekst en klik een knop om op te maken. Foto-icoon plaatst een afbeelding in de tekst (zichtbaar in de app).</small>
+                                    <div class="form-group" style="margin-top:1rem;">
+                                        <label>Fotogalerij (onder de tekst)</label>
+                                        <input type="file" id="newsGalleryFiles" accept="image/*" multiple class="file-input">
+                                        <small class="form-hint">Max. 8 foto’s. Worden onder het artikel in de app getoond als galerie (los van de hero-afbeelding).</small>
+                                        <div id="newsGalleryPreview" class="news-gallery-preview" data-gallery='${escAttr(JSON.stringify(Array.isArray(article?.gallery) ? article.gallery : []))}'></div>
+                                    </div>
                                 </div>
                             </div>
 
@@ -5293,6 +5301,8 @@ class HolwertAdmin {
             console.log('🔧 Forced modal display to flex');
             this.wirePdfRemoveControl(overlay);
             this.syncNewsCustomCategoryField();
+            this.initNewsGalleryEditor(overlay);
+            this.wireNewsInlineImage(overlay);
             const pubCheckbox = overlay.querySelector('#newsPublished');
             if (pubCheckbox) {
                 pubCheckbox.addEventListener('change', () => syncNewsFacebookShareField(overlay));
@@ -5417,6 +5427,139 @@ class HolwertAdmin {
             };
             reader.onerror = reject;
             reader.readAsDataURL(file);
+        });
+    }
+
+    async uploadAdminNewsImageFile(file, prefix = 'news-content') {
+        const organizationId = document.getElementById('newsOrganization')?.value || null;
+        const compressed = await this.compressPhotoImage(file, { maxSize: 1600, quality: 0.72 });
+        const uploadRes = await fetch(`${this.apiBaseUrl}/upload/image`, {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${this.token}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                imageData: compressed.dataUrl,
+                filename: `${prefix}-${Date.now()}.${compressed.ext}`,
+                organizationId: organizationId || undefined,
+            }),
+        });
+        const uploadJson = await uploadRes.json().catch(() => ({}));
+        if (!uploadRes.ok) {
+            throw new Error(uploadJson.error || uploadJson.message || 'Upload mislukt');
+        }
+        const url = uploadJson.imageUrl || uploadJson.url;
+        if (!url) throw new Error('Geen image-URL ontvangen');
+        return url;
+    }
+
+    wireNewsInlineImage(overlay) {
+        const btn = overlay?.querySelector('#newsInlineImageBtn');
+        const fileInput = overlay?.querySelector('#newsInlineImageFile');
+        if (!btn || !fileInput) return;
+        btn.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', async () => {
+            const file = fileInput.files?.[0];
+            fileInput.value = '';
+            if (!file) return;
+            btn.disabled = true;
+            try {
+                const url = await this.uploadAdminNewsImageFile(file, 'news-inline');
+                const esc = String(url).replace(/"/g, '&quot;');
+                insertHtmlAtCursor('newsArticleContent', `<img src="${esc}" alt="">`);
+                this.showNotification('Foto in tekst geplaatst', 'success');
+            } catch (err) {
+                this.showNotification(err.message || 'Foto uploaden mislukt', 'error');
+            } finally {
+                btn.disabled = false;
+            }
+        });
+    }
+
+    getNewsGalleryFromDom(el) {
+        if (!el) return [];
+        try {
+            const raw = el.getAttribute('data-gallery') || '[]';
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed) ? parsed.filter((x) => x && x.url) : [];
+        } catch {
+            return [];
+        }
+    }
+
+    setNewsGalleryDom(el, items) {
+        if (!el) return;
+        const list = Array.isArray(items) ? items.slice(0, 8) : [];
+        el.setAttribute('data-gallery', JSON.stringify(list));
+        this.renderNewsGalleryPreview(el);
+    }
+
+    renderNewsGalleryPreview(el) {
+        if (!el) return;
+        const items = this.getNewsGalleryFromDom(el);
+        if (!items.length) {
+            el.innerHTML = '<p class="form-hint" style="margin:0.5rem 0 0;">Nog geen galeriefoto’s.</p>';
+            return;
+        }
+        el.innerHTML = items.map((item, idx) => `
+            <div class="news-gallery-thumb" data-idx="${idx}">
+                <img src="${String(item.url).replace(/"/g, '&quot;')}" alt="">
+                <div class="news-gallery-thumb-actions">
+                    <button type="button" class="btn btn-secondary btn-sm" data-gal-up title="Omhoog" ${idx === 0 ? 'disabled' : ''}>↑</button>
+                    <button type="button" class="btn btn-secondary btn-sm" data-gal-down title="Omlaag" ${idx === items.length - 1 ? 'disabled' : ''}>↓</button>
+                    <button type="button" class="btn btn-secondary btn-sm" data-gal-remove title="Verwijderen">×</button>
+                </div>
+            </div>
+        `).join('');
+        el.querySelectorAll('.news-gallery-thumb').forEach((thumb) => {
+            const idx = parseInt(thumb.getAttribute('data-idx'), 10);
+            thumb.querySelector('[data-gal-remove]')?.addEventListener('click', () => {
+                const next = this.getNewsGalleryFromDom(el).filter((_, i) => i !== idx);
+                this.setNewsGalleryDom(el, next);
+            });
+            thumb.querySelector('[data-gal-up]')?.addEventListener('click', () => {
+                const list = this.getNewsGalleryFromDom(el);
+                if (idx <= 0) return;
+                [list[idx - 1], list[idx]] = [list[idx], list[idx - 1]];
+                this.setNewsGalleryDom(el, list);
+            });
+            thumb.querySelector('[data-gal-down]')?.addEventListener('click', () => {
+                const list = this.getNewsGalleryFromDom(el);
+                if (idx >= list.length - 1) return;
+                [list[idx], list[idx + 1]] = [list[idx + 1], list[idx]];
+                this.setNewsGalleryDom(el, list);
+            });
+        });
+    }
+
+    initNewsGalleryEditor(overlay) {
+        const preview = overlay?.querySelector('#newsGalleryPreview');
+        const fileInput = overlay?.querySelector('#newsGalleryFiles');
+        if (!preview) return;
+        this.renderNewsGalleryPreview(preview);
+        if (!fileInput) return;
+        fileInput.addEventListener('change', async () => {
+            const files = Array.from(fileInput.files || []);
+            fileInput.value = '';
+            if (!files.length) return;
+            const current = this.getNewsGalleryFromDom(preview);
+            const room = Math.max(0, 8 - current.length);
+            if (!room) {
+                this.showNotification('Maximaal 8 galeriefoto’s', 'error');
+                return;
+            }
+            const toUpload = files.slice(0, room);
+            for (const file of toUpload) {
+                try {
+                    const url = await this.uploadAdminNewsImageFile(file, 'news-gallery');
+                    current.push({ url, alt: '' });
+                    this.setNewsGalleryDom(preview, current);
+                } catch (err) {
+                    this.showNotification(err.message || 'Galerie-upload mislukt', 'error');
+                    break;
+                }
+            }
         });
     }
 
@@ -5582,6 +5725,7 @@ class HolwertAdmin {
             // Gekoppeld agendapunt (leeg = ontkoppelen)
             const linkedEv = (field('newsLinkedEvent')?.value || '').trim();
             body.linked_event_id = linkedEv ? parseInt(linkedEv, 10) : null;
+            body.gallery = this.getNewsGalleryFromDom(document.getElementById('newsGalleryPreview'));
             // Bronvermelding
             body.source_name = (field('newsSourceName')?.value || '').trim() || null;
             body.source_url  = (field('newsSourceUrl')?.value  || '').trim() || null;
@@ -9520,6 +9664,8 @@ function adminFormatText(textareaId, format) {
         const url = prompt('URL van de link:', 'https://');
         if (!url) return;
         before = `<a href="${url}">`; after = '</a>';
+    } else {
+        return;
     }
 
     const replacement = before + (selected || 'tekst') + after;
@@ -9532,5 +9678,17 @@ function adminFormatText(textareaId, format) {
         newCursor = start + before.length;
         ta.setSelectionRange(newCursor, newCursor + (format === 'link' ? 5 : 5));
     }
+    ta.focus();
+}
+
+function insertHtmlAtCursor(textareaId, html) {
+    const ta = document.getElementById(textareaId);
+    if (!ta || !html) return;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const insert = `\n${html}\n`;
+    ta.value = ta.value.substring(0, start) + insert + ta.value.substring(end);
+    const pos = start + insert.length;
+    ta.setSelectionRange(pos, pos);
     ta.focus();
 }

@@ -996,6 +996,111 @@
         return url;
     }
 
+    function getNewsGalleryFromDom(el) {
+        if (!el) return [];
+        try {
+            const parsed = JSON.parse(el.getAttribute('data-gallery') || '[]');
+            return Array.isArray(parsed) ? parsed.filter((x) => x && x.url) : [];
+        } catch {
+            return [];
+        }
+    }
+
+    function setNewsGalleryDom(el, items) {
+        if (!el) return;
+        const list = Array.isArray(items) ? items.slice(0, 8) : [];
+        el.setAttribute('data-gallery', JSON.stringify(list));
+        renderNewsGalleryPreview(el);
+    }
+
+    function renderNewsGalleryPreview(el) {
+        if (!el) return;
+        const items = getNewsGalleryFromDom(el);
+        if (!items.length) {
+            el.innerHTML = '<p class="form-hint" style="margin:0.5rem 0 0;">Nog geen galeriefoto’s.</p>';
+            return;
+        }
+        el.innerHTML = items.map((item, idx) => {
+            const src = String(item.url || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+            return `<div class="news-gallery-thumb" data-idx="${idx}">
+                <img src="${src}" alt="">
+                <div class="news-gallery-thumb-actions">
+                    <button type="button" class="btn btn-secondary btn-sm" data-gal-up ${idx === 0 ? 'disabled' : ''}>↑</button>
+                    <button type="button" class="btn btn-secondary btn-sm" data-gal-down ${idx === items.length - 1 ? 'disabled' : ''}>↓</button>
+                    <button type="button" class="btn btn-secondary btn-sm" data-gal-remove>×</button>
+                </div>
+            </div>`;
+        }).join('');
+        el.querySelectorAll('.news-gallery-thumb').forEach((thumb) => {
+            const idx = parseInt(thumb.getAttribute('data-idx'), 10);
+            thumb.querySelector('[data-gal-remove]')?.addEventListener('click', () => {
+                setNewsGalleryDom(el, getNewsGalleryFromDom(el).filter((_, i) => i !== idx));
+            });
+            thumb.querySelector('[data-gal-up]')?.addEventListener('click', () => {
+                const list = getNewsGalleryFromDom(el);
+                if (idx <= 0) return;
+                [list[idx - 1], list[idx]] = [list[idx], list[idx - 1]];
+                setNewsGalleryDom(el, list);
+            });
+            thumb.querySelector('[data-gal-down]')?.addEventListener('click', () => {
+                const list = getNewsGalleryFromDom(el);
+                if (idx >= list.length - 1) return;
+                [list[idx], list[idx + 1]] = [list[idx + 1], list[idx]];
+                setNewsGalleryDom(el, list);
+            });
+        });
+    }
+
+    function initNewsGalleryEditor(overlay) {
+        const preview = overlay?.querySelector('#newsGalleryPreview');
+        const fileInput = overlay?.querySelector('#newsGalleryFiles');
+        if (!preview) return;
+        renderNewsGalleryPreview(preview);
+        if (!fileInput) return;
+        fileInput.addEventListener('change', async () => {
+            const files = Array.from(fileInput.files || []);
+            fileInput.value = '';
+            if (!files.length) return;
+            const current = getNewsGalleryFromDom(preview);
+            const room = Math.max(0, 8 - current.length);
+            if (!room) {
+                alert('Maximaal 8 galeriefoto’s');
+                return;
+            }
+            for (const file of files.slice(0, room)) {
+                try {
+                    const url = await uploadNewsOrEventImage(file, 'news-gallery');
+                    current.push({ url, alt: '' });
+                    setNewsGalleryDom(preview, current);
+                } catch (err) {
+                    alert(err.message || 'Galerie-upload mislukt');
+                    break;
+                }
+            }
+        });
+    }
+
+    function wireNewsInlineImage(overlay) {
+        const btn = overlay?.querySelector('#newsInlineImageBtn');
+        const fileInput = overlay?.querySelector('#newsInlineImageFile');
+        if (!btn || !fileInput) return;
+        btn.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', async () => {
+            const file = fileInput.files?.[0];
+            fileInput.value = '';
+            if (!file) return;
+            btn.disabled = true;
+            try {
+                const url = await uploadNewsOrEventImage(file, 'news-inline');
+                insertHtmlAtCursor('newsContent', `<img src="${String(url).replace(/"/g, '&quot;')}" alt="">`);
+            } catch (err) {
+                alert(err.message || 'Foto uploaden mislukt');
+            } finally {
+                btn.disabled = false;
+            }
+        });
+    }
+
     /** Multipart naar backend; organisatiemap komt uit JWT (client kan die niet overschrijven). */
     async function uploadImageFile(file) {
         if (!file || !file.type.startsWith('image/')) {
@@ -1654,7 +1759,25 @@
             }
             const imgPreview = previewThumbHtml(article?.image_url);
             const titleHtml = isPreview ? 'Artikel bekijken' : (article ? 'Artikel bewerken' : 'Nieuw artikel');
-            const editorToolbar = isPreview ? '' : '<div class="editor-toolbar"><button type="button" class="editor-btn" onclick="adminFormatText(\'newsContent\',\'bold\')" title="Vet"><b>B</b></button><button type="button" class="editor-btn" onclick="adminFormatText(\'newsContent\',\'italic\')" title="Cursief"><i>I</i></button><button type="button" class="editor-btn" onclick="adminFormatText(\'newsContent\',\'link\')" title="Link">&#128279;</button></div><small class="form-hint">Selecteer tekst en klik een knop om op te maken. De eerste regels verschijnen automatisch in het nieuwsoverzicht in de app.</small>';
+            const galleryInitial = Array.isArray(article?.gallery) ? article.gallery : [];
+            const editorToolbar = isPreview ? '' : `<div class="editor-toolbar">
+                <button type="button" class="editor-btn" onclick="adminFormatText('newsContent','bold')" title="Vet"><b>B</b></button>
+                <button type="button" class="editor-btn" onclick="adminFormatText('newsContent','italic')" title="Cursief"><i>I</i></button>
+                <button type="button" class="editor-btn" onclick="adminFormatText('newsContent','link')" title="Link">&#128279;</button>
+                <button type="button" class="editor-btn" id="newsInlineImageBtn" title="Foto in tekst"><i class="fas fa-image"></i></button>
+                <input type="file" id="newsInlineImageFile" accept="image/*" style="display:none">
+            </div>
+            <small class="form-hint">Selecteer tekst en klik een knop om op te maken. Foto-icoon plaatst een afbeelding in de tekst.</small>`;
+            const galleryEditorHtml = !isPreview
+                ? `<div class="form-group">
+                        <label>Fotogalerij (onder de tekst)</label>
+                        <input type="file" id="newsGalleryFiles" accept="image/*" multiple>
+                        <p class="form-hint">Max. 8 foto’s. Worden onder het artikel in de app getoond (los van de hero-afbeelding).</p>
+                        <div id="newsGalleryPreview" class="news-gallery-preview" data-gallery="${escapeHtml(JSON.stringify(galleryInitial))}"></div>
+                   </div>`
+                : (galleryInitial.length
+                    ? `<p class="form-hint">Galerie: ${galleryInitial.length} foto’s</p>`
+                    : '<p class="form-hint">Geen galerie</p>');
             const publishedAtValue = article?.published_at
                 ? toDatetimeInputValue(article.published_at)
                 : '';
@@ -1712,6 +1835,7 @@
                                 ${editorToolbar}
                                 <textarea id="newsContent" rows="6" ${ro}>${escapeHtml(article?.content || '')}</textarea>
                             </div>
+                            ${galleryEditorHtml}
                         </div>
                         <div class="form-block">
                             <div class="form-block__head">
@@ -1823,6 +1947,8 @@
             overlay.querySelector('.modal-close').addEventListener('click', () => overlay.remove());
             overlay.querySelector('.modal-close-btn').addEventListener('click', () => overlay.remove());
             wirePdfRemoveControl(overlay);
+            initNewsGalleryEditor(overlay);
+            wireNewsInlineImage(overlay);
             const catSelect = overlay.querySelector('#newsCategory');
             if (catSelect) catSelect.addEventListener('change', syncNewsCustomCategoryField);
             syncNewsCustomCategoryField();
@@ -1873,6 +1999,7 @@
                         image_url: imageUrl || null,
                         youtube_url:  (document.getElementById('newsYoutubeUrl')?.value  || '').trim() || null,
                         linked_event_id: linkedEvRaw ? parseInt(linkedEvRaw, 10) : null,
+                        gallery: getNewsGalleryFromDom(document.getElementById('newsGalleryPreview')),
                         source_name: (document.getElementById('newsSourceName')?.value || '').trim() || null,
                         source_url:  (document.getElementById('newsSourceUrl')?.value  || '').trim() || null,
                         pdf_url: pdfUrl,
@@ -3645,6 +3772,8 @@ function adminFormatText(textareaId, format) {
         const url = prompt('URL van de link:', 'https://');
         if (!url) return;
         before = `<a href="${url}">`; after = '</a>';
+    } else {
+        return;
     }
     const replacement = before + (selected || 'tekst') + after;
     ta.value = ta.value.substring(0, start) + replacement + ta.value.substring(end);
@@ -3654,5 +3783,17 @@ function adminFormatText(textareaId, format) {
         newCursor = start + before.length;
         ta.setSelectionRange(newCursor, newCursor + 5);
     }
+    ta.focus();
+}
+
+function insertHtmlAtCursor(textareaId, html) {
+    const ta = document.getElementById(textareaId);
+    if (!ta || !html) return;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const insert = `\n${html}\n`;
+    ta.value = ta.value.substring(0, start) + insert + ta.value.substring(end);
+    const pos = start + insert.length;
+    ta.setSelectionRange(pos, pos);
     ta.focus();
 }

@@ -901,6 +901,44 @@ async function assertOrgOwnsLinkedEvent(orgId, linkedEventId) {
   return id;
 }
 
+const NEWS_GALLERY_MAX = 8;
+
+/** Normaliseer gallery_json uit request/DB tot array van { url, alt }. undefined = niet meegestuurd. */
+function normalizeNewsGallery(raw) {
+  if (raw === undefined) return undefined;
+  if (raw === null || raw === '' || raw === 'null') return [];
+  let parsed = raw;
+  if (typeof raw === 'string') {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(parsed)) return [];
+  const out = [];
+  for (const item of parsed) {
+    if (!item) continue;
+    const url = String(typeof item === 'string' ? item : (item.url || item.image_url || '')).trim();
+    if (!url || !/^https?:\/\//i.test(url)) continue;
+    const alt = String(typeof item === 'object' && item.alt != null ? item.alt : '').trim().slice(0, 255);
+    out.push({ url: url.slice(0, 2000), alt });
+    if (out.length >= NEWS_GALLERY_MAX) break;
+  }
+  return out;
+}
+
+function serializeNewsGallery(raw) {
+  const arr = normalizeNewsGallery(raw);
+  if (arr === undefined) return undefined;
+  return arr.length ? JSON.stringify(arr) : null;
+}
+
+function parseNewsGalleryFromRow(raw) {
+  const arr = normalizeNewsGallery(raw == null || raw === '' ? [] : raw);
+  return Array.isArray(arr) ? arr : [];
+}
+
 let _lastScheduledNewsFlushAt = 0;
 /**
  * Stuur uitgestelde follower-pushes zodra geplande artikelen live mogen.
@@ -1988,6 +2026,7 @@ async function ensureNewsColumns() {
     ['reactions_open', 'TINYINT(1) NOT NULL DEFAULT 0'],
     ['followers_notified_at', 'DATETIME NULL'],
     ['linked_event_id', 'INT NULL'],
+    ['gallery_json', 'TEXT NULL'],
   ];
   let addedFollowersNotified = false;
   for (const [col, def] of cols) {
@@ -3268,7 +3307,7 @@ app.get('/api/news/:id', async (req, res) => {
       const result = await executeQuery(`
       SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt,
              n.image_url, n.youtube_url, n.source_name, n.source_url, n.pdf_url, n.reactions_open,
-             n.linked_event_id,
+             n.linked_event_id, n.gallery_json,
              n.created_at, n.updated_at, 
              COALESCE(n.published_at, n.created_at) as published_at,
              n.category, n.custom_category, n.is_published,
@@ -3319,6 +3358,7 @@ app.get('/api/news/:id', async (req, res) => {
       };
 
       const linked_event = await fetchPublicLinkedEvent(article.linked_event_id);
+      const gallery = parseNewsGalleryFromRow(article.gallery_json);
 
       return {
         article: {
@@ -3328,6 +3368,8 @@ app.get('/api/news/:id', async (req, res) => {
           image_variants: imageVariants,
           linked_event_id: linked_event ? linked_event.id : null,
           linked_event,
+          gallery_json: undefined,
+          gallery,
         }
       };
     },
@@ -3545,6 +3587,10 @@ app.post('/api/news', authenticateToken, async (req, res) => {
     {
       const linkedId = normalizeLinkedEventId(req.body.linked_event_id);
       if (linkedId !== undefined) pushExtra('linked_event_id', linkedId);
+    }
+    {
+      const gallerySer = serializeNewsGallery(req.body.gallery);
+      if (gallerySer !== undefined) pushExtra('gallery_json', gallerySer);
     }
     if (req.body.reactions_open !== undefined) {
       extraSets.push('reactions_open = ?');
@@ -5189,7 +5235,7 @@ app.get('/api/admin/news/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
 
     const result = await executeQuery(`
-      SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt, n.image_url, n.youtube_url, n.source_name, n.source_url, n.pdf_url, n.reactions_open, n.linked_event_id, n.organization_id,
+      SELECT n.id, n.title, COALESCE(n.content, '') as content, n.excerpt, n.image_url, n.youtube_url, n.source_name, n.source_url, n.pdf_url, n.reactions_open, n.linked_event_id, n.gallery_json, n.organization_id,
              n.created_at, n.updated_at, 
              COALESCE(n.published_at, n.created_at) as published_at,
              n.category, n.custom_category, n.is_published,
@@ -5220,6 +5266,7 @@ app.get('/api/admin/news/:id', authenticateToken, async (req, res) => {
     res.json({
       article: {
         ...article,
+        gallery: parseNewsGalleryFromRow(article.gallery_json),
         image_variants: imageVariants
       }
     });
@@ -5238,7 +5285,7 @@ app.put('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res)
   try {
     await ensureNewsColumns();
     const { id } = req.params;
-    const { title, content, category, custom_category, organization_id, image_url, youtube_url, source_name, source_url, pdf_url, image_data, is_published, published_at, reactions_open, linked_event_id } = req.body;
+    const { title, content, category, custom_category, organization_id, image_url, youtube_url, source_name, source_url, pdf_url, image_data, is_published, published_at, reactions_open, linked_event_id, gallery } = req.body;
 
     const prevNews = await executeQuery(
       'SELECT pdf_url, is_published, organization_id FROM news WHERE id = ? LIMIT 1',
@@ -5314,6 +5361,14 @@ app.put('/api/admin/news/:id', authenticateToken, requireAdmin, async (req, res)
       if (linkedId !== undefined) {
         updateFields.push(`linked_event_id = ?`);
         values.push(linkedId);
+      }
+    }
+
+    {
+      const gallerySer = serializeNewsGallery(gallery !== undefined ? gallery : req.body.gallery_json);
+      if (gallerySer !== undefined) {
+        updateFields.push(`gallery_json = ?`);
+        values.push(gallerySer);
       }
     }
 
@@ -8965,11 +9020,17 @@ app.get('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req, re
     await ensureNewsColumns();
     const orgId = req.organizationId;
     const result = await executeQuery(
-      'SELECT id, title, content, excerpt, category, custom_category, image_url, youtube_url, source_name, source_url, pdf_url, linked_event_id, is_published, reactions_open, COALESCE(published_at, created_at) as published_at, organization_id, author_id, created_at, updated_at FROM news WHERE id = ? AND organization_id = ?',
+      'SELECT id, title, content, excerpt, category, custom_category, image_url, youtube_url, source_name, source_url, pdf_url, linked_event_id, gallery_json, is_published, reactions_open, COALESCE(published_at, created_at) as published_at, organization_id, author_id, created_at, updated_at FROM news WHERE id = ? AND organization_id = ?',
       [req.params.id, orgId]
     );
     if (!result.rows?.length) return res.status(404).json({ error: 'Artikel niet gevonden' });
-    res.json({ article: result.rows[0] });
+    const article = result.rows[0];
+    res.json({
+      article: {
+        ...article,
+        gallery: parseNewsGalleryFromRow(article.gallery_json),
+      },
+    });
   } catch (error) {
     console.error('GET /api/org/news/:id error:', error);
     res.status(500).json({ error: 'Failed to load article', message: error.message });
@@ -8981,7 +9042,7 @@ app.post('/api/org/news', authenticateToken, requireOrgPortal, async (req, res) 
     await ensureNewsColumns();
     const orgId = req.organizationId;
     const userId = req.user.userId;
-    const { title, content, category, custom_category, image_url, youtube_url, source_name, source_url, pdf_url, is_published, published_at, reactions_open, linked_event_id } = req.body || {};
+    const { title, content, category, custom_category, image_url, youtube_url, source_name, source_url, pdf_url, is_published, published_at, reactions_open, linked_event_id, gallery } = req.body || {};
     if (!title) return res.status(400).json({ error: 'title is required' });
     const finalCategory = category || 'dorpsnieuws';
     const finalCustomCategory = finalCategory === 'overig' && custom_category ? String(custom_category).trim() : null;
@@ -8994,15 +9055,16 @@ app.post('/api/org/news', authenticateToken, requireOrgPortal, async (req, res) 
     } catch (linkErr) {
       return res.status(linkErr.statusCode || 400).json({ error: linkErr.message });
     }
+    const gallerySer = serializeNewsGallery(gallery !== undefined ? gallery : []);
     const pubAt = (published_at != null && String(published_at).trim() !== '')
       ? toMysqlDateTime(published_at)
       : null;
 
     let insertSql;
     let insertParams;
-    const baseCols = 'title, content, excerpt, author_id, organization_id, image_url, youtube_url, source_name, source_url, pdf_url, linked_event_id, category, custom_category, is_published, reactions_open';
-    const baseVals = '?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?';
-    const baseParams = [title || '', content || '', null, userId, orgId, image_url || null, youtube_url || null, source_name || null, source_url || null, pdf_url || null, linkedEventId, finalCategory, finalCustomCategory, isPublished, reactionsOpen];
+    const baseCols = 'title, content, excerpt, author_id, organization_id, image_url, youtube_url, source_name, source_url, pdf_url, linked_event_id, gallery_json, category, custom_category, is_published, reactions_open';
+    const baseVals = '?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?';
+    const baseParams = [title || '', content || '', null, userId, orgId, image_url || null, youtube_url || null, source_name || null, source_url || null, pdf_url || null, linkedEventId, gallerySer, finalCategory, finalCustomCategory, isPublished, reactionsOpen];
 
     if (pubAt) {
       insertSql = `INSERT INTO news (${baseCols}, published_at, created_at, updated_at) VALUES (${baseVals}, ?, NOW(), NOW())`;
@@ -9051,7 +9113,7 @@ app.put('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req, re
     await ensureNewsColumns();
     const orgId = req.organizationId;
     const id = parseInt(req.params.id);
-    const { title, content, category, custom_category, image_url, youtube_url, source_name, source_url, pdf_url, is_published, published_at, reactions_open, linked_event_id } = req.body || {};
+    const { title, content, category, custom_category, image_url, youtube_url, source_name, source_url, pdf_url, is_published, published_at, reactions_open, linked_event_id, gallery } = req.body || {};
     const existing = await executeQuery('SELECT id, pdf_url, is_published FROM news WHERE id = ? AND organization_id = ?', [id, orgId]);
     if (!existing.rows?.length) return res.status(404).json({ error: 'Artikel niet gevonden' });
     const wasPublished = !!existing.rows[0].is_published;
@@ -9062,6 +9124,7 @@ app.put('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req, re
     } catch (linkErr) {
       return res.status(linkErr.statusCode || 400).json({ error: linkErr.message });
     }
+    const gallerySer = serializeNewsGallery(gallery);
     const pubAt = (published_at != null && String(published_at).trim() !== '')
       ? toMysqlDateTime(published_at)
       : null;
@@ -9084,13 +9147,15 @@ app.put('/api/org/news/:id', authenticateToken, requireOrgPortal, async (req, re
     ];
     const linkedClause = linkedEventId !== undefined ? ', linked_event_id = ?' : '';
     if (linkedEventId !== undefined) updateParams.push(linkedEventId);
+    const galleryClause = gallerySer !== undefined ? ', gallery_json = ?' : '';
+    if (gallerySer !== undefined) updateParams.push(gallerySer);
     if (pubAt) updateParams.push(pubAt);
     updateParams.push(id);
 
     const unpublishReset =
       wasPublished && !nowPublished ? ', followers_notified_at = NULL' : '';
     await executeQuery(
-      `UPDATE news SET title = ?, content = ?, excerpt = ?, category = ?, custom_category = ?, image_url = ?, youtube_url = ?, source_name = ?, source_url = ?, pdf_url = ?, is_published = ?, reactions_open = ?${linkedClause}, ${publishedAtClause}, updated_at = NOW()${unpublishReset} WHERE id = ?`,
+      `UPDATE news SET title = ?, content = ?, excerpt = ?, category = ?, custom_category = ?, image_url = ?, youtube_url = ?, source_name = ?, source_url = ?, pdf_url = ?, is_published = ?, reactions_open = ?${linkedClause}${galleryClause}, ${publishedAtClause}, updated_at = NOW()${unpublishReset} WHERE id = ?`,
       updateParams
     );
     const newPdfUrl = pdf_url ?? null;
@@ -10954,6 +11019,7 @@ app.get('/api/migrate-columns', async (req, res) => {
     { table: 'organizations', column: 'show_email',   sql: `ALTER TABLE organizations ADD COLUMN show_email BOOLEAN DEFAULT true` },
     { table: 'news',          column: 'pdf_url',      sql: `ALTER TABLE news ADD COLUMN pdf_url VARCHAR(500)` },
     { table: 'news',          column: 'linked_event_id', sql: `ALTER TABLE news ADD COLUMN linked_event_id INT NULL` },
+    { table: 'news',          column: 'gallery_json', sql: `ALTER TABLE news ADD COLUMN gallery_json TEXT NULL` },
     { table: 'events',        column: 'pdf_url',      sql: `ALTER TABLE events ADD COLUMN pdf_url VARCHAR(500)` },
     { table: 'events',        column: 'ticket_url',   sql: `ALTER TABLE events ADD COLUMN ticket_url VARCHAR(500)` },
     { table: 'events',        column: 'ticket_label', sql: `ALTER TABLE events ADD COLUMN ticket_label VARCHAR(255)` },
